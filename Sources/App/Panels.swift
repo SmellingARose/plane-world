@@ -1,0 +1,402 @@
+// SwiftUI side panels for BUILD / FLY / WORLD. Owned by architect, then integrator.
+import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
+import PWCore
+import PWRender
+import PWCraft
+import PWCollision
+
+struct SidePanel: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                switch model.tab {
+                case .build: BuildPanel()
+                case .fly: FlyPanel()
+                case .world: WorldPanel()
+                }
+                if !model.status.isEmpty {
+                    Divider()
+                    Text(model.status).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(.regularMaterial)
+    }
+}
+
+struct SectionHeader: View {
+    let title: String
+    var body: some View { Text(title.uppercased()).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).tracking(0.8).padding(.top, 6) }
+}
+
+// MARK: - BUILD
+
+struct BuildPanel: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        SectionHeader(title: "Library")
+        Menu("Load craft: \(model.craft.name)") {
+            ForEach(model.library, id: \.name) { c in Button(c.name) { model.loadCraft(c) } }
+        }
+        HStack {
+            Button("New") { model.newCraft() }
+            Button("Save to library") { model.saveCraftToLibrary() }
+        }
+        HStack {
+            Button("Import JSON…") { FileDialogs.openCraftJSON(model) }
+            Button("Export JSON…") { FileDialogs.saveCraftJSON(model) }
+        }
+        TextField("Craft name", text: Binding(get: { model.craft.name }, set: { model.craft.name = $0 }))
+
+        SectionHeader(title: "Add part")
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
+            ForEach(PartType.allCases.filter { $0 != .cad }, id: \.self) { t in
+                Button(t.rawValue) { model.addPart(t) }.controlSize(.small)
+            }
+        }
+
+        SectionHeader(title: "CAD import")
+        HStack {
+            Toggle("Z-up", isOn: $model.importUpZ)
+            Toggle("Auto-rig", isOn: $model.autoRigOnImport)
+        }
+        HStack {
+            Text("Scale"); TextField("", value: $model.importScale, format: .number).frame(width: 60)
+            Text("Yaw°"); TextField("", value: $model.importYaw, format: .number).frame(width: 50)
+        }
+        HStack {
+            Button("Import as craft…") { FileDialogs.importCAD(model, into: false) }
+            Button("Add to craft…") { FileDialogs.importCAD(model, into: true) }
+        }
+        Text("STL · OBJ · glTF/GLB · USD/USDZ").font(.caption2).foregroundStyle(.secondary)
+        Button("Auto-rig current craft") { model.autoRig() }
+        if !model.rigReport.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(Array(model.rigReport.prefix(30).enumerated()), id: \.offset) { _, l in Text(l).font(.caption2.monospaced()) }
+            }
+        }
+
+        let mp = model.massProperties
+        SectionHeader(title: "Mass")
+        Text(String(format: "%.1f kg  ·  CoM (%.2f, %.2f, %.2f) m", mp.mass, mp.com.x, mp.com.y, mp.com.z)).font(.caption.monospaced())
+
+        SectionHeader(title: "Parts (\(model.craft.parts.count))")
+        VStack(spacing: 0) {
+            ForEach(model.craft.parts) { p in
+                HStack {
+                    Circle().fill(Color(nsColor: NSColor(hex: p.color))).frame(width: 8, height: 8)
+                    Text(p.name).lineLimit(1)
+                    Spacer()
+                    if p.servo != nil { Image(systemName: "link").font(.caption2).foregroundStyle(.purple) }
+                    if p.motor != nil { Image(systemName: "bolt").font(.caption2).foregroundStyle(.orange) }
+                    Text(p.type).foregroundStyle(.secondary).font(.caption)
+                }
+                .padding(.vertical, 2).padding(.horizontal, 6)
+                .background(model.selectedPartID == p.id ? Color.accentColor.opacity(0.25) : .clear, in: RoundedRectangle(cornerRadius: 4))
+                .contentShape(Rectangle())
+                .onTapGesture { model.selectedPartID = p.id }
+            }
+        }
+        if model.selectedPart != nil { PartInspector() }
+
+        SectionHeader(title: "Outputs (auto)")
+        ForEach(model.outputs) { o in
+            VStack(alignment: .leading, spacing: 1) {
+                TextField("name", text: Binding(get: { model.outputRenames[o.id] ?? o.name }, set: { model.outputRenames[o.id] = $0 }))
+                    .onSubmit { if let n = model.outputRenames[o.id] { model.renameOutput(o.id, n); model.outputRenames[o.id] = nil } }
+                    .font(.body.bold())
+                Text("\(o.kind.rawValue) · \(o.info)").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        Text("Viewport: click = select part · ⇧-drag = move · ⌘-drag = rotate · right-drag = orbit").font(.caption2).foregroundStyle(.tertiary)
+    }
+}
+
+struct PartInspector: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        if let p = model.selectedPart {
+            SectionHeader(title: "Properties — \(p.name)")
+            TextField("Name", text: Binding(get: { p.name }, set: { n in model.updateSelected { $0.name = n } }))
+            HStack {
+                ColorPicker("Color", selection: Binding(get: { Color(nsColor: NSColor(hex: p.color)) },
+                                                         set: { c in model.updateSelected { $0.color = NSColor(c).hexString } }))
+                Spacer()
+                Text("Mass"); TextField("", value: Binding(get: { p.mass }, set: { v in model.updateSelected { $0.mass = max(0, v) } }), format: .number).frame(width: 70)
+            }
+            VecRow(label: "Pos", values: p.pos, step: 0.05) { v in model.updateSelected { $0.pos = v } }
+            VecRow(label: "Rot°", values: p.rot.count >= 3 ? p.rot : [0, 0, 0], step: 5) { v in model.updateSelected { $0.rot = v } }
+            let keys = Array(Set((p.partType?.defaults.p.keys.map { $0 } ?? []) + p.p.keys.map { $0 })).sorted()
+            ForEach(keys.filter { p.param($0, .nan).isFinite }, id: \.self) { k in
+                HStack {
+                    Text(k).font(.caption.monospaced()).frame(width: 70, alignment: .leading)
+                    TextField("", value: Binding(get: { p.param(k) }, set: { v in model.updateSelected { $0.p[k] = .number(v) } }), format: .number)
+                }
+            }
+            let servos = model.craft.parts.filter { $0.type == "servo" && $0.id != p.id }
+            let motors = model.craft.parts.filter { $0.type == "motor" && $0.id != p.id }
+            if p.type != "servo" {
+                Picker("Servo link", selection: Binding(get: { p.servo ?? "" }, set: { v in model.updateSelected { $0.servo = v.isEmpty ? nil : v } })) {
+                    Text("—").tag(""); ForEach(servos) { s in Text(s.name).tag(s.id) }
+                }
+                Toggle("Invert", isOn: Binding(get: { p.invert }, set: { v in model.updateSelected { $0.invert = v } }))
+            }
+            if ["wheel", "prop"].contains(p.type) {
+                Picker("Motor link", selection: Binding(get: { p.motor ?? "" }, set: { v in model.updateSelected { $0.motor = v.isEmpty ? nil : v } })) {
+                    Text("— (auto motor output)").tag(""); ForEach(motors) { s in Text(s.name).tag(s.id) }
+                }
+            }
+            HStack {
+                Button("Duplicate") { model.duplicateSelected(mirror: false) }
+                Button("Mirror L/R") { model.duplicateSelected(mirror: true) }
+                Button("Delete", role: .destructive) { model.deleteSelected() }
+            }
+            SectionHeader(title: "Mesh cut")
+            Toggle("Show cut plane", isOn: $model.showCutPlane)
+            Picker("Plane normal", selection: $model.cutAxis) { Text("X").tag(0); Text("Y").tag(1); Text("Z").tag(2) }.pickerStyle(.segmented)
+            LabeledSlider(label: "Offset", value: $model.cutOffset, range: -5...5, format: "%.2f m")
+            Button("Cut selected part") { model.cutSelected() }
+        }
+    }
+}
+
+struct VecRow: View {
+    let label: String
+    let values: [Double]
+    let step: Double
+    let set: ([Double]) -> Void
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label).font(.caption).frame(width: 34, alignment: .leading)
+            ForEach(0..<3, id: \.self) { i in
+                TextField("", value: Binding(get: { i < values.count ? values[i] : 0 },
+                                             set: { v in var a = values; while a.count < 3 { a.append(0) }; a[i] = v; set(a) }),
+                          format: .number.precision(.fractionLength(0...3)))
+                Stepper("", value: Binding(get: { i < values.count ? values[i] : 0 },
+                                           set: { v in var a = values; while a.count < 3 { a.append(0) }; a[i] = v; set(a) }), step: step).labelsHidden()
+            }
+        }
+    }
+}
+
+// MARK: - FLY
+
+struct FlyPanel: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        SectionHeader(title: "Outputs — \(model.craft.name)")
+        if model.outputs.isEmpty { Text("This craft has no outputs.").foregroundStyle(.secondary) }
+        ForEach(model.outputs) { o in
+            VStack(alignment: .leading, spacing: 2) {
+                HStack { Text(o.name).bold(); Spacer(); Text(String(format: "%+.2f", o.value)).monospacedDigit().foregroundStyle(Color.accentColor) }
+                Slider(value: Binding(get: { o.value }, set: { model.setOutput(o.id, $0) }), in: o.range)
+                Text(o.info).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        SectionHeader(title: "Camera")
+        Picker("", selection: $model.cameraMode) { ForEach(CameraMode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).labelsHidden()
+        SectionHeader(title: "Simulation")
+        Text("R reset · P pause · C camera · drag to look").font(.caption).foregroundStyle(.secondary)
+        HStack { Text("Physics"); Spacer(); Text("\(Int(model.sim.substepHz)) Hz substeps").monospacedDigit() }
+        HStack { Text("Collision world"); Spacer(); Text("240 Hz").monospacedDigit() }
+    }
+}
+
+// MARK: - WORLD
+
+struct WorldPanel: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        SectionHeader(title: "World")
+        TextField("Name", text: $model.world.name)
+        HStack {
+            Button("Open…") { FileDialogs.openWorld(model) }
+            Button("Save…") { FileDialogs.saveWorld(model) }
+            Button("Save to library") {
+                do { let u = try CraftLibrary.saveWorld(model.makeWorldDocument()); model.status = "Saved \(u.path)" } catch { model.status = "\(error)" }
+            }
+        }
+        let worlds = CraftLibrary.listWorlds()
+        if !worlds.isEmpty {
+            Menu("Library worlds") { ForEach(worlds, id: \.self) { u in Button(u.deletingPathExtension().lastPathComponent) {
+                if let w = try? CraftLibrary.loadWorld(u) { model.loadWorld(w, baseURL: u.deletingLastPathComponent()) } } } }
+        }
+
+        SectionHeader(title: "Terrain source")
+        Picker("", selection: $model.terrainSource) { Text("Real").tag(0); Text("Procedural").tag(1); Text("Heightmap").tag(2); Text("Flat").tag(3) }.pickerStyle(.segmented).labelsHidden()
+        switch model.terrainSource {
+        case 0:
+            HStack { Text("Lat"); TextField("", value: $model.realLat, format: .number); Text("Lon"); TextField("", value: $model.realLon, format: .number) }
+            HStack {
+                Stepper("Zoom \(model.realZoom)", value: $model.realZoom, in: 8...14)
+                Stepper("Tiles ±\(model.realRadius)", value: $model.realRadius, in: 1...4)
+            }
+            Menu("Places") {
+                Button("Mt Rainier") { model.realLat = 46.8523; model.realLon = -121.7603 }
+                Button("Yosemite Valley") { model.realLat = 37.7456; model.realLon = -119.5936 }
+                Button("Matterhorn") { model.realLat = 45.9763; model.realLon = 7.6586 }
+                Button("Grand Canyon") { model.realLat = 36.0565; model.realLon = -112.1251 }
+                Button("Innsbruck") { model.realLat = 47.2692; model.realLon = 11.4041 }
+                Button("Hawaii (Kīlauea)") { model.realLat = 19.4069; model.realLon = -155.2834 }
+            }
+            Button("Load real terrain (AWS Terrain Tiles)") { model.loadRealWorld() }
+            if model.terrain.tilesRequested > 0 { ProgressView(value: model.terrain.loadingProgress).controlSize(.small) }
+        case 1:
+            HStack { Stepper("Seed \(model.procSeed)", value: $model.procSeed); Button("Random") { model.procSeed = Int.random(in: 1...99999) } }
+            Picker("Size", selection: $model.procSizeIndex) { Text("4 km").tag(0); Text("8 km").tag(1); Text("16 km").tag(2) }.pickerStyle(.segmented)
+            LabeledSlider(label: "Relief", value: $model.procHeight, range: 50...3000, format: "%.0f m")
+            LabeledSlider(label: "Erosion (GPU iterations)", value: $model.procErosion, range: 0...600, format: "%.0f")
+            Button("Generate") { model.generateProcedural() }
+        case 2:
+            HStack { Text("m/px"); TextField("", value: $model.heightmapMPP, format: .number); Text("height"); TextField("", value: $model.heightmapScale, format: .number) }
+            Button("Import heightmap PNG/R16…") { FileDialogs.importHeightmap(model) }
+        default:
+            Button("Flat ground") { model.setFlat() }
+        }
+
+        SectionHeader(title: "Tools (click / drag in viewport)")
+        Picker("Tool", selection: $model.worldTool) { ForEach(WorldTool.allCases) { Text($0.rawValue).tag($0) } }
+        LabeledSlider(label: "Radius", value: $model.brushRadius, range: 2...300, format: "%.0f m")
+        LabeledSlider(label: "Strength", value: $model.brushStrength, range: 0.5...50, format: "%.1f")
+        switch model.worldTool {
+        case .paint:
+            Picker("Material", selection: $model.paintLayer) { Text("Grass").tag(0); Text("Rock").tag(1); Text("Sand/dirt").tag(2); Text("Snow").tag(3) }
+        case .trees:
+            LabeledSlider(label: "Density", value: $model.treeDensity, range: 5...600, format: "%.0f /ha")
+            Picker("Species", selection: $model.treeSpecies) { Text("Mixed").tag(-1); Text("Pine").tag(0); Text("Oak").tag(1); Text("Birch").tag(2); Text("Palm").tag(3) }
+        case .prop, .breakable:
+            Picker("Asset", selection: $model.propAsset) { ForEach(PropAsset.allCases) { Text($0.rawValue).tag($0) } }
+            Picker("Material", selection: $model.propMaterial) { ForEach(0..<4, id: \.self) { Text(FractureMaterial.presets[$0].name).tag($0) } }
+            LabeledSlider(label: "Scale", value: $model.propScale, range: 0.25...6, format: "%.2f×")
+            Button("Import prop mesh (STL/OBJ/glTF/USDZ)…") { FileDialogs.importPropMesh(model) }
+            Button("Remove all props & debris") { model.clearObjects() }
+        case .lake:
+            LabeledSlider(label: "Lake radius", value: $model.lakeRadius, range: 20...1500, format: "%.0f m")
+        case .river:
+            Text("\(model.riverPoints.count) points").font(.caption)
+            HStack { Button("Finish river") { model.finishRiver() }; Button("Clear") { model.riverPoints = [] } }
+        default: EmptyView()
+        }
+        HStack {
+            Button("Clear sculpt/paint") { model.terrain.clearEdits() }
+            Button("Regrow vegetation") { model.regenerateVegetation() }
+        }
+
+        SectionHeader(title: "Water")
+        Toggle("Ocean (FFT)", isOn: $model.oceanEnabled).onChange(of: model.oceanEnabled) { model.applyWater() }
+        LabeledSlider(label: "Sea level", value: $model.seaLevel, range: -200...400, format: "%.0f m", onCommit: { model.applyWater() })
+        LabeledSlider(label: "Ocean wind", value: $model.oceanWind, range: 0...25, format: "%.1f m/s", onCommit: { model.applyWater() })
+        Button("Remove lakes & rivers") { model.water.removeAllBodies(); model.world.water = model.water.makeSpec() }
+        Button("Spawn fluid zone at craft") {
+            if model.water.spawnLocalFluidZone(around: model.sim.bodyState.centerOfMass) == nil { model.status = "No water (or zone limit) at the craft" }
+        }
+
+        SectionHeader(title: "Sky & atmosphere")
+        LabeledSlider(label: "Time of day", value: $model.environment.timeOfDayHours, range: 4...20, format: "%.1f h")
+        LabeledSlider(label: "Sun azimuth", value: $model.environment.sunAzimuthDeg, range: 0...360, format: "%.0f°")
+        LabeledSlider(label: "Aerial perspective", value: $model.environment.fogDensity, range: 0...8, format: "%.1fx")
+        SectionHeader(title: "Wind")
+        LabeledSlider(label: "Speed", value: $model.environment.windSpeed, range: 0...30, format: "%.1f m/s")
+        LabeledSlider(label: "Direction", value: $model.environment.windDirectionDeg, range: 0...360, format: "%.0f°")
+        SectionHeader(title: "Rendering")
+        Picker("Anti-aliasing", selection: $model.renderSettings.antiAliasing) {
+            Text("TAA").tag(AntiAliasing.taa); Text("MSAA 4x").tag(AntiAliasing.msaa4)
+        }
+        LabeledSlider(label: "Exposure", value: Binding(get: { Double(model.renderSettings.exposure) }, set: { model.renderSettings.exposure = Float($0) }), range: 0.1...4, format: "%.2f")
+        LabeledSlider(label: "Bloom", value: Binding(get: { Double(model.renderSettings.bloomStrength) }, set: { model.renderSettings.bloomStrength = Float($0) }), range: 0...0.2, format: "%.3f")
+    }
+}
+
+struct LabeledSlider: View {
+    let label: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let format: String
+    var onCommit: (() -> Void)? = nil
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack { Text(label); Spacer(); Text(String(format: format, value)).monospacedDigit().foregroundStyle(.secondary) }
+            Slider(value: $value, in: range, onEditingChanged: { editing in if !editing { onCommit?() } })
+        }
+    }
+}
+
+// MARK: - HUD
+
+struct HUDOverlay: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(model.stats)
+            if model.tab == .fly {
+                ForEach(model.hudExtra, id: \.self) { Text($0) }
+                ForEach(model.warnings, id: \.self) { Text($0).foregroundStyle(.red).bold() }
+            }
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .padding(8)
+        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .foregroundStyle(.white)
+        .allowsHitTesting(false)
+    }
+}
+
+// MARK: - File dialogs
+
+@MainActor
+enum FileDialogs {
+    static func openCraftJSON(_ m: AppModel) {
+        let p = NSOpenPanel(); p.allowedContentTypes = [.json]
+        guard p.runModal() == .OK, let url = p.url else { return }
+        do { let d = try JSONIO.decode(CraftDocument.self, file: url); m.loadCraft(d); m.library.removeAll { $0.name == d.name }; m.library.append(d) }
+        catch { m.status = "Open failed: \(error)" }
+    }
+    static func saveCraftJSON(_ m: AppModel) {
+        let p = NSSavePanel(); p.allowedContentTypes = [.json]; p.nameFieldStringValue = m.craft.name + ".json"
+        guard p.runModal() == .OK, let url = p.url else { return }
+        do { try JSONIO.write(m.craft, to: url, pretty: false); m.status = "Saved \(url.lastPathComponent)" } catch { m.status = "Save failed: \(error)" }
+    }
+    static var cadTypes: [UTType] { CADImporter.fileExtensions.compactMap { UTType(filenameExtension: $0) } }
+    static func importCAD(_ m: AppModel, into: Bool) {
+        let p = NSOpenPanel(); p.allowedContentTypes = cadTypes; p.allowsMultipleSelection = true
+        guard p.runModal() == .OK, !p.urls.isEmpty else { return }
+        m.importCAD(urls: p.urls, intoCurrent: into)
+    }
+    static func importPropMesh(_ m: AppModel) {
+        let p = NSOpenPanel(); p.allowedContentTypes = cadTypes
+        guard p.runModal() == .OK, let url = p.url else { return }
+        m.importPropMesh(url)
+    }
+    static func importHeightmap(_ m: AppModel) {
+        let p = NSOpenPanel(); p.allowedContentTypes = [.png, .image, UTType(filenameExtension: "r16") ?? .data]
+        guard p.runModal() == .OK, let url = p.url else { return }
+        m.importHeightmap(url)
+    }
+    static func openWorld(_ m: AppModel) {
+        let p = NSOpenPanel(); p.allowedContentTypes = [.json]
+        guard p.runModal() == .OK, let url = p.url else { return }
+        do { let w = try CraftLibrary.loadWorld(url); m.loadWorld(w, baseURL: url.deletingLastPathComponent()) } catch { m.status = "Open failed: \(error)" }
+    }
+    static func saveWorld(_ m: AppModel) {
+        let p = NSSavePanel(); p.allowedContentTypes = [.json]; p.nameFieldStringValue = m.world.name + ".json"
+        guard p.runModal() == .OK, let url = p.url else { return }
+        do { try JSONWorldDocumentStore().save(m.makeWorldDocument(), url: url); m.status = "Saved \(url.lastPathComponent)" } catch { m.status = "Save failed: \(error)" }
+    }
+}
+
+extension NSColor {
+    convenience init(hex: String) {
+        let c = linearColor(hex: hex)   // linear → sRGB for display
+        func s(_ x: Float) -> CGFloat { CGFloat(x <= 0.0031308 ? x * 12.92 : 1.055 * pow(x, 1 / 2.4) - 0.055) }
+        self.init(srgbRed: s(c.x), green: s(c.y), blue: s(c.z), alpha: 1)
+    }
+    var hexString: String {
+        let c = usingColorSpace(.sRGB) ?? self
+        return String(format: "#%02x%02x%02x", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
+    }
+}

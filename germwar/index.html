@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Germ War 3D</title>
+<style>
+  :root { --bg:#050a10; --fg:#d6f0e8; --accent:#5fffb0; --money:#ffd84a; --panel:#0b1a1ee6; --line:#2a5a50; --bad:#ff6a6a; }
+  html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--fg); font:13px/1.45 ui-monospace,Menlo,monospace; user-select:none; }
+  canvas { display:block; }
+  #hud { position:fixed; top:10px; left:14px; pointer-events:none; text-shadow:0 0 4px #000, 0 0 2px #000; }
+  #hud b { color:var(--accent); } #hud .m { color:var(--money); font-size:16px; }
+  #build { position:fixed; bottom:12px; left:14px; display:flex; gap:6px; flex-wrap:wrap; max-width:calc(100% - 310px); }
+  button { font:inherit; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 10px; cursor:pointer; text-align:left; }
+  button:hover { border-color:var(--accent); }
+  button.on { background:#17463a; border-color:var(--accent); }
+  button:disabled { opacity:.4; cursor:default; }
+  button small { display:block; color:var(--money); font-size:11px; }
+  #build button { min-width:120px; }
+  .panel { position:fixed; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; backdrop-filter:blur(6px); }
+  .panel h3 { margin:0 0 4px; font-size:14px; color:var(--accent); }
+  .panel h4 { margin:10px 0 4px; font-size:12px; opacity:.7; font-weight:normal; text-transform:uppercase; letter-spacing:.06em; }
+  .panel .row { margin:3px 0; opacity:.85; }
+  #sel { bottom:12px; right:14px; width:260px; display:none; }
+  #sel button { width:100%; margin-top:6px; }
+  #devBtn { position:fixed; top:10px; right:14px; }
+  #dev { top:50px; right:14px; width:290px; max-height:calc(100% - 330px); overflow:auto; display:none; }
+  #dev .grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  #dev .help { opacity:.75; font-size:12px; }
+  #box { position:fixed; border:1px solid var(--accent); background:#5fffb022; pointer-events:none; display:none; }
+  #toasts { position:fixed; top:64px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:4px; pointer-events:none; }
+  #toasts div { font-size:15px; color:#ffef9a; text-shadow:0 0 6px #000, 0 0 2px #000; transition:opacity .5s; }
+  #over { position:fixed; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column; background:#000b; font-size:22px; text-align:center; }
+  #over button { margin-top:16px; padding:8px 20px; background:var(--accent); color:#000; border:0; }
+  #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; font-size:18px; }
+  @media (max-width:820px){ #build { max-width:calc(100% - 28px); bottom:auto; top:84px; } #build button { min-width:0; } #dev { max-height:60%; } }
+</style>
+</head>
+<body>
+<div id="loading">Growing cultures…</div>
+<div id="hud"></div>
+<div id="toasts"></div>
+<div id="box"></div>
+<div id="build"></div>
+<div id="sel" class="panel"></div>
+<button id="devBtn">⚙ Dev panel (`)</button>
+<div id="dev" class="panel">
+  <h3>Dev / God panel</h3>
+  <div class="grid">
+    <button id="dRestart">↺ Restart</button>
+    <button id="dPause">⏸ Pause (P)</button>
+    <button id="dSpeed">Speed 1×</button>
+    <button id="dMoney">+$1000</button>
+    <button id="dGod">God mode: off</button>
+    <button id="dWave">Next wave now</button>
+    <button id="dClear">Clear enemies</button>
+    <button id="dReload">Reload mods</button>
+  </div>
+  <h4>Spawn enemies (click map · shift = repeat)</h4>
+  <div id="dSpawn" class="grid"></div>
+  <h4>Controls</h4>
+  <div class="help">
+    1–0 build · shift-place to repeat · Esc cancel<br>
+    Left-drag: box-select units · click to select<br>
+    Selected: click ground = move · click enemy = attack<br>
+    T all units · R auto-attack · P pause · H home<br>
+    Right-drag orbit · wheel zoom · WASD pan · Q/E rotate
+  </div>
+</div>
+<div id="over"><div id="overMsg"></div><button id="overRestart">Play again</button></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+window.THREE = THREE;
+window.POST = { EffectComposer, RenderPass, UnrealBloomPass, OutputPass };
+// The engine is a classic script so mods can be eval'd into the same global scope.
+const s = document.createElement('script'); s.src = 'core.js'; document.body.appendChild(s);
+</script>
+</body>
+</html>

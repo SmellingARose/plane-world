@@ -1,0 +1,603 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Germ War 3D</title>
+<style>
+  :root { --bg:#04070a; --fg:#d6f0e0; --accent:#6f6; --money:#fd4; --panel:#0d1d16dd; --line:#2a5a40; }
+  html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--fg); font:13px/1.45 ui-monospace,Menlo,monospace; user-select:none; }
+  canvas { display:block; }
+  #hud { position:fixed; top:10px; left:14px; pointer-events:none; text-shadow:0 0 4px #000; }
+  #hud b { color:var(--accent); } #hud .m { color:var(--money); }
+  #build { position:fixed; bottom:12px; left:14px; display:flex; gap:8px; flex-wrap:wrap; max-width:calc(100% - 300px); }
+  button { font:inherit; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:7px 11px; cursor:pointer; text-align:left; }
+  button:hover { border-color:var(--accent); }
+  button.on { background:#1d4a30; border-color:var(--accent); }
+  button:disabled { opacity:.4; cursor:default; }
+  button small { display:block; color:var(--money); }
+  #sel { position:fixed; bottom:12px; right:14px; width:250px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; display:none; }
+  #sel h3 { margin:0 0 4px; font-size:14px; color:var(--accent); }
+  #sel .row { margin:3px 0; opacity:.85; }
+  #sel button { width:100%; margin-top:6px; }
+  #box { position:fixed; border:1px solid #6f6; background:#6f62; pointer-events:none; display:none; }
+  #toast { position:fixed; top:80px; left:50%; transform:translateX(-50%); font-size:16px; color:#ff8; text-shadow:0 0 6px #000; pointer-events:none; transition:opacity .4s; text-align:center; }
+  #help { position:fixed; top:10px; right:14px; text-align:right; opacity:.7; pointer-events:none; font-size:12px; }
+  #over { position:fixed; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column; background:#000b; font-size:22px; text-align:center; }
+  #over button { margin-top:16px; padding:8px 20px; background:var(--accent); color:#000; border:0; }
+  @media (max-width:800px){ #help { display:none; } #build { max-width:calc(100% - 28px); bottom:auto; top:70px; } }
+</style>
+</head>
+<body>
+<div id="hud"></div>
+<div id="help">
+  1–5 build · shift = keep placing · Esc cancel / deselect<br>
+  Left-drag: box-select tanks · click unit/building to select<br>
+  With selection: click ground = move · click enemy = attack<br>
+  T all tanks · R toggle auto-attack · Right-drag: orbit · WASD pan · Q/E rotate
+</div>
+<div id="toast"></div>
+<div id="box"></div>
+<div id="build"></div>
+<div id="sel"></div>
+<div id="over"><div id="overMsg"></div><button onclick="location.reload()">Play again</button></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const rand = (a,b) => a + Math.random()*(b-a);
+const flat = (a,b) => Math.hypot(a.x-b.x, a.z-b.z);
+
+// ---------- Renderer / scene ----------
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04070a);
+scene.fog = new THREE.Fog(0x04070a, 900, 2800);
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 1, 6000);
+scene.add(new THREE.HemisphereLight(0xaaffcc, 0x102010, 0.85));
+const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(300,600,200); scene.add(sun);
+
+const ground = new THREE.Mesh(new THREE.CircleGeometry(2200, 64), new THREE.MeshLambertMaterial({ color:0x0f1f17 }));
+ground.rotation.x = -Math.PI/2; scene.add(ground);
+const grid = new THREE.GridHelper(4400, 110, 0x1c4030, 0x132a20); grid.position.y = .2; scene.add(grid);
+
+function flatRing(r, color, op=.45){
+  const m = new THREE.Mesh(new THREE.RingGeometry(r-2, r+2, 96), new THREE.MeshBasicMaterial({ color, transparent:true, opacity:op }));
+  m.rotation.x = -Math.PI/2; m.position.y = .5; m.visible = false; scene.add(m); return m;
+}
+const BUILD_R = 420;
+const buildRing = flatRing(BUILD_R, 0x44ff88);
+const rangeRing = flatRing(1, 0xff9944, .6); rangeRing.geometry = new THREE.RingGeometry(.995, 1, 128);
+
+// ---------- Definitions ----------
+const DEFS = {
+  hq:        { name:'HQ', hp:1500, r:22, speed:8 },
+  extractor: { name:'Extractor', cost:150, hp:260, r:12, income:4, speed:15, desc:'+$4/s' },
+  turret:    { name:'Turret', cost:100, hp:320, r:10, range:135, dmg:20, rate:.28, speed:18, desc:'Shoots germs' },
+  battery:   { name:'Missile Battery', cost:200, hp:260, r:12, range:750, rate:.9, speed:15, desc:'Shoots spores' },
+  silo:      { name:'Rocket Silo', cost:300, hp:300, r:13, range:550, rate:5, dmg:220, speed:12, desc:'Strikes colonies' },
+  tank:      { name:'Tank', cost:250, hp:450, r:9, range:120, dmg:40, rate:.55, speed:55, desc:'Mobile assault' },
+};
+const ORDER = ['extractor','turret','battery','silo','tank'];
+const G = 30, MAX_BUGS = 350, SILO_MAX_LVL = 6;
+const siloUpCost = e => 150 * e.lvl;
+
+const M = (color, emissive=0) => new THREE.MeshLambertMaterial({ color, emissive });
+const box = (w,h,d,mat) => new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+const cyl = (rt,rb,h,mat,s=16) => new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,s), mat);
+
+const BUILD = {
+  hq(){ const g = new THREE.Group();
+    const base = cyl(24,26,10,M(0x5a6676)); base.position.y=5; g.add(base);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(16,20,12,0,Math.PI*2,0,Math.PI/2), M(0x88aacc,0x112233)); dome.position.y=10; g.add(dome);
+    const ant = cyl(.8,.8,22,M(0xcccccc)); ant.position.y=30; g.add(ant);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(2,8,6), M(0xff4444,0xaa0000)); tip.position.y=41; g.add(tip);
+    return g; },
+  extractor(){ const g = new THREE.Group();
+    const b = cyl(11,12,6,M(0x6b5a3a)); b.position.y=3; g.add(b);
+    const tower = box(5,22,5,M(0x99886a)); tower.position.y=14; g.add(tower);
+    const top = cyl(7,7,3,M(0xffcc33,0x664400),6); top.position.y=26; g.add(top); g.userData.spin = top;
+    return g; },
+  turret(){ const g = new THREE.Group();
+    const b = box(16,6,16,M(0x506070)); b.position.y=3; g.add(b);
+    const head = new THREE.Group(); head.position.y=9; g.add(head);
+    head.add(box(9,6,10,M(0x7f93a8)));
+    const gun = cyl(1,1,14,M(0x333333),8); gun.rotation.x=Math.PI/2; gun.position.z=9; head.add(gun);
+    g.userData.head = head; return g; },
+  battery(){ const g = new THREE.Group();
+    const b = box(18,5,18,M(0x4a5560)); b.position.y=2.5; g.add(b);
+    const rack = new THREE.Group(); rack.position.y=8; rack.rotation.x=-.6; g.add(rack);
+    for (let i=0;i<4;i++){ const t = cyl(2,2,14,M(0xccd4dd),8); t.rotation.x=Math.PI/2; t.position.set((i%2)*5-2.5, Math.floor(i/2)*5-2.5, 0); rack.add(t); }
+    const radar = box(10,6,1,M(0x88ccff,0x113344)); radar.position.set(0,16,-7); g.add(radar); g.userData.spin = radar;
+    return g; },
+  silo(){ const g = new THREE.Group();
+    const b = cyl(13,14,6,M(0x5d5048),8); b.position.y=3; g.add(b);
+    const tube = cyl(6,6,22,M(0x8a8f96)); tube.position.y=15; g.add(tube);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(6,9,16), M(0xff6633,0x441100)); nose.position.y=30.5; g.add(nose);
+    g.userData.nose = nose;
+    for (const s of [-1,1]){ const f = box(2,8,8,M(0x444444)); f.position.set(s*8,7,0); g.add(f); }
+    return g; },
+  tank(){ const g = new THREE.Group();
+    const hull = box(14,6,20,M(0x55663a)); hull.position.y=4; g.add(hull);
+    for (const s of [-1,1]){ const tr = box(4,5,22,M(0x222222)); tr.position.set(s*8,2.5,0); g.add(tr); }
+    const tur = new THREE.Group(); tur.position.y=9; g.add(tur);
+    tur.add(box(9,4,10,M(0x6d7f48)));
+    const barrel = cyl(1,1,14,M(0x2a2a2a),8); barrel.rotation.x=Math.PI/2; barrel.position.z=10; tur.add(barrel);
+    g.userData.head = tur; return g; },
+};
+
+// ---------- Health bars ----------
+const planeGeo = new THREE.PlaneGeometry(1,1);
+function makeBar(w){
+  const g = new THREE.Group();
+  const bg = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({ color:0x220000, depthTest:false }));
+  const fg = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({ color:0x44ff66, depthTest:false }));
+  bg.scale.set(w,2.4,1); fg.scale.set(w,2.4,1); bg.renderOrder=10; fg.renderOrder=11;
+  g.add(bg,fg); g.userData = { fg, w }; scene.add(g); return g;
+}
+function updBar(bar, pos, h, ratio){
+  bar.position.set(pos.x, h, pos.z); bar.quaternion.copy(camera.quaternion);
+  const { fg, w } = bar.userData; ratio = Math.max(0, ratio);
+  fg.scale.x = Math.max(.001, w*ratio); fg.position.x = -(w - w*ratio)/2;
+  fg.material.color.setHex(ratio>.5 ? 0x44ff66 : ratio>.25 ? 0xffcc33 : 0xff4433);
+}
+
+function collectMats(g){ const a=[]; g.traverse(o=>{ if (o.material && o.material.emissive){ o.material.userData.e0 = o.material.emissive.getHex(); a.push(o.material); } }); return a; }
+function setFlash(e, on){ if (e.flashing === on) return; e.flashing = on; for (const m of e.mats) m.emissive.setHex(on ? 0x992211 : m.userData.e0); }
+
+// ---------- State ----------
+let money = 400, wave = 1, waveT = 50, kills = 0, time = 0, over = false;
+let structs = [], tanks = [], bugs = [], colonies = [], spores = [], rockets = [], strikes = [], fx = [];
+let buildMode = null, ghost = null, ghostOk = false;
+const selected = new Set();
+
+function addEntity(type, pos){
+  const d = DEFS[type], g = BUILD[type](); g.position.copy(pos); scene.add(g);
+  const mats = collectMats(g);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(d.r+5, d.r+7, 32), new THREE.MeshBasicMaterial({ color:0x66ff88 }));
+  ring.rotation.x = -Math.PI/2; ring.position.y = .6; ring.visible = false; g.add(ring);
+  const e = { type, d, g, ring, pos:g.position, hp:d.hp, cd:0, bar:makeBar(d.r*1.6), mats, dest:null, attack:null,
+              range:d.range, lvl:1, auto:true };
+  (type === 'tank' ? tanks : structs).push(e); return e;
+}
+const hq = addEntity('hq', new THREE.Vector3(0,0,0));
+
+function damage(e, amt){
+  if (e.dead) return; e.hp -= amt; e.flashT = .1;
+  if (e.hp <= 0){ e.dead = true; scene.remove(e.g); scene.remove(e.bar); explode(e.pos.clone().setY(10), 0xff8833, 40);
+    if (selected.delete(e)) refreshPanel();
+    if (e === hq) endGame(); }
+}
+
+// ---------- Germs ----------
+const bugGeo = new THREE.SphereGeometry(4,10,8);
+function addBug(p){
+  if (bugs.length >= MAX_BUGS) return;
+  const m = new THREE.Mesh(bugGeo, new THREE.MeshLambertMaterial({ color:new THREE.Color().setHSL(rand(.25,.35),.8,.5), emissive:0x184d10 }));
+  m.position.set(p.x, 4, p.z); scene.add(m);
+  const b = { m, pos:m.position, hp:30, spd:rand(16,26), div:rand(14,24), ph:rand(0,6), tgt:null, kind:'bug' };
+  m.userData.ent = b; bugs.push(b);
+}
+function hitBug(b, dmg){ if (b.dead) return; b.hp -= dmg; if (b.hp <= 0){ b.dead = true; scene.remove(b.m); money += 4; kills++; explode(b.pos, 0x88ff44, 7); } }
+
+function addColony(){
+  const a = rand(0,Math.PI*2), r = rand(650,1000);
+  const g = new THREE.Group(); g.position.set(hq.pos.x + Math.cos(a)*r, 0, hq.pos.z + Math.sin(a)*r);
+  g.position.clampLength(0, 1900);
+  const mat = new THREE.MeshLambertMaterial({ color:0x2f8a2a, emissive:0x0c3a08 });
+  for (let i=0;i<7;i++){ const s = new THREE.Mesh(new THREE.SphereGeometry(rand(8,16),14,10), mat); s.position.set(rand(-14,14), rand(4,14), rand(-14,14)); g.add(s); }
+  const core = new THREE.Mesh(new THREE.SphereGeometry(9,14,10), new THREE.MeshBasicMaterial({ color:0xccff44 })); core.position.y=16; g.add(core);
+  scene.add(g);
+  const c = { g, pos:g.position, hp:600, max:600, spawn:2, spore:rand(6,10), bar:makeBar(40), mats:[mat], ph:rand(0,6), kind:'col' };
+  g.traverse(o => o.userData.ent = c); colonies.push(c);
+}
+function hitColony(c, dmg){ if (c.dead) return; c.hp -= dmg; c.flashT=.1;
+  if (c.hp <= 0){ c.dead = true; scene.remove(c.g); scene.remove(c.bar); money += 250; kills += 10; explode(c.pos.clone().setY(15), 0xccff44, 70); toast('Colony destroyed! +$250'); } }
+
+const sporeGeo = new THREE.SphereGeometry(3.5,10,8);
+function launchSpore(c){
+  const targets = structs.concat(tanks).filter(e=>!e.dead); if (!targets.length) return;
+  const tgt = targets[Math.floor(Math.random()*targets.length)].pos.clone().add(new THREE.Vector3(rand(-15,15),0,rand(-15,15)));
+  const start = c.pos.clone().setY(20), T = rand(6,9);
+  const vel = tgt.sub(start).divideScalar(T); vel.y += .5*G*T;
+  const m = new THREE.Mesh(sporeGeo, new THREE.MeshBasicMaterial({ color:0xcc66ff })); m.position.copy(start); scene.add(m);
+  spores.push({ m, pos:m.position, vel, claimed:false });
+}
+
+// ---------- Effects ----------
+function explode(pos, color, size){
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1,12,8), new THREE.MeshBasicMaterial({ color, transparent:true }));
+  m.position.copy(pos); scene.add(m);
+  fx.push({ obj:m, t:0, life:.7, upd:k=>{ m.scale.setScalar(size*Math.min(1,k*3)); m.material.opacity = 1-k; } });
+}
+function tracer(a, b, color){
+  const geo = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
+  const l = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent:true })); scene.add(l);
+  fx.push({ obj:l, t:0, life:.08, upd:k=>{ l.material.opacity = 1-k; } });
+}
+function puff(pos){
+  const m = new THREE.Mesh(new THREE.SphereGeometry(2.5,6,5), new THREE.MeshBasicMaterial({ color:0x999999, transparent:true, opacity:.5 }));
+  m.position.copy(pos); scene.add(m);
+  fx.push({ obj:m, t:0, life:1.2, upd:k=>{ m.scale.setScalar(1+k*2.5); m.material.opacity = .5*(1-k); } });
+}
+let toastT = 0;
+function toast(msg){ $('toast').textContent = msg; $('toast').style.opacity = 1; toastT = 3; }
+
+// ---------- Combat helpers ----------
+const enemyPos = t => t.kind==='col' ? t.pos.clone().setY(12) : t.pos;
+const enemyDist = (t, p) => flat(t.pos, p) - (t.kind==='col' ? 20 : 0);
+function nearestEnemy(pos, range, onlyColonies=false){
+  let best=null, bd=range;
+  if (!onlyColonies) for (const b of bugs){ if (b.dead) continue; const d = flat(b.pos,pos); if (d<bd){ bd=d; best=b; } }
+  for (const c of colonies){ if (c.dead) continue; const d = enemyDist(c,pos); if (d<bd){ bd=d; best=c; } }
+  return best;
+}
+function shoot(e){
+  let t = e.attack && !e.attack.dead && enemyDist(e.attack, e.pos) <= e.range ? e.attack : nearestEnemy(e.pos, e.range);
+  if (!t) return;
+  const tp = enemyPos(t), head = e.g.userData.head;
+  if (head) head.rotation.y = Math.atan2(tp.x-e.pos.x, tp.z-e.pos.z) - e.g.rotation.y;
+  if (e.cd > 0) return;
+  e.cd = e.d.rate;
+  tracer(e.pos.clone().setY(9), tp, e.type==='tank' ? 0xffaa33 : 0xffff88);
+  if (t.kind==='bug') hitBug(t, e.d.dmg); else hitColony(t, e.type==='tank' ? e.d.dmg*1.5 : e.d.dmg*.4);
+}
+
+const rocketGeo = new THREE.ConeGeometry(1.6,8,6); rocketGeo.rotateX(Math.PI/2);
+function fireRocket(e){
+  let best=null, bd=e.range;
+  for (const s of spores){ if (s.dead || s.claimed) continue; const d = s.pos.distanceTo(e.pos); if (d<bd){ bd=d; best=s; } }
+  if (!best) return false;
+  best.claimed = true;
+  const m = new THREE.Mesh(rocketGeo, new THREE.MeshBasicMaterial({ color:0x66ddff })); m.position.copy(e.pos).setY(12); scene.add(m);
+  rockets.push({ m, pos:m.position, tgt:best, life:5 });
+  return true;
+}
+
+// Silo: ballistic strike missiles on enemy colonies
+const strikeGeo = new THREE.ConeGeometry(3,16,10); strikeGeo.rotateX(Math.PI/2);
+function fireStrike(e){
+  let t = e.attack && !e.attack.dead && enemyDist(e.attack, e.pos) <= e.range ? e.attack : nearestEnemy(e.pos, e.range, true);
+  if (!t) return false;
+  const start = e.pos.clone().setY(32), tgt = t.pos.clone();
+  const T = 2.5 + flat(start, tgt)/260;
+  const vel = tgt.clone().sub(start).divideScalar(T); vel.y += .5*G*T;
+  const m = new THREE.Mesh(strikeGeo, new THREE.MeshBasicMaterial({ color:0xff7733 })); m.position.copy(start); scene.add(m);
+  strikes.push({ m, pos:m.position, vel, dmg:e.d.dmg, smoke:0 });
+  e.g.userData.nose.visible = false; e.reload = e.d.rate;
+  return true;
+}
+
+// ---------- Update ----------
+function moveToward(e, dt){
+  if (!e.dest) return;
+  const dx=e.dest.x-e.pos.x, dz=e.dest.z-e.pos.z, d=Math.hypot(dx,dz);
+  if (d < 3){ e.dest = null; return; }
+  if (e.type === 'tank') e.g.rotation.y = Math.atan2(dx,dz);
+  const st = Math.min(d, e.d.speed*dt); e.pos.x += dx/d*st; e.pos.z += dz/d*st;
+}
+
+function update(dt){
+  time += dt;
+  const extractors = structs.filter(s=>!s.dead && s.type==='extractor').length;
+  money += (3 + extractors*DEFS.extractor.income) * dt;
+
+  waveT -= dt;
+  if (waveT <= 0){ wave++; waveT = 45; addColony(); if (wave % 3 === 0) addColony(); toast(`Wave ${wave}: new colony detected`); }
+
+  // Colonies
+  for (const c of colonies){ if (c.dead) continue;
+    c.g.scale.setScalar(1 + .06*Math.sin(time*2+c.ph));
+    c.spawn -= dt; if (c.spawn <= 0){ addBug(c.pos.clone().add(new THREE.Vector3(rand(-25,25),0,rand(-25,25)))); c.spawn = Math.max(.8, 4.5 - wave*.35); }
+    if (wave >= 2){ c.spore -= dt; if (c.spore <= 0){ launchSpore(c); c.spore = Math.max(3, 11 - wave*.8); } }
+    c.flashT = (c.flashT||0) - dt; setFlash(c, c.flashT > 0);
+    updBar(c.bar, c.pos, 45, c.hp/c.max);
+  }
+
+  // Germs: chase nearest structure/tank, eat it, divide
+  const prey = structs.concat(tanks).filter(e=>!e.dead);
+  for (const b of bugs){ if (b.dead) continue;
+    if (!b.tgt || b.tgt.dead || Math.random() < .01){
+      let bd = Infinity; b.tgt = null;
+      for (const e of prey){ const d = flat(e.pos,b.pos); if (d<bd){ bd=d; b.tgt=e; } }
+    }
+    const t = b.tgt;
+    if (t){
+      const dx = t.pos.x-b.pos.x, dz = t.pos.z-b.pos.z, d = Math.hypot(dx,dz);
+      if (d > t.d.r + 4){ const wob = Math.sin(time*3+b.ph)*.5; b.pos.x += (dx/d + wob*dz/d*.4)*b.spd*dt; b.pos.z += (dz/d - wob*dx/d*.4)*b.spd*dt; }
+      else damage(t, 10*dt);
+    }
+    const s = 1 + .18*Math.sin(time*6+b.ph); b.m.scale.set(s, 1/s, 1.1/s);
+    b.div -= dt; if (b.div <= 0 && bugs.length < 60 + wave*25){ b.div = rand(14,24); addBug(b.pos.clone().add(new THREE.Vector3(rand(-6,6),0,rand(-6,6)))); }
+  }
+
+  // Spores
+  for (const s of spores){ if (s.dead) continue;
+    s.vel.y -= G*dt; s.pos.addScaledVector(s.vel, dt);
+    if (s.pos.y <= 0){
+      s.dead = true; scene.remove(s.m); explode(s.pos.clone().setY(2), 0xcc66ff, 35);
+      for (const e of prey) if (flat(e.pos,s.pos) < 35) damage(e, 70);
+      for (let i=0;i<3;i++) addBug(s.pos.clone().add(new THREE.Vector3(rand(-8,8),0,rand(-8,8))));
+    }
+  }
+
+  // Interceptor rockets (lead pursuit)
+  for (const r of rockets){ if (r.dead) continue;
+    r.life -= dt;
+    if (!r.tgt || r.tgt.dead){ r.tgt = spores.find(s=>!s.dead); }
+    if (!r.tgt || r.life <= 0){ r.dead = true; scene.remove(r.m); explode(r.pos, 0x88aaff, 8); continue; }
+    const spd = 420, dist = r.pos.distanceTo(r.tgt.pos);
+    const aim = r.tgt.pos.clone().addScaledVector(r.tgt.vel, dist/spd);
+    const dir = aim.sub(r.pos).normalize();
+    r.pos.addScaledVector(dir, spd*dt); r.m.lookAt(r.pos.clone().add(dir));
+    if (r.pos.distanceTo(r.tgt.pos) < 10){ r.dead = r.tgt.dead = true; scene.remove(r.m); scene.remove(r.tgt.m); explode(r.pos, 0xffee88, 18); money += 10; }
+  }
+
+  // Silo strike missiles
+  for (const s of strikes){ if (s.dead) continue;
+    s.vel.y -= G*dt; s.pos.addScaledVector(s.vel, dt); s.m.lookAt(s.pos.clone().add(s.vel));
+    s.smoke -= dt; if (s.smoke <= 0){ puff(s.pos); s.smoke = .05; }
+    if (s.pos.y <= 0){
+      s.dead = true; scene.remove(s.m); explode(s.pos.clone().setY(4), 0xff9933, 60);
+      for (const c of colonies) if (flat(c.pos,s.pos) < 50) hitColony(c, s.dmg);
+      for (const b of bugs) if (flat(b.pos,s.pos) < 45) hitBug(b, 999);
+    }
+  }
+
+  // Structures
+  for (const e of structs){ if (e.dead) continue;
+    e.cd -= dt; moveToward(e, dt);
+    if (e.g.userData.spin) e.g.userData.spin.rotation.y += dt*2;
+    if (e.type==='turret') shoot(e);
+    if (e.type==='battery' && e.cd <= 0 && fireRocket(e)) e.cd = e.d.rate;
+    if (e.type==='silo'){
+      if (e.attack && e.attack.dead) e.attack = null;
+      if (e.reload > 0){ e.reload -= dt; if (e.reload <= 0) e.g.userData.nose.visible = true; }
+      else fireStrike(e);
+    }
+    e.flashT = (e.flashT||0) - dt; setFlash(e, e.flashT > 0);
+    e.ring.visible = selected.has(e);
+    updBar(e.bar, e.pos, e.type==='hq' ? 50 : 38, e.hp/e.d.hp);
+  }
+
+  // Tanks: manual orders > attack target > auto-hunt
+  for (const e of tanks){ if (e.dead) continue;
+    e.cd -= dt;
+    if (e.attack && e.attack.dead){ e.attack = null; e.dest = null; }
+    if (e.attack){
+      e.dest = enemyDist(e.attack, e.pos) > e.range*.85 ? e.attack.pos.clone() : null;
+    } else if (e.auto && !e.manual){
+      const t = nearestEnemy(e.pos, 700);
+      e.dest = t && enemyDist(t, e.pos) > e.range*.85 ? t.pos.clone() : null;
+    }
+    moveToward(e, dt);
+    if (!e.dest) e.manual = false;
+    shoot(e);
+    e.ring.visible = selected.has(e);
+    e.flashT = (e.flashT||0) - dt; setFlash(e, e.flashT > 0);
+    updBar(e.bar, e.pos, 24, e.hp/e.d.hp);
+  }
+
+  // Rings follow HQ and selected silo
+  buildRing.position.set(hq.pos.x, .5, hq.pos.z);
+  const silo = [...selected].find(e => e.type==='silo');
+  rangeRing.visible = !!silo;
+  if (silo){ rangeRing.position.set(silo.pos.x, .6, silo.pos.z); rangeRing.scale.setScalar(silo.range); }
+
+  bugs = bugs.filter(b=>!b.dead); spores = spores.filter(s=>!s.dead); rockets = rockets.filter(r=>!r.dead); strikes = strikes.filter(s=>!s.dead);
+  structs = structs.filter(e=>!e.dead); tanks = tanks.filter(e=>!e.dead); colonies = colonies.filter(c=>!c.dead);
+}
+
+function updateFx(dt){
+  for (const f of fx){ f.t += dt; f.upd(Math.min(1, f.t/f.life)); }
+  fx = fx.filter(f => { if (f.t >= f.life){ scene.remove(f.obj); f.obj.geometry.dispose(); return false; } return true; });
+  if (toastT > 0){ toastT -= dt; if (toastT <= 0) $('toast').style.opacity = 0; }
+}
+
+function endGame(){
+  over = true;
+  const m = Math.floor(time/60), s = Math.floor(time%60);
+  $('overMsg').innerHTML = `The infection overran your HQ<br><small>Survived ${m}:${String(s).padStart(2,'0')} · wave ${wave} · ${kills} kills</small>`;
+  $('over').style.display = 'flex';
+}
+
+// ---------- Build UI ----------
+for (const [i,type] of ORDER.entries()){
+  const d = DEFS[type], b = document.createElement('button');
+  b.id = 'b_'+type; b.innerHTML = `${i+1}. ${d.name}<small>$${d.cost} · ${d.desc}</small>`;
+  b.onclick = () => chooseBuild(type); $('build').appendChild(b);
+}
+function chooseBuild(type){
+  if (type === 'tank'){ // tanks roll out of HQ
+    if (money < DEFS.tank.cost) return;
+    money -= DEFS.tank.cost; const a = rand(0,Math.PI*2);
+    const t = addEntity('tank', new THREE.Vector3(hq.pos.x + Math.cos(a)*35, 0, hq.pos.z + Math.sin(a)*35)); t.g.rotation.y = a; return;
+  }
+  cancelBuild();
+  if (money < DEFS[type].cost) return;
+  buildMode = type; ghost = BUILD[type]();
+  ghost.traverse(o => { if (o.material){ o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = .5; } });
+  scene.add(ghost); buildRing.visible = true;
+  $('b_'+type).classList.add('on');
+}
+function cancelBuild(){
+  if (ghost) scene.remove(ghost); ghost = null; buildRing.visible = false;
+  if (buildMode) $('b_'+buildMode).classList.remove('on'); buildMode = null;
+}
+
+// ---------- Selection panel ----------
+function refreshPanel(){
+  const sel = [...selected], p = $('sel');
+  if (!sel.length){ p.style.display = 'none'; return; }
+  p.style.display = 'block';
+  const tks = sel.filter(e=>e.type==='tank'), silos = sel.filter(e=>e.type==='silo');
+  let h = sel.length === 1 ? `<h3>${sel[0].d.name}</h3>` : `<h3>${sel.length} selected</h3>`;
+  if (sel.length === 1) h += `<div class="row">HP ${Math.ceil(sel[0].hp)}/${sel[0].d.hp}</div>`;
+  h += `<div class="row">Click ground to move${tks.length||silos.length ? ' · click enemy to attack' : ''}</div>`;
+  if (tks.length){
+    const allAuto = tks.every(t=>t.auto);
+    h += `<button id="autoBtn" class="${allAuto?'on':''}">Auto-attack: ${allAuto?'ON':'OFF'} (R)</button>`;
+  }
+  if (silos.length === 1){
+    const s = silos[0];
+    h += `<div class="row">Range ${s.range} · Level ${s.lvl}/${SILO_MAX_LVL}</div>`;
+    h += s.lvl < SILO_MAX_LVL ? `<button id="upBtn">Upgrade range +150<small>$${siloUpCost(s)}</small></button>` : `<div class="row">Max range</div>`;
+  }
+  p.innerHTML = h;
+  if ($('autoBtn')) $('autoBtn').onclick = toggleAuto;
+  if ($('upBtn')) $('upBtn').onclick = () => upgradeSilo(silos[0]);
+}
+function toggleAuto(){
+  const tks = [...selected].filter(e=>e.type==='tank'); if (!tks.length) return;
+  const v = !tks.every(t=>t.auto); tks.forEach(t => { t.auto = v; if (!v) t.dest = null; });
+  toast(`Auto-attack ${v?'ON':'OFF'}`); refreshPanel();
+}
+function upgradeSilo(s){
+  const c = siloUpCost(s); if (money < c || s.lvl >= SILO_MAX_LVL) return;
+  money -= c; s.lvl++; s.range += 150; toast(`Silo range → ${s.range}`); refreshPanel();
+}
+
+function hud(){
+  const ext = structs.filter(s=>s.type==='extractor').length;
+  $('hud').innerHTML =
+    `<span class="m">$${Math.floor(money)}</span> <span style="opacity:.7">(+${3+ext*4}/s)</span> · WAVE <b>${wave}</b> next in <b>${Math.ceil(waveT)}s</b><br>`+
+    `HQ <b>${Math.max(0,Math.ceil(hq.hp))}</b>/${DEFS.hq.hp} · GERMS <b>${bugs.length}</b> · COLONIES <b>${colonies.length}</b> · SPORES <b>${spores.length}</b><br>`+
+    `TANKS <b>${tanks.length}</b> · KILLS <b>${kills}</b>`;
+  for (const t of ORDER) $('b_'+t).disabled = money < DEFS[t].cost;
+  const up = $('upBtn'); if (up){ const s = [...selected].find(e=>e.type==='silo'); if (s) up.disabled = money < siloUpCost(s); }
+}
+
+// ---------- Camera & input ----------
+const camTarget = new THREE.Vector3(0,0,0);
+let yaw = .8, pitch = .75, dist = 750;
+const keys = {};
+function updateCam(dt){
+  const sp = dist*.9*dt, fx_ = -Math.cos(yaw), fz = -Math.sin(yaw);
+  if (keys.KeyW){ camTarget.x += fx_*sp; camTarget.z += fz*sp; }
+  if (keys.KeyS){ camTarget.x -= fx_*sp; camTarget.z -= fz*sp; }
+  if (keys.KeyA){ camTarget.x += fz*sp; camTarget.z -= fx_*sp; }
+  if (keys.KeyD){ camTarget.x -= fz*sp; camTarget.z += fx_*sp; }
+  if (keys.KeyQ) yaw -= dt*1.5; if (keys.KeyE) yaw += dt*1.5;
+  camTarget.clampLength(0, 1600);
+  camera.position.set(camTarget.x + Math.cos(yaw)*Math.cos(pitch)*dist, Math.sin(pitch)*dist, camTarget.z + Math.sin(yaw)*Math.cos(pitch)*dist);
+  camera.lookAt(camTarget);
+}
+
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+function setRay(e){ ndc.set(e.clientX/innerWidth*2-1, -e.clientY/innerHeight*2+1); ray.setFromCamera(ndc, camera); }
+function groundPoint(e){ setRay(e); const h = ray.intersectObject(ground)[0]; return h && h.point; }
+function ownerOf(obj, list){ return list.find(t => { let o = obj; while (o){ if (o === t.g) return true; o = o.parent; } return false; }); }
+
+function placementOk(p){
+  if (flat(p, hq.pos) > BUILD_R) return false;
+  for (const s of structs.concat(tanks)) if (flat(s.pos,p) < s.d.r + DEFS[buildMode].r + 4) return false;
+  return true;
+}
+
+const cv = renderer.domElement;
+let drag = null;
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('pointerdown', e => { drag = { x0:e.clientX, y0:e.clientY, x:e.clientX, y:e.clientY, moved:false, btn:e.button }; });
+addEventListener('pointermove', e => {
+  if (ghost){ const p = groundPoint(e); if (p){ p.x = Math.round(p.x/10)*10; p.z = Math.round(p.z/10)*10; p.y = 0; ghost.position.copy(p);
+    ghostOk = placementOk(p) && money >= DEFS[buildMode].cost;
+    ghost.traverse(o => { if (o.material && o.material.emissive) o.material.emissive.setHex(ghostOk ? 0x115522 : 0x661111); }); } }
+  if (!drag) return;
+  if (!drag.moved && Math.abs(e.clientX-drag.x0)+Math.abs(e.clientY-drag.y0) > 5) drag.moved = true;
+  if (!drag.moved) return;
+  if (drag.btn === 2 || drag.btn === 1 || buildMode){ // orbit
+    yaw += (e.clientX-drag.x)*.005; pitch = Math.min(1.45, Math.max(.2, pitch + (e.clientY-drag.y)*.005));
+  } else { // box select
+    const b = $('box'); b.style.display = 'block';
+    b.style.left = Math.min(drag.x0,e.clientX)+'px'; b.style.top = Math.min(drag.y0,e.clientY)+'px';
+    b.style.width = Math.abs(e.clientX-drag.x0)+'px'; b.style.height = Math.abs(e.clientY-drag.y0)+'px';
+  }
+  drag.x = e.clientX; drag.y = e.clientY;
+});
+addEventListener('pointerup', e => {
+  if (!drag || over){ drag = null; return; }
+  if (!drag.moved) click(e, drag.btn);
+  else if (drag.btn === 0 && !buildMode) boxSelect(drag.x0, drag.y0, e.clientX, e.clientY, e.shiftKey);
+  $('box').style.display = 'none'; drag = null;
+});
+cv.addEventListener('wheel', e => { dist = Math.min(2000, Math.max(150, dist*(1+e.deltaY*.001))); e.preventDefault(); }, { passive:false });
+addEventListener('resize', () => { camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Escape'){ cancelBuild(); selected.clear(); refreshPanel(); }
+  if (e.code === 'KeyT'){ if (!e.shiftKey) selected.clear(); tanks.forEach(t => selected.add(t)); refreshPanel(); }
+  if (e.code === 'KeyR') toggleAuto();
+  const n = parseInt(e.key); if (n>=1 && n<=ORDER.length) chooseBuild(ORDER[n-1]);
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+function boxSelect(x0,y0,x1,y1,add){
+  const [l,r,t,b] = [Math.min(x0,x1), Math.max(x0,x1), Math.min(y0,y1), Math.max(y0,y1)];
+  if (!add) selected.clear();
+  const v = new THREE.Vector3();
+  for (const tk of tanks){
+    v.copy(tk.pos).setY(5).project(camera);
+    const sx = (v.x+1)/2*innerWidth, sy = (1-v.y)/2*innerHeight;
+    if (sx>=l && sx<=r && sy>=t && sy<=b) selected.add(tk);
+  }
+  refreshPanel();
+}
+
+function click(e, btn){
+  if (buildMode){
+    if (btn === 2){ cancelBuild(); return; }
+    if (ghostOk){ money -= DEFS[buildMode].cost; addEntity(buildMode, ghost.position.clone());
+      const t = buildMode; if (!e.shiftKey || money < DEFS[t].cost) cancelBuild(); else ghostOk = placementOk(ghost.position); }
+    return;
+  }
+  setRay(e);
+  // own units/buildings
+  const own = tanks.concat(structs);
+  const hitOwn = btn === 0 && ray.intersectObjects(own.map(t=>t.g), true)[0];
+  // enemies
+  const hitEnemy = ray.intersectObjects(colonies.map(c=>c.g).concat(bugs.map(b=>b.m)), true)[0];
+  if (hitEnemy && selected.size){
+    const ent = hitEnemy.object.userData.ent;
+    let n = 0;
+    for (const s of selected) if (s.type==='tank' || s.type==='silo'){ s.attack = ent; s.manual = false; n++; }
+    if (n){ marker(ent.pos, 0xff4444); return; }
+  }
+  if (hitOwn && (!hitEnemy || hitOwn.distance < hitEnemy.distance)){
+    const ent = ownerOf(hitOwn.object, own);
+    if (!e.shiftKey) selected.clear();
+    if (selected.has(ent) && e.shiftKey) selected.delete(ent); else selected.add(ent);
+    refreshPanel(); return;
+  }
+  const p = groundPoint(e);
+  if (p && selected.size){ // spread into a small formation
+    const list = [...selected], cols = Math.ceil(Math.sqrt(list.length));
+    list.forEach((t,i) => {
+      const off = Math.max(26, t.d.r*2.6);
+      t.dest = new THREE.Vector3(p.x + (i%cols - (cols-1)/2)*off, 0, p.z + (Math.floor(i/cols) - (cols-1)/2)*off);
+      t.attack = null; t.manual = true;
+    });
+    marker(p, 0x66ff88);
+  } else if (btn === 0 && selected.size){ selected.clear(); refreshPanel(); }
+}
+function marker(p, color){
+  const m = new THREE.Mesh(new THREE.RingGeometry(6,9,24), new THREE.MeshBasicMaterial({ color, transparent:true }));
+  m.rotation.x = -Math.PI/2; m.position.set(p.x,.7,p.z); scene.add(m);
+  fx.push({ obj:m, t:0, life:.5, upd:k => { m.scale.setScalar(1+k*2); m.material.opacity = 1-k; } });
+}
+
+// ---------- Start ----------
+addColony();
+toast('Germs incoming — build turrets & extractors!');
+let last = performance.now(), panelT = 0;
+function loop(now){
+  const dt = Math.min(.05, (now-last)/1000); last = now;
+  if (!over) update(dt);
+  updateFx(dt); updateCam(dt); hud();
+  panelT -= dt; if (panelT <= 0 && selected.size === 1 && !document.querySelector('#sel button:hover')){ panelT = .5; refreshPanel(); }
+  renderer.render(scene, camera); requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
