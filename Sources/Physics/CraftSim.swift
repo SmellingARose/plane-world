@@ -913,3 +913,14 @@ struct StripJob {
         }
     }
 }
+
+extension CraftSim {
+    /// CraftSimBatch support: write a lane's body state back into this sim (setters are private to this file).
+    func batchStore(position p: Vec3d, orientation q: Quatd, velocity v: Vec3d, angularMomentum L: Vec3d, time t: Double,
+                    crashed c: Bool, groundContact g: Bool, maxImpactSpeed m: Double) {
+        position = p; orientation = q; velocity = v; angularMomentum = L; time = t
+        crashed = c; groundContact = g; maxImpactSpeed = m
+    }
+    /// CraftSimBatch support: mass properties recomputed by `updateMassProperties` read back by the batch.
+    var batchMassProperties: (mass: Double, comLocal: Vec3d, inertiaInv: Mat3d) { (mass, comLocal, inertiaInv) }
+}

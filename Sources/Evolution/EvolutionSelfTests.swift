@@ -77,6 +77,7 @@ public enum EvolutionSelfTests {
     }
 
     public static func register() {
+        BatchSelfTests.register()
         SelfTestRegistry.register("evolution", "rng-determinism") { ctx in
             var a = EvoRNG(seed: 42), b = EvoRNG(seed: 42), c = EvoRNG(seed: 43)
             let xa = (0..<100).map { _ in a.next() }, xb = (0..<100).map { _ in b.next() }, xc = (0..<100).map { _ in c.next() }

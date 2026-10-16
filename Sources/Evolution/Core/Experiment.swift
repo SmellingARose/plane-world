@@ -166,6 +166,12 @@ public struct ExperimentDocument: Codable, Sendable, Equatable {
     public var checkpointEvery = 5
     /// Worker threads (0 = JobSystem thread count).
     public var workers = 0
+    /// Candidates stepped in lockstep per worker as SIMD lanes (CraftSimBatch): 1 = scalar CraftSim, 2 / 4 / 8 =
+    /// batched. Results are bit-identical for every value (docs/PERF.md "Batched lanes"); only speed differs.
+    /// The environment variable PW_BATCH_LANES overrides it.
+    public var batchLanes = ExperimentDocument.defaultBatchLanes
+    /// Default for `batchLanes` (the best measured setting, docs/PERF.md "Batched lanes").
+    public static let defaultBatchLanes = 1
     public init() {}
 
     public init(from d: any Decoder) throws {
@@ -180,6 +186,7 @@ public struct ExperimentDocument: Codable, Sendable, Equatable {
         episode = v(.episode, def.episode); seed = v(.seed, def.seed); scripts = v(.scripts, def.scripts)
         rewardTerms = v(.rewardTerms, def.rewardTerms); descriptorAxes = v(.descriptorAxes, def.descriptorAxes)
         checkpointEvery = v(.checkpointEvery, def.checkpointEvery); workers = v(.workers, def.workers)
+        batchLanes = v(.batchLanes, def.batchLanes)
     }
 
     public static var directory: URL {

@@ -71,16 +71,22 @@ final class Bench {
 
     static let all: [(String, (Bench) throws -> Void)] = [
         ("physics.substep", { try $0.physicsSubstep() }),
+        ("physics.batch", { try $0.physicsBatch() }),
         ("headless.episode", { try $0.headlessEpisode() }),
         ("js.controller-call", { try $0.jsCall() }),
         ("nn.forward", { $0.nnForward() }),
         ("train.scaling", { try $0.trainScaling() }),
         ("train.generation", { try $0.trainGeneration() }),
+        ("train.batch", { try $0.trainBatch() }),
         ("terrain.erosion", { try $0.erosion() }),
         ("water.fft", { try $0.waterFFT() }),
         ("buoyancy", { try $0.buoyancy() }),
         ("fluid.step", { try $0.fluidStep() }),
         ("render.frame", { try $0.renderFrame() }),   // also emits cpu.frame
+        ("placement.gpu-latency", { try $0.placementGPULatency() }),
+        ("placement.train-mix", { try $0.placementTrainMix() }),
+        ("placement.train-pool", { try $0.placementTrainPool() }),
+        ("placement.coexist", { try $0.placementCoexist() }),
     ]
 
     // MARK: physics.substep
@@ -152,6 +158,62 @@ final class Bench {
         bench("cad60big.air", big, air: true)
         big.parallelThreshold = .max
         bench("cad60big.air.serial", big, air: true)
+    }
+
+    // MARK: physics.batch (SIMD lanes: K candidates per thread in lockstep)
+
+    /// Runs `body` on a fresh thread with the given QoS (background → E-cores on Apple silicon) and waits.
+    nonisolated static func onThread<T>(_ qos: QualityOfService, _ body: @escaping () -> T) -> T {
+        let done = DispatchSemaphore(value: 0)
+        let box = UnsafeMutablePointer<T?>.allocate(capacity: 1); box.initialize(to: nil)
+        let th = Thread { box.pointee = body(); done.signal() }
+        th.qualityOfService = qos; th.stackSize = 4 << 20; th.start(); done.wait()
+        let r = box.pointee!; box.deinitialize(count: 1); box.deallocate(); return r
+    }
+
+    /// Lane throughput of `CraftSimBatch` (K = 2/4/8) against K scalar sims (K = 1), on a P-core and an E-core.
+    func physicsBatch() throws {
+        let world = HeadlessWorld.flat()
+        let seconds = quick ? 2.0 : 8.0   // simulated seconds per lane per rep
+        func measure(_ doc: CraftDocument, air: Bool, K: Int, qos: QualityOfService) throws -> Double {
+            var sims: [CraftSim] = []
+            for l in 0..<K {
+                let s = CraftSim(); try s.load(doc); s.substepHz = 1000; s.turbulence = Double(ProcessInfo.processInfo.environment["PW_BATCH_TURB"] ?? "") ?? 0.3
+                if air { s.reset(spawn: Transform(position: [Double(l) * 3, 300, 0])); s.setVelocity(linear: [45, 0, 0], angular: .zero) }
+                else { s.reset(spawn: s.restingSpawn(groundHeight: 0)) }
+                for i in 0..<s.outputs.count { s.setOutput(index: i, value: s.outputs[i].kind == .motor ? 0.8 : 0.1 * Double(l + 1) / Double(K)) }
+                sims.append(s)
+            }
+            let batch = K > 1 ? CraftSimBatch(lanes: K, template: sims[0]) : nil
+            for l in 0..<K { batch?.attach(sims[l], lane: l) }
+            let envs = UnsafeMutablePointer<SimEnvironment>.allocate(capacity: K)
+            for l in 0..<K { (envs + l).initialize(to: world.makeEnvironment(wind: Vec3d(2, 0, 1), time: 0)) }
+            defer { envs.deinitialize(count: K); envs.deallocate() }
+            let steps = Int(seconds / 0.02)
+            let wall: Double = Self.onThread(qos) {
+                let t0 = benchNow()
+                for _ in 0..<steps {
+                    if let batch { batch.step(dt: 0.02, envs: envs) } else { for l in 0..<K { sims[l].step(dt: 0.02, env: envs[l]) } }
+                    for l in 0..<K { envs[l].time += 0.02 }
+                }
+                return Double(benchNow() - t0) / 1e9
+            }
+            return Double(K) * seconds / wall   // lane sim-seconds per wall-second (physics only)
+        }
+        // PW_BATCH_FILTER=<substring> restricts the variants (e.g. "trainer.air.P"); PW_BATCH_K="1,4" the lane counts.
+        let filter = ProcessInfo.processInfo.environment["PW_BATCH_FILTER"] ?? ""
+        let ks = (ProcessInfo.processInfo.environment["PW_BATCH_K"] ?? "1,2,4,8").split(separator: ",").compactMap { Int($0) }
+        for (label, name, air) in [("trainer.air", "Trainer", true), ("trainer.runway", "Trainer", false), ("jet.air", "Jet trainer", true), ("rover.ground", "Rover", false)] {
+            guard let doc = Self.flightCraft(name) else { print("physics.batch.\(label): craft '\(name)' missing"); continue }
+            for (core, qos) in [("P", QualityOfService.userInteractive), ("E", .background)] where filter.isEmpty || "\(label).\(core)".contains(filter) {
+                for K in ks {
+                    try repeatRun("physics.batch.\(label).\(core)", units: ["sim-s/s K=\(K)": "x", "us/lane-substep K=\(K)": "µs"]) {
+                        let r = try measure(doc, air: air, K: K, qos: qos)
+                        return ["sim-s/s K=\(K)": r, "us/lane-substep K=\(K)": 1e6 / (r * 1000)]
+                    }
+                }
+            }
+        }
     }
 
     // MARK: training
@@ -268,6 +330,36 @@ final class Bench {
             record("train.generation.\(w)w.pop\(pop)", "sim-s/wall-s", "x", simsec)
         }
         print("  (scaling efficiency = rate(N) / (N × rate(1)); compare with train.scaling.free-running for the barrier/tail loss)")
+    }
+
+    /// Evaluator throughput with SIMD lanes (ExperimentDocument.batchLanes = K): one generation on one P-core
+    /// thread, on one E-core thread (background QoS), and on 10 workers. K = 1 is the scalar CraftSim path.
+    /// Every K produces bit-identical fitness (checked here too). PW_BATCH_K / PW_BATCH_FILTER ("P", "E", "10w").
+    func trainBatch() throws {
+        let s = try Self.trainSetup()
+        let filter = ProcessInfo.processInfo.environment["PW_BATCH_FILTER"] ?? ""
+        let ks = (ProcessInfo.processInfo.environment["PW_BATCH_K"] ?? "1,2,4,8").split(separator: ",").compactMap { Int($0) }
+        var reference: [String: [UInt64]] = [:]
+        func check(_ key: String, _ f: [Fitness]) {
+            let b = f.map { $0.total.bitPattern }
+            if let r = reference[key] { if r != b { print("  !! \(key): fitness differs from K=1") } } else { reference[key] = b }
+        }
+        for (label, qos, workers, pop) in [("P", QualityOfService.userInteractive, 1, 8), ("E", .background, 1, 4), ("10w", .userInteractive, Int(ProcessInfo.processInfo.environment["PW_BATCH_WORKERS"] ?? "") ?? 10, Int(ProcessInfo.processInfo.environment["PW_BATCH_POP"] ?? "") ?? 64)]
+            where filter.isEmpty || label == filter {
+            for K in ks {
+                var e = s.exp; e.batchLanes = K
+                let run = try Self.makeRun(TrainSetup(exp: e, craft: s.craft, world: s.world), workers: workers, population: pop)
+                let genomes = try run.algorithm.ask()
+                guard let ev = run.evaluator as? SimEvaluator else { return }
+                try repeatRun("train.batch.\(label)", units: ["sim-s/s K=\(K)": "x"]) {
+                    let (f, wall): ([Fitness], Double) = workers == 1
+                        ? Self.onThread(qos) { let t0 = benchNow(); let f = ev.evaluate(genomes, generation: 0, cancel: nil); return (f, Double(benchNow() - t0) / 1e9) }
+                        : { let t0 = benchNow(); let f = ev.evaluate(genomes, generation: 0, cancel: nil); return (f, Double(benchNow() - t0) / 1e9) }()
+                    check(label, f)
+                    return ["sim-s/s K=\(K)": f.reduce(0) { $0 + $1.simSeconds } / wall]
+                }
+            }
+        }
     }
 
     // MARK: js / nn

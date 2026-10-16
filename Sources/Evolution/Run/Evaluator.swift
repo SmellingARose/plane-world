@@ -125,6 +125,9 @@ public final class EvalWorker {
     let world: HeadlessWorld
     // worker-local copies of the context's MLP maps (reading `ctx.<array>` in the tick loop retains the shared buffer)
     let mlpIn: [Int], mlpOut: [Int], mlpScale: [Double], ranges: [ClosedRange<Double>]
+    /// Hoisted per-run constants of the tick loop (0 = script only, 1 = mlp, 2 = neat).
+    let policyMode: Int, stopOnCrash: Bool
+    let obstacles: HeadlessObstacles?
 
     /// Deep copy through JSON (Swift's encoder writes shortest round-trip doubles, so the copy is value-identical).
     static func isolatedCopy(_ d: CraftDocument) -> CraftDocument {
@@ -139,6 +142,9 @@ public final class EvalWorker {
         world = shared ? context.world : context.world.isolatedCopy()
         mlpIn = Array(context.mlpInputs); mlpOut = Array(context.mlpOutputs)
         mlpScale = Array(context.mlpInputScale); ranges = Array(context.outputRanges)
+        policyMode = context.experiment.controller.mode == "mlp" ? 1 : context.experiment.controller.mode == "neat" ? 2 : 0
+        stopOnCrash = context.experiment.episode.stopOnCrash
+        obstacles = world.obstacles
         try runtime.compile(context.experiment.scripts, experiment: context.experiment)
         frame = ControlFrame(inputNames: context.inputNames, outputNames: context.outputNames, termNames: context.termNames)
         baseSim = CraftSim()
@@ -301,10 +307,18 @@ public final class EvalWorker {
         for i in 0..<inMap.count { let j = inMap[i]; frame.inputs[i] = j >= 0 ? simInputs[j] : 0 }
     }
 
-    /// Run one episode. Returns (script outcome, term sums in termNames order, sim seconds, control ticks).
-    /// The per-tick loop performs no heap allocation (with a NullScriptRuntime / allocation-free runtime).
-    public func runEpisode(_ g: Genome, generation: Int, candidate: Int, episode: Int, seed: UInt64,
-                           observer: TickObserver?) throws -> (EpisodeOutcome, [Double], Double, Int) {
+    /// Live state of one episode between control ticks. The scalar loop (`runEpisode`) and the batched driver
+    /// (`BatchEvalDriver`) run the same phases on it: begin → (controlTick → physics step → afterStep)* → finish.
+    struct EpisodeRun {
+        var env: SimEnvironment
+        var dt = 0.0, steps = 0, k = 0
+        var spawnXZ = Vec2d.zero
+        var nCorners = 0, prevPos = Vec3d.zero
+        var bounds: AABB?
+    }
+
+    /// Spawn, reset and observe for an episode; runs the script's beginEpisode.
+    func beginEpisode(_ g: Genome, generation: Int, candidate: Int, episode: Int, seed: UInt64) throws -> EpisodeRun {
         let e = ctx.experiment
         var rng = EvoRNG(seed: seed)
         let (sp, v0) = spawn(&rng)
@@ -317,73 +331,99 @@ public final class EvalWorker {
         for i in 0..<sim.outputs.count { sim.setOutput(index: i, value: 0) }
         neat?.reset(); mlp?.reset()
 
-        var env = world.makeEnvironment(wind: Vec3d(sin(windDir), 0, cos(windDir)) * windSpeed, time: 0)
-        let hz = max(1, e.controller.hz), dt = 1 / hz
-        let steps = max(1, Int((e.episode.duration * hz).rounded()))
-        let spawnXZ = Vec2d(sp.position.x, sp.position.z)
+        var run = EpisodeRun(env: world.makeEnvironment(wind: Vec3d(sin(windDir), 0, cos(windDir)) * windSpeed, time: 0))
+        let hz = max(1, e.controller.hz)
+        run.dt = 1 / hz
+        run.steps = max(1, Int((e.episode.duration * hz).rounded()))
+        run.spawnXZ = Vec2d(sp.position.x, sp.position.z)
         frame.tick = 0; frame.done = false; frame.doneReason = ""
         var info = EpisodeInfo()
         info.generation = generation; info.candidate = candidate; info.episode = episode; info.seed = seed
-        info.duration = e.episode.duration; info.controlDt = dt
+        info.duration = e.episode.duration; info.controlDt = run.dt
         frame.info = info
         for i in 0..<frame.outputs.count { frame.outputs[i] = 0 }
         for i in 0..<frame.termSums.count { frame.termSums[i] = 0 }
-        let bounds = world.terrain?.bounds
-        let mode = e.controller.mode
-        fillState(env, spawnXZ: spawnXZ); observe(env)
+        run.bounds = world.terrain?.bounds
+        fillState(run.env, spawnXZ: run.spawnXZ); observe(run.env)
         try runtime.beginEpisode(genome: g, frame: frame)
-        let obstacles = world.obstacles
-        var nCorners = obstacles != nil ? sim.writeWorldCorners(cornersPrev, capacity: cornerCap) : 0
-        var prevPos = sim.position
+        run.nCorners = obstacles != nil ? sim.writeWorldCorners(cornersPrev, capacity: cornerCap) : 0
+        run.prevPos = sim.position
+        return run
+    }
 
-        var k = 0
-        while k < steps {
-            frame.tick = k
-            // native policy
-            if mode == "mlp", let mlp {
-                for j in 0..<mlpIn.count { mlpX[j] = frame.inputs[mlpIn[j]] * mlpScale[j] }
-                mlp.forward(mlpX, mlpY)
-                for j in 0..<mlpOut.count {
-                    let o = mlpOut[j], r = ranges[o]
-                    frame.outputs[o] = r.lowerBound + (mlpY[j] + 1) * 0.5 * (r.upperBound - r.lowerBound)
-                }
-            } else if mode == "neat", let net = neat {
-                // by name, scaled inputs; tanh outputs [-1, 1] mapped onto each output's range (as in mlp mode)
-                for j in 0..<ctx.neatInputs.count { mlpX[j] = frame.inputs[ctx.neatInputs[j]] * ctx.neatInputScale[j] }
-                net.forward(UnsafePointer(mlpX), mlpY)
-                for j in 0..<ctx.neatOutputs.count {
-                    let o = ctx.neatOutputs[j], r = ctx.outputRanges[o]
-                    frame.outputs[o] = r.lowerBound + (max(-1, min(1, mlpY[j])) + 1) * 0.5 * (r.upperBound - r.lowerBound)
-                }
+    /// Native policy of the current tick (MLP / NEAT) → frame.outputs.
+    @inline(__always) func applyNativePolicy() {
+        if policyMode == 1, let mlp {
+            for j in 0..<mlpIn.count { mlpX[j] = frame.inputs[mlpIn[j]] * mlpScale[j] }
+            mlp.forward(mlpX, mlpY)
+            for j in 0..<mlpOut.count {
+                let o = mlpOut[j], r = ranges[o]
+                frame.outputs[o] = r.lowerBound + (mlpY[j] + 1) * 0.5 * (r.upperBound - r.lowerBound)
             }
-            for i in 0..<frame.terms.count { frame.terms[i] = 0 }
-            try runtime.tick(frame)
-            for i in 0..<frame.termSums.count { frame.termSums[i] += frame.terms[i] }
-            for i in 0..<outMap.count where outMap[i] >= 0 { sim.setOutput(index: outMap[i], value: frame.outputs[i]) }
-            observer?(sim, frame)
-            if frame.done { break }
-            sim.step(dt: dt, env: env)
-            env.time += dt; k += 1
-            if let obstacles {
-                nCorners = sim.writeWorldCorners(cornersCur, capacity: cornerCap)
-                let travel = simd_length(sim.position - prevPos)
-                if obstacles.hit(center: sim.position, radius: sim.collisionRadius, prev: cornersPrev, cur: cornersCur, count: nCorners, travel: travel) {
-                    sim.markObstacleHit(impactSpeed: simd_length(sim.velocity))
-                }
-                swap(&cornersPrev, &cornersCur); prevPos = sim.position
-            }
-            fillState(env, spawnXZ: spawnXZ); observe(env)
-            if !(sim.position.x.isFinite && sim.position.y.isFinite && sim.velocity.y.isFinite) { frame.done = true; frame.doneReason = "nan"; break }
-            if e.episode.stopOnCrash && sim.crashed { frame.done = true; frame.doneReason = "crash"; break }
-            if let b = bounds, sim.position.x < b.min.x || sim.position.x > b.max.x || sim.position.z < b.min.z || sim.position.z > b.max.z {
-                frame.done = true; frame.doneReason = "bounds"; break
+        } else if policyMode == 2, let net = neat {
+            // by name, scaled inputs; tanh outputs [-1, 1] mapped onto each output's range (as in mlp mode)
+            for j in 0..<ctx.neatInputs.count { mlpX[j] = frame.inputs[ctx.neatInputs[j]] * ctx.neatInputScale[j] }
+            net.forward(UnsafePointer(mlpX), mlpY)
+            for j in 0..<ctx.neatOutputs.count {
+                let o = ctx.neatOutputs[j], r = ctx.outputRanges[o]
+                frame.outputs[o] = r.lowerBound + (max(-1, min(1, mlpY[j])) + 1) * 0.5 * (r.upperBound - r.lowerBound)
             }
         }
+    }
+
+    /// Control phase of tick `run.k`: policy (unless the caller already ran it, e.g. a batched MLP), script tick,
+    /// outputs → sim. Returns false when the episode ended before the physics step (frame.done).
+    @inline(__always) func controlTick(_ run: inout EpisodeRun, observer: TickObserver?, policyDone: Bool = false) throws -> Bool {
+        frame.tick = run.k
+        if !policyDone { applyNativePolicy() }
+        for i in 0..<frame.terms.count { frame.terms[i] = 0 }
+        try runtime.tick(frame)
+        for i in 0..<frame.termSums.count { frame.termSums[i] += frame.terms[i] }
+        for i in 0..<outMap.count where outMap[i] >= 0 { sim.setOutput(index: outMap[i], value: frame.outputs[i]) }
+        observer?(sim, frame)
+        return !frame.done
+    }
+
+    /// After the physics step of tick `run.k`: time, obstacles, state, termination. Returns false when the episode ended.
+    @inline(__always) func afterStep(_ run: inout EpisodeRun) -> Bool {
+        run.env.time += run.dt; run.k += 1
+        if let obstacles {
+            run.nCorners = sim.writeWorldCorners(cornersCur, capacity: cornerCap)
+            let travel = simd_length(sim.position - run.prevPos)
+            if obstacles.hit(center: sim.position, radius: sim.collisionRadius, prev: cornersPrev, cur: cornersCur, count: run.nCorners, travel: travel) {
+                sim.markObstacleHit(impactSpeed: simd_length(sim.velocity))
+            }
+            swap(&cornersPrev, &cornersCur); run.prevPos = sim.position
+        }
+        fillState(run.env, spawnXZ: run.spawnXZ); observe(run.env)
+        if !(sim.position.x.isFinite && sim.position.y.isFinite && sim.velocity.y.isFinite) { frame.done = true; frame.doneReason = "nan"; return false }
+        if stopOnCrash && sim.crashed { frame.done = true; frame.doneReason = "crash"; return false }
+        if let b = run.bounds, sim.position.x < b.min.x || sim.position.x > b.max.x || sim.position.z < b.min.z || sim.position.z > b.max.z {
+            frame.done = true; frame.doneReason = "bounds"; return false
+        }
+        return true
+    }
+
+    /// End of episode: reason, final observer call, script endEpisode.
+    func finishEpisode(_ run: EpisodeRun, observer: TickObserver?) throws -> (EpisodeOutcome, [Double], Double, Int) {
         if !frame.done { frame.doneReason = "time" } else if frame.doneReason.isEmpty { frame.doneReason = "script" }
-        frame.tick = k
+        frame.tick = run.k
         observer?(sim, frame)
         let out = try runtime.endEpisode(frame)
-        return (out, Array(frame.termSums), env.time, k)
+        return (out, Array(frame.termSums), run.env.time, run.k)
+    }
+
+    /// Run one episode. Returns (script outcome, term sums in termNames order, sim seconds, control ticks).
+    /// The per-tick loop performs no heap allocation (with a NullScriptRuntime / allocation-free runtime).
+    public func runEpisode(_ g: Genome, generation: Int, candidate: Int, episode: Int, seed: UInt64,
+                           observer: TickObserver?) throws -> (EpisodeOutcome, [Double], Double, Int) {
+        var run = try beginEpisode(g, generation: generation, candidate: candidate, episode: episode, seed: seed)
+        while run.k < run.steps {
+            if !(try controlTick(&run, observer: observer)) { break }
+            sim.step(dt: run.dt, env: run.env)
+            if !afterStep(&run) { break }
+        }
+        return try finishEpisode(run, observer: observer)
     }
 
 }
@@ -399,12 +439,32 @@ public final class SimEvaluator: Evaluator {
     let pool: WorkerPool
     let jobs: JobSystem
     public private(set) var lastStats = EvalStats()
+    /// SIMD lanes per job (1 = scalar CraftSim; see ExperimentDocument.batchLanes).
+    public let batchLanes: Int
+    let drivers: [BatchEvalDriver]
+    /// Episodes of the last `evaluate` that ran on the scalar path although batching was on (topology mismatch).
+    public private(set) var lastFallbackEpisodes = 0
 
-    /// `workers` = 0 → one per JobSystem thread. `runtimeFactory` makes one ScriptRuntime per worker.
+    /// Effective lane count: PW_BATCH_LANES overrides the experiment; unsupported values round down to 1/2/4/8.
+    public static func resolveBatchLanes(_ requested: Int) -> Int {
+        let r = ProcessInfo.processInfo.environment["PW_BATCH_LANES"].flatMap(Int.init) ?? requested
+        return r >= 8 ? 8 : r >= 4 ? 4 : r >= 2 ? 2 : 1
+    }
+
+    /// `workers` = 0 → one per JobSystem thread. `runtimeFactory` makes one ScriptRuntime per worker (per lane
+    /// when batching: each job then owns `batchLanes` EvalWorkers).
     public init(context: ExperimentContext, workers: Int = 0, jobs: JobSystem = .shared, runtimeFactory: ScriptRuntimeFactory) throws {
         self.context = context; self.jobs = jobs
         let n = workers > 0 ? workers : jobs.threadCount
-        pool = WorkerPool(try (0..<n).map { _ in try EvalWorker(context: context, runtime: runtimeFactory()) })
+        let K = Self.resolveBatchLanes(context.experiment.batchLanes)
+        batchLanes = K
+        if K > 1 {
+            drivers = try (0..<n).map { _ in BatchEvalDriver(lanes: try (0..<K).map { _ in try EvalWorker(context: context, runtime: runtimeFactory()) }) }
+            pool = WorkerPool(drivers.map { $0.lanes[0] })
+        } else {
+            drivers = []
+            pool = WorkerPool(try (0..<n).map { _ in try EvalWorker(context: context, runtime: runtimeFactory()) })
+        }
     }
     public var workerCount: Int { pool.all.count }
 
@@ -422,7 +482,19 @@ public final class SimEvaluator: Evaluator {
         let items = split ? n * E : n
         let eps = UnsafeMutablePointer<EvalWorker.EpisodeResult>.allocate(capacity: max(1, split ? items : 0))
         let next = Atomic<Int>(0)
+        let drivers = self.drivers
+        let fallback0 = drivers.reduce(0) { $0 + $1.fallbackEpisodes }
+        let jobsN = min(workers.count, drivers.isEmpty ? items : (items + batchLanes - 1) / batchLanes)
         let body: (Range<Int>) -> Void = { r in
+            if !drivers.isEmpty {
+                withUnsafePointer(to: next) { np in
+                    for wi in r {
+                        drivers[wi].run(BatchEvalDriver.Work(genomes: genomes, generation: generation, items: items, split: split, E: E,
+                                                             drivers: jobsN, next: np, cancel: cancel, out: out, eps: eps))
+                    }
+                }
+                return
+            }
             for wi in r {
                 let w = workers[wi]
                 while true {
@@ -439,8 +511,8 @@ public final class SimEvaluator: Evaluator {
                 }
             }
         }
-        let jobsN = min(workers.count, items)
         if jobsN <= 1 { body(0..<1) } else { jobs.parallelFor(jobsN, grain: 1, label: "evolution.eval", body) }
+        lastFallbackEpisodes = drivers.reduce(0) { $0 + $1.fallbackEpisodes } - fallback0
         if split {
             for i in 0..<n { (out + i).initialize(to: workers[0].aggregate(UnsafeBufferPointer(start: eps + i * E, count: E))) }
             eps.deinitialize(count: items)

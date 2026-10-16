@@ -85,6 +85,59 @@ public final class MLPPolicy: PolicyNetwork {
     }
 }
 
+/// K MLPs of the same shape (one per batch lane, each with its own weights) evaluated together. Storage is
+/// lane-minor ([parameter][lane], [unit][lane]) so the inner loop over lanes is contiguous and vectorises. Every
+/// lane performs exactly `MLPPolicy.forward`'s operations in the same order (acc = b; acc += w·x in input
+/// order; activation per lane with scalar libm), so outputs are bit-identical to K separate forwards.
+public final class MLPBatch {
+    public let sizes: [Int]
+    public let lanes: Int
+    let hiddenAct: UInt8, outAct: UInt8
+    let weightCount: Int
+    let w: UnsafeMutablePointer<Double>          // [weightCount][lanes]
+    let bufA: UnsafeMutablePointer<Double>, bufB: UnsafeMutablePointer<Double>, acc: UnsafeMutablePointer<Double>
+    /// Inputs [sizes[0]][lanes] and outputs [sizes.last][lanes].
+    public let x: UnsafeMutablePointer<Double>, y: UnsafeMutablePointer<Double>
+
+    public init(like m: MLPPolicy, lanes: Int) {
+        sizes = m.sizes; self.lanes = lanes; hiddenAct = m.hiddenAct; outAct = m.outAct; weightCount = m.weightCount
+        func buf(_ n: Int) -> UnsafeMutablePointer<Double> { let p = UnsafeMutablePointer<Double>.allocate(capacity: max(1, n)); p.initialize(repeating: 0, count: max(1, n)); return p }
+        let mx = sizes.max() ?? 1
+        w = buf(weightCount * lanes); bufA = buf(mx * lanes); bufB = buf(mx * lanes); acc = buf(lanes)
+        x = buf(sizes[0] * lanes); y = buf((sizes.last ?? 1) * lanes)
+    }
+    deinit { w.deallocate(); bufA.deallocate(); bufB.deallocate(); acc.deallocate(); x.deallocate(); y.deallocate() }
+
+    /// Copy one lane's weights from a loaded MLPPolicy of the same shape.
+    public func load(lane l: Int, from m: MLPPolicy) {
+        for k in 0..<weightCount { w[k * lanes + l] = m.weights[k] }
+    }
+
+    /// Forward all lanes (inactive lanes compute on whatever their columns hold; harmless).
+    public func forward() {
+        let K = lanes
+        var src = x, wl = w
+        let L = sizes.count - 1
+        for l in 0..<L {
+            let nIn = sizes[l], nOut = sizes[l + 1]
+            let dst = l == L - 1 ? y : (l % 2 == 0 ? bufA : bufB)
+            let act = l == L - 1 ? outAct : hiddenAct
+            let b = wl + nOut * nIn * K
+            for o in 0..<nOut {
+                for k in 0..<K { acc[k] = b[o * K + k] }
+                let row = wl + o * nIn * K
+                for i in 0..<nIn {
+                    let wr = row + i * K, xs = src + i * K
+                    for k in 0..<K { acc[k] += wr[k] * xs[k] }
+                }
+                for k in 0..<K { dst[o * K + k] = activate(act, acc[k]) }
+            }
+            wl = b + nOut * K
+            src = dst
+        }
+    }
+}
+
 /// Applies design genes to a craft document (native, before the JS decode hook).
 public enum DesignDecoder {
     public static func layout(_ genes: [DesignGene]) -> GenomeLayout {

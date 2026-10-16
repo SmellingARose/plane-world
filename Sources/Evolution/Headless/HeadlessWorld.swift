@@ -10,6 +10,7 @@
 import Foundation
 import simd
 import PWCore
+import PWPhysics
 import PWTerrain
 import PWWater
 
@@ -86,6 +87,14 @@ public final class BakedTerrain: TerrainProvider, @unchecked Sendable {
     public func update(cameraPosition: Vec3d, deltaTime: Double) {}
     public func load(spec: TerrainSpec, baseURL: URL?) throws { throw EvolutionError.invalidExperiment("BakedTerrain is read-only") }
     public func makeSpec() -> TerrainSpec { TerrainSpec() }
+}
+
+extension BakedTerrain: TerrainBulkHeights {
+    /// Bulk `height(x:z:)` for CraftSimBatch (same function per point: bit-identical, no per-point dispatch).
+    public func heights(xs: UnsafePointer<Double>, zs: UnsafePointer<Double>, into out: UnsafeMutablePointer<Double>, count: Int) {
+        let f = field
+        for i in 0..<count { out[i] = f.sampleHeight(x: xs[i], z: zs[i]) }
+    }
 }
 
 /// Read-only, thread-safe water for headless runs.

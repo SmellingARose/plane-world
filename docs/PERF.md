@@ -250,3 +250,123 @@ Measured on a clean release build at `/tmp/pw-perf-final/build` (load average ab
   multiply-adds into FMA. Debug builds now check against their own reference, `0x144cb400e4c99c37`, measured in
   the TSan debug build. Release remains authoritative.
 - The CPU encode "regression" did not reproduce on a quieter machine: 0.08 ms against 0.18-0.30 ms in the baseline.
+
+## GPU pass (native 3200x1920, no upscaling)
+
+Goal: a GPU frame of 12 ms or less in the worst case, ideally 10 ms or less, in FLY and WORLD at native resolution,
+with no visible quality loss.
+
+### Bench views
+
+`Sources/Render/BenchViews.swift` adds fixed worst-case cameras. Set `PW_VIEW=horizon|low|grass|ocean` to override
+the camera passed to `Renderer.render`, both in `--bench render.frame` and in the app. Each view is placed relative
+to the tab's own camera, so FLY and WORLD each get a deterministic view:
+
+| view | camera |
+|---|---|
+| default | the tab's own chase or orbit camera, over the runway |
+| horizon | 250 m above ground, pitched 2° down, looking across the terrain to the horizon |
+| low | 2.5 m above ground, pitched 6° down |
+| grass | 2 m above the nearest flat, fully grassed spot, pitched 3° down, with a tree line in view |
+| ocean | 40 m above the sea, pitched 4° down toward the coast (the worst view) |
+
+Other environment variables:
+
+- `PW_DUMP=/path.png` writes the tonemapped frame `PW_DUMP_FRAME` (default 150) as a PNG. It works with
+  framebuffer-only drawables because it re-tonemaps into an offscreen target.
+- `PW_SKIP=TerrainRenderable,…` drops renderables by type name, for profiling.
+
+Measurement method: release build, `--bench render.frame` (90 frames per tab). Runs alternated between base and new
+binaries, view by view. Base is HEAD's Render, Terrain, Water and Vegetation plus only the bench hooks. Values are
+medians in ms. "shadows" is the per-frame average; cascades 2 and 3 render on alternate frames.
+
+Caveat: macOS Low Power Mode roughly doubles every GPU number (a first run gave 24–33 ms). The table below was
+measured with it off.
+
+| view | gpu total | hdr | taa | bloom | skyLUT (+aerial LUT) | shadows |
+|---|---|---|---|---|---|---|
+| default FLY | 12.37 → 9.03 | 7.99 → 4.80 | 1.68 → 1.29 | 1.12 → 1.16 | 0.18 → 0.40 | 0.69 → 0.79 |
+| default WORLD | 12.59 → 8.90 | 8.21 → 4.88 | 1.71 → 1.30 | 1.12 → 1.15 | 0.18 → 0.41 | 0.70 → 0.83 |
+| horizon FLY | 10.77 → 7.69 | 6.01 → 3.52 | 1.76 → 1.29 | 1.20 → 1.14 | 0.20 → 0.44 | 0.37 → 0.34 |
+| horizon WORLD | 10.62 → 7.61 | 6.31 → 3.76 | 1.80 → 1.30 | 1.19 → 1.14 | 0.21 → 0.49 | 0.37 → 0.36 |
+| low FLY | 11.56 → 7.71 | 6.92 → 3.45 | 1.71 → 1.24 | 1.13 → 1.13 | 0.19 → 0.49 | 0.82 → 1.04 |
+| low WORLD | 11.71 → 7.55 | 7.13 → 3.54 | 1.72 → 1.27 | 1.15 → 1.13 | 0.20 → 0.50 | 0.85 → 1.17 |
+| grass FLY | 9.35 → 7.93 | 4.54 → 3.39 | 1.74 → 1.32 | 1.12 → 1.17 | 0.19 → 0.50 | 1.71 → 1.96 |
+| grass WORLD | 9.23 → 7.78 | 4.66 → 3.31 | 1.76 → 1.33 | 1.13 → 1.15 | 0.19 → 0.49 | 1.74 → 1.89 |
+| ocean FLY | 14.86 → 9.04 | 10.48 → 5.18 | 1.72 → 1.27 | 1.14 → 1.14 | 0.19 → 0.45 | 0.48 → 0.56 |
+| ocean WORLD | 14.85 → 9.19 | 10.74 → 5.35 | 1.72 → 1.29 | 1.14 → 1.15 | 0.18 → 0.47 | 0.46 → 0.58 |
+
+The worst case drops from 14.9 ms (ocean) to 9.2 ms. Every view is now under 10 ms. "gpu total" is measured
+without timestamps; per-pass timestamps have about ±5 % noise.
+
+### Where the hdr time went
+
+Profiled with shader toggles in the default view, before the changes below. The hdr pass was 9.6 ms, of which the
+terrain fragment shader was about 6.9 ms:
+
+| part | cost |
+|---|---|
+| splat and layer sampling | about 1.8 ms |
+| macro-variation noise (8 `sin` hashes per pixel) | about 1.1 ms |
+| per-pixel aerial perspective and sun transmittance | about 2.5 ms |
+| 9-tap shadow PCF | about 1 ms |
+
+Per-pixel aerial perspective was 6 scattering steps, each with an 8-step sun march, plus another 8-step sun march in
+`shadeSurface`. That is about 60 atmosphere-medium evaluations per pixel, paid by the terrain, the water and the
+mesh pipeline.
+
+### Changes
+
+1. **Aerial-perspective LUT** (`ShaderCommon` and the `aerialLUT` kernel). A per-frame 64×64×48 rgba16f 3D LUT over
+   (view azimuth, sqrt-warped elevation, sqrt distance up to 100 km) holds three things: in-scatter, view
+   transmittance and sun transmittance at the point. Each LUT cell is computed with the same `integrateScattering`
+   and `transmittanceToSun` calls as before. It is bound by `FrameContext.bindFrame` at fragment textures 13–15.
+   Terrain, water and the PBR mesh call `aerialLookup` and `shadeSurfaceT`. Beyond 100 km they fall back to the exact
+   path. Cost: +0.25 ms in the skyLUT pass. Saving: about 2.5 ms in hdr. Vegetation already did this per vertex.
+2. **Terrain layer culling, exact.** The dominant splat layer is sampled first. A layer whose largest possible
+   height-blend score, `w + 0.45·hmax`, cannot reach `a_dom − 0.18` would get zero weight, so it is skipped.
+   `hmax` is each layer's measured maximum detail height, taken from the generated texture by an atomic-max kernel.
+3. **Triplanar floor.** Projection weights have 0.04 subtracted and are then renormalised. Near-flat ground uses one
+   projection (2 fetches per layer). The blend stays continuous on slopes.
+4. **Macro noise baked.** The `/173 m` and `/41 m` lattice `tvhash` values are baked once into r32f textures that
+   cover the quadtree root plus the falloff band. Each noise is now one `gather` plus the same Hermite blend, with
+   identical values.
+5. **Shadow PCF early-out** (`sampleShadow`). The four corner hardware-PCF taps cover the same 4×4 texels as all
+   nine taps. When the corners agree (fully lit or fully shadowed), the other five taps are skipped. Penumbrae still
+   take 9 taps.
+6. **Sky after opaque.** The full-screen sky is drawn after opaque geometry, at z = 0 with a read-only
+   greater-equal test. Early-z now rejects every covered pixel. Before, it shaded all 6.1 Mpx first.
+7. **TAA tiled.** Each 16×16 group loads its 18×18 neighbourhood into threadgroup memory: colour is converted to
+   tonemapped YCoCg once per texel, and depth is loaded alongside. The maths is identical. Saving: 1.7 → 1.3 ms.
+
+### Checked and left alone
+
+- **Depth prepass.** Opaque terrain is drawn first, and Apple's HSR already removes opaque overdraw, so a prepass
+  only adds vertex work. Alpha-tested trees stay after the opaque terrain, as Apple recommends.
+- **Far-cascade caching.** It already exists: cascades 2 and 3 alternate.
+- **Bloom.** It is already half-res. A cheaper first downsample would change the filter.
+- **fp16 render targets.** HDR, history and bloom are already rgba16f. rg11b10 history risks tint drift.
+- **Anisotropy.** Dropping from 8x to 2x on the dominant layer saves only about 0.4 ms, so it stays at 8x.
+- **Tree shadow casters.** These cost about 1–2 ms in the grass view and are already LOD'd per cascade.
+
+### Quality check
+
+Screenshots were taken at identical cameras with `PW_DUMP`, frame 150 for FLY and frame 480 for WORLD, base
+against new, for all five views in both tabs (in `/tmp/pw-gpu/shots/`). PSNR ranges from 56 to 65 dB, the mean
+absolute difference is at most 0.11 of 255, and the 99th-percentile difference is at most 2 of 255. The largest
+single-pixel differences (up to 72) are on ocean glints and foam. No visible difference.
+
+Release `--selftest all`: 92/92 pass.
+
+## Batched lanes (K candidates per worker in SIMD lanes)
+
+`CraftSimBatch` steps K candidates of the same craft in lockstep (SoA, `SIMDn<Double>`, masked branches). Each lane gives exactly the same result as the scalar `CraftSim`; this is checked by the `BatchSelfTests` selftests.
+
+| 10 workers, median of 5 | K=1 sim-s/s | K=2 sim-s/s | K=2 vs K=1 |
+|---|---|---|---|
+| population 64 | 1351 | 1244 | -8% |
+| population 1024 | 1186 | 949 | -20% |
+
+A seeded 3-generation training run gives identical `history.csv` (timing columns excluded) for K=1 with 1 worker, K=1 with 10 workers and K=2 with 10 workers.
+
+**Verdict: the default is `batchLanes = 1` (batching off); larger values are opt-in per experiment.** Each sim is branch-heavy Double work: stall, contact and servo saturation diverge across lanes, so masked execution wastes lanes. A NEON register holds only 2 Doubles. Running all 10 cores also pushes memory bandwidth and the shared power budget, so the losses get larger at high worker counts. Training throughput is already close to the M4 ceiling (about 4×P + 6×E ≈ 1350 sim-s/s). Further gains need cheaper sims (lower fidelity, two-tier evaluation), not wider ones.
