@@ -157,6 +157,42 @@ public enum PhysicsSelfTests {
             ctx.expect(sim.telemetry.fuelKg < 1e-6, "propellant burned out")
         }
 
+        SelfTestRegistry.register("physics", "prop-counter-rotation") { ctx in
+            // Coaxial pair thrusting +Y; prop param "spin" (+1/-1) sets the rotation sense and so the reaction torque.
+            func yawRate(_ s1: Double, _ s2: Double) throws -> Double {
+                let sim = CraftSim()
+                try sim.load(CraftDocument(name: "coax", parts: [
+                    PhysicsPresets.part(.motor, "m", "Lift", pos: [0, 1, 0], mass: 3, p: PhysicsPresets.n(["torque": 20])),
+                    PhysicsPresets.part(.cylinder, "b", "Body", pos: [0, 1, 0], mass: 10, p: PhysicsPresets.n(["r": 0.3, "h": 2, "cd": 0.3])),
+                    PhysicsPresets.part(.prop, "a", "A", pos: [0, 0.8, 0], rot: [0, 0, 90], mass: 0.4, p: PhysicsPresets.n(["d": 0.55, "thrust": 120, "vmax": 40, "spin": s1]), motor: "m"),
+                    PhysicsPresets.part(.prop, "c", "B", pos: [0, 1.2, 0], rot: [0, 0, 90], mass: 0.4, p: PhysicsPresets.n(["d": 0.55, "thrust": 120, "vmax": 40, "spin": s2]), motor: "m"),
+                ]))
+                sim.reset(spawn: sim.restingSpawn())
+                let env = SimEnvironment()
+                sim.setOutput(id: "m", value: 1)
+                for _ in 0..<(3 * 60) { sim.step(dt: 1.0 / 60, env: env) }
+                return sim.angularVelocityWorld.y
+            }
+            let same = try yawRate(1, 1), counter = try yawRate(1, -1)
+            ctx.log(String(format: "yaw rate after 3 s: same-direction %.3f rad/s, counter-rotating %.5f rad/s", same, counter))
+            ctx.expect(abs(same) > 0.05, "same-direction props should spin the craft (\(same))")
+            ctx.expect(abs(counter) < 1e-6, "counter-rotating props should cancel yaw torque (\(counter))")
+            // The example craft, when run from the repo root.
+            let url = URL(fileURLWithPath: "examples/crafts/ducted-rocket.json")
+            if let data = try? Data(contentsOf: url) {
+                let sim = CraftSim()
+                try sim.load(try JSONDecoder().decode(CraftDocument.self, from: data))
+                sim.reset(spawn: sim.restingSpawn())
+                let env = SimEnvironment(), y0 = sim.position.y
+                for o in sim.outputs { sim.setOutput(id: o.id, value: 1) }
+                for _ in 0..<(4 * 60) { sim.step(dt: 1.0 / 60, env: env) }
+                ctx.log(String(format: "ducted-rocket: climbed %.1f m in 4 s, yaw rate %.5f rad/s, up.y %.3f", sim.position.y - y0, sim.angularVelocityWorld.y,
+                               sim.orientation.act([0, 1, 0]).y))
+                ctx.expect(sim.position.y - y0 > 5, "ducted rocket should climb")
+                ctx.expect(abs(sim.angularVelocityWorld.y) < 1e-3, "ducted rocket should not spin")
+            } else { ctx.log("examples/crafts/ducted-rocket.json not found from cwd; skipped") }
+        }
+
         SelfTestRegistry.register("physics", "many-part-resting-stable") { ctx in
             // 40-plate deck (80 bottom corners touching): contact must not inject energy.
             var doc = CraftDocument(name: "deck", parts: [])

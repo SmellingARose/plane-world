@@ -35,7 +35,7 @@ struct SimPart {
     var isBody = false, isWing = false, invert = false, docMass = 0.0
     var kRange = 0.0, kTorque = 0.0, kSpeed = 0.0            // servo / motor
     var kCd = 0.3                                              // body drag
-    var kThrust = 0.0, kD = 0.0, kPropVmax = 80.0              // prop / jet / solid
+    var kThrust = 0.0, kD = 0.0, kPropVmax = 80.0, kSpin = 1.0              // prop / jet / solid
     var kFlow = 0.0, kBurn = 0.0
     var kR = 0.0, kGrip = 0.9, kRoll = 0.02                    // wheel
     var kReversible = 0.0, kMotorVmax = 20.0                   // motor
@@ -55,7 +55,7 @@ struct SimPart {
         invert = doc.invert; docMass = doc.mass
         kRange = p("range"); kTorque = p("torque"); kSpeed = p("speed")
         kCd = p("cd", 0.3)
-        kThrust = p("thrust"); kD = p("d"); kPropVmax = p("vmax", 80)
+        kThrust = p("thrust"); kD = p("d"); kPropVmax = p("vmax", 80); kSpin = p("spin", 1) < 0 ? -1 : 1
         kFlow = p("flow"); kBurn = p("burn")
         kR = p("r"); kGrip = p("grip", 0.9); kRoll = p("roll", 0.02)
         kReversible = p("reversible"); kMotorVmax = p("vmax", 20)
@@ -610,7 +610,7 @@ public final class CraftSim: CraftSimulation {
                 let r = Propulsion.propThrust(power: P0, diameter: max(0.1, P[i].kD), rho: max(rho, 1e-6), axialSpeed: thr >= 0 ? vax : -vax, pitchSpeed: P[i].kPropVmax)
                 let Tn = (thr >= 0 ? 1 : -0.5) * r.thrust
                 apply(dir * Tn, at: pw)
-                let targetOmega = 2 * Double.pi * r.rps * abs(thr) * (thr >= 0 ? 1 : -1)
+                let targetOmega = 2 * Double.pi * r.rps * abs(thr) * (thr >= 0 ? 1 : -1) * P[i].kSpin  // spin: +1 / -1 rotation sense; flips reaction torque
                 P[i].omega += (targetOmega - P[i].omega) * min(1, h / 0.4)
                 P[i].spinAngle = (P[i].spinAngle + P[i].omega * h).truncatingRemainder(dividingBy: 2 * Double.pi)
                 if abs(P[i].omega) > 1 { T -= dir * (P0 * 0.75 / P[i].omega) * 0.25 }  // reaction torque (partly cancelled by slipstream)

@@ -157,7 +157,7 @@ struct BPart<V: LaneVec> {
     // constants (per lane)
     var docMass = V(), kRange = V(), kTorque = V(), kSpeed = V(), kCd = V(), kThrust = V(), kD = V(), kPropVmax = V()
     var kFlow = V(), kBurn = V(), kR = V(), kGrip = V(), kRoll = V(), kReversible = V(), kMotorVmax = V()
-    var kChord = V(), kSpan = V(), invSign = V(), flapChord = V(), fuelCapacity = V(), kPropPower = V()
+    var kChord = V(), kSpan = V(), invSign = V(), flapChord = V(), fuelCapacity = V(), kPropPower = V(), kSpin = V()
     var basePos = BV3<V>.zero, ctr = BV3<V>.zero, size = BV3<V>.zero, servoAxisBase = BV3<V>.zero
     var baseQ = BQ<V>.identity, baseQN = BQ<V>.identity
     // wing constants (Aero.WingConst)
@@ -248,7 +248,7 @@ final class BatchCore<V: LaneVec> {
             P[i].kFlow[l] = sp.kFlow; P[i].kBurn[l] = sp.kBurn; P[i].kR[l] = sp.kR; P[i].kGrip[l] = sp.kGrip; P[i].kRoll[l] = sp.kRoll
             P[i].kReversible[l] = sp.kReversible; P[i].kMotorVmax[l] = sp.kMotorVmax; P[i].kChord[l] = sp.kChord; P[i].kSpan[l] = sp.kSpan
             P[i].invSign[l] = sp.invert ? -1 : 1; P[i].flapChord[l] = sp.flapChord; P[i].fuelCapacity[l] = sp.fuelCapacity
-            P[i].kPropPower[l] = sp.kPropPower
+            P[i].kPropPower[l] = sp.kPropPower; P[i].kSpin[l] = sp.kSpin
             P[i].basePos[lane: l] = sp.basePos; P[i].ctr[lane: l] = sp.ctr; P[i].size[lane: l] = sp.size; P[i].servoAxisBase[lane: l] = sp.servoAxisBase
             P[i].baseQ[lane: l] = sp.baseQ; P[i].baseQN[lane: l] = sp.baseQN
             let w = sp.wing
@@ -547,7 +547,7 @@ final class BatchCore<V: LaneVec> {
                                    axialSpeed: vsel(pos, vax, vneg(vax)), pitchSpeed: P[i].kPropVmax, lanes: live)
                 let Tn = vsel(pos, 1, -0.5) * r.thrust
                 bApply(&F, &T, dir * Tn, pw, position)
-                let targetOmega = 2 * Double.pi * r.rps * V.vabs(thr) * vsel(pos, 1, -1)
+                let targetOmega = 2 * Double.pi * r.rps * V.vabs(thr) * vsel(pos, 1, -1) * P[i].kSpin
                 P[i].omega = P[i].omega + (targetOmega - P[i].omega) * min(1, h / 0.4)
                 P[i].spinAngle = vmap(P[i].spinAngle + P[i].omega * h) { $0.truncatingRemainder(dividingBy: 2 * Double.pi) }
                 let spinning = V.vabs(P[i].omega) .> 1
