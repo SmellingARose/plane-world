@@ -22,9 +22,10 @@ Shaders are MSL source strings compiled at runtime (`ShaderLibrary`, with `Shade
 | PWVegetation | Vegetation/ | vegetation builder | implements `VegetationSystem` + Renderable |
 | PWWater | Water/ | water builder | implements `WaterProvider` + Renderable (transparent pass) |
 | PWCraft | Craft/ | import builder | CAD import, auto-rig, mesh cut, PartMeshFactory, CraftLibrary |
-| PlaneWorld | App/ | architect, then integrator | window, tabs, panels, input, main loop, wiring |
+| PWEvolution | Evolution/ | architect + script / ga-es / neat-qd builders | EVOLVE: headless world, parallel evaluator, algorithms (ask/tell), JavaScriptCore scripting, run/checkpoint/replay — see docs/EVOLUTION.md |
+| PlaneWorld | App/ | architect, then integrator (App/Evolve/: evolve-ui builder) | window, tabs, panels, input, main loop, wiring |
 
-Dependency rule: everything depends on Core. Render-facing modules depend on Render. Modules never import each other, except Physics→Collision and Craft→Physics. Only App wires concrete types together, through `SimulationServices`.
+Dependency rule: everything depends on Core. Render-facing modules depend on Render. Modules never import each other, except Physics→Collision, Craft→Physics and Evolution→{Physics, Collision, Terrain, Water}. Only App wires concrete types together, through `SimulationServices`.
 Each stub file is headed `OWNED BY <x> builder` and every unfinished piece is marked `TODO(<owner>)`. Each module exposes `<Module>SelfTests.register()`, and App/main.swift calls it.
 
 ## Key interfaces (Core/Interfaces.swift)
@@ -32,7 +33,7 @@ Each stub file is headed `OWNED BY <x> builder` and every unfinished piece is ma
 - `WaterProvider`: `sample` (height, normal, velocity, depth), `flow`, `submergedForces(hull:state:time:)`, `step`.
 - `CollisionWorld`: add/remove bodies (`RigidBodyDesc`, `CollisionShape`), state, forces, `registerBreakable`, `addBreakableJoint`, `step`, contacts, raycast. Breaks publish `BreakEvent`.
 - `VegetationSystem`: `generate`, `interact`, `step(wind)`, `collisionProxies`.
-- `CraftSimulation`: `load(CraftDocument)`, `outputs` (one slider each), `setOutput`, `reset`, `step(dt, env: SimEnvironment)`, `bodyState`, `partPoses`, `telemetry`.
+- `CraftSimulation`: `load(CraftDocument)`, `outputs` (one slider each), `setOutput`, `reset`, `step(dt, env: SimEnvironment)`, `bodyState`, `partPoses`, `telemetry`. `CraftSim` adds sensor `inputs` (`CraftInput`, from `sensor` parts), `readSensors(env:into:)`, `setOutput(index:value:)`, crash/contact flags and `clone()`.
 - `WorldDocument` / `JSONWorldDocumentStore`: JSON world save/load.
 - `Renderable` (Render/RenderCore.swift): `prepare`, `drawShadow(cascade)`, `drawOpaque`, `drawTransparent`, with a `FrameContext`. Register it with `RenderRegistry.shared.add`.
 

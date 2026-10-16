@@ -299,7 +299,11 @@ public enum AutoRig {
         }
         let wheels = doc.parts.indices.filter { doc.parts[$0].partType == .wheel && !linkedOK(doc.parts[$0]) }
         if !wheels.isEmpty {
-            let c = wheels.reduce(Vec3d.zero) { $0 + doc.parts[$1].position } / Double(wheels.count)
+            var c = wheels.reduce(Vec3d.zero) { $0 + doc.parts[$1].position } / Double(wheels.count)
+            // The motor is a 0.5 m body: lift it above the axles (wheel radius + half its size) so it can never
+            // touch the ground. At the axle centroid it dragged on the runway and pinned the craft in place.
+            let maxR = wheels.map { doc.parts[$0].param("r", 0.3) }.max() ?? 0.3
+            c.y += maxR + 0.3
             var m = CraftPart(id: id(), type: .motor, name: "Wheel drive", pos: c)
             m.p["torque"] = .number(150); m.p["reversible"] = .number(1); m.mass = 20
             for w in wheels { doc.parts[w].motor = m.id }

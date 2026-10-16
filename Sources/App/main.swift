@@ -1,6 +1,8 @@
 // Plane World entry point.
 //   PlaneWorld                         launch the app
 //   PlaneWorld --selftest <name|all|list>   headless tests, exit status 0/1
+//   PlaneWorld --train <experiment.json> [--generations N] [--out dir] [--workers N]   headless training
+//   PlaneWorld --make-experiment "<preset>" <out.json>
 //   PlaneWorld --quit-after <seconds>  launch and quit automatically (smoke testing)
 import AppKit
 import PWCore
@@ -11,6 +13,7 @@ import PWTerrain
 import PWVegetation
 import PWWater
 import PWCraft
+import PWEvolution
 
 func registerAllSelfTests() {
     CoreSelfTests.register()
@@ -21,6 +24,10 @@ func registerAllSelfTests() {
     VegetationSelfTests.register()
     WaterSelfTests.register()
     CraftSelfTests.register()
+    SensorSelfTests.register()
+    EvolutionSelfTests.register()
+    JSScriptSelfTests.register()
+    AlgorithmSelfTests.register()
     AppSelfTests.register()
 }
 
@@ -30,6 +37,9 @@ if let i = args.firstIndex(of: "--selftest") {
     let name = i + 1 < args.count ? args[i + 1] : "all"
     exit(SelfTestRegistry.run(name) ? 0 : 1)
 }
+
+if args.contains("--train") { exit(TrainCLI.run(args)) }
+if args.contains("--make-experiment") { exit(TrainCLI.makeExperiment(args)) }
 
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)

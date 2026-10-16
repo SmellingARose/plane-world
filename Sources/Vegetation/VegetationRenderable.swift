@@ -10,7 +10,7 @@ import PWRender
 
 struct TreeInstGPU { var posScale: Vec4; var quat: Vec4; var tmpl: UInt32; var flags: UInt32; var tint: Float; var phase: Float }
 struct TreeTemplateGPU { var barkColor: Vec4; var leafColor: Vec4; var dims: Vec4; var lod0: SIMD4<UInt32>; var lod1: SIMD4<UInt32>; var region: SIMD4<UInt32> }
-struct VegCullU { var planes: (Vec4, Vec4, Vec4, Vec4, Vec4, Vec4); var camPos: Vec4; var lodDist: Vec4; var counts: SIMD4<UInt32> }
+struct VegCullU { var planes: (Vec4, Vec4, Vec4, Vec4, Vec4, Vec4); var camPos: Vec4; var lodDist: Vec4; var counts: SIMD4<UInt32>; var casc: (Mat4, Mat4, Mat4) }
 struct GrassU { var camPos: Vec4; var grid: Vec4; var hmap: Vec4; var inter: Vec4; var planes: (Vec4, Vec4, Vec4, Vec4, Vec4, Vec4); var params: Vec4; var counts: SIMD4<UInt32> }
 struct InteractorGPU { var posRadius: Vec4; var dirStrength: Vec4 }
 struct InterU { var base: SIMD4<Int32>; var prevBase: SIMD4<Int32>; var params: Vec4 }
@@ -246,8 +246,8 @@ public final class VegetationRenderable: Renderable {
         let tg = templates.enumerated().map { templateGPU($0.element, index: $0.offset, region: (start[$0.offset], counts[$0.offset])) }
         templateBuffer = device.makeBuffer(bytes: tg, length: max(tg.count, 1) * MemoryLayout<TreeTemplateGPU>.stride, options: .storageModeShared)
         let N = max(trees.count, 1)
-        visibleBuffers = (0..<3).map { _ in device.makeBuffer(length: 4 * N * 4, options: .storageModePrivate)! }
-        argsBuffers = (0..<3).map { _ in device.makeBuffer(length: max(templates.count, 1) * (15 + 4) * 4, options: .storageModeShared)! }
+        visibleBuffers = (0..<3).map { _ in device.makeBuffer(length: 6 * N * 4, options: .storageModePrivate)! }
+        argsBuffers = (0..<3).map { _ in device.makeBuffer(length: max(templates.count, 1) * (25 + 4) * 4, options: .storageModeShared)! }
         builtTreesVersion = sys.treesVersion; builtBrokenVersion = sys.brokenVersion
     }
 
@@ -290,21 +290,22 @@ public final class VegetationRenderable: Renderable {
         let T = templateCount, N = max(instanceCount, 1)
 
         // ---- tree culling
-        let args = argsBuffers[slot].contents().bindMemory(to: UInt32.self, capacity: T * 19)
+        let args = argsBuffers[slot].contents().bindMemory(to: UInt32.self, capacity: T * 29)
         for t in 0..<T {
             let r = templateRanges[t]
             let base = UInt32(templateBufferRegionStart(t))
-            let entries: [(Int, Int, UInt32)] = [(r.lod0.0, r.lod0.1, base), (r.lod1.0, r.lod1.1, UInt32(N) + base), (r.shadow.0, r.shadow.1, UInt32(2 * N) + base)]
-            for (k, e) in entries.enumerated() {
-                let a = t * 15 + k * 5
-                args[a] = UInt32(e.1); args[a + 1] = 0; args[a + 2] = UInt32(e.0); args[a + 3] = 0; args[a + 4] = e.2
+            for k in 0..<5 {
+                let e: (Int, Int) = k == 0 ? r.lod0 : (k == 1 ? r.lod1 : r.shadow)
+                let a = t * 25 + k * 5
+                args[a] = UInt32(e.1); args[a + 1] = 0; args[a + 2] = UInt32(e.0); args[a + 3] = 0; args[a + 4] = UInt32(k * N) + base
             }
-            let ia = T * 15 + t * 4
-            args[ia] = 4; args[ia + 1] = 0; args[ia + 2] = 0; args[ia + 3] = UInt32(3 * N) + base
+            let ia = T * 25 + t * 4
+            args[ia] = 4; args[ia + 1] = 0; args[ia + 2] = 0; args[ia + 3] = UInt32(5 * N) + base
         }
         var cu = VegCullU(planes: planes, camPos: camF,
                           lodDist: Vec4(settings.lod0Distance, settings.lod1Distance, settings.impostorDistance, settings.shadowCasterDistance),
-                          counts: [UInt32(instanceCount), UInt32(T), UInt32(N), 0])
+                          counts: [UInt32(instanceCount), UInt32(T), UInt32(N), 0],
+                          casc: (frame.uniforms.cascadeViewProj.0, frame.uniforms.cascadeViewProj.1, frame.uniforms.cascadeViewProj.2))
         frameCull = cu
         if instanceCount > 0, let ce = frame.commandBuffer.makeComputeCommandEncoder() {
             ce.label = "veg.treeCull"
@@ -402,9 +403,9 @@ public final class VegetationRenderable: Renderable {
 
     private func readStats(slot s: Int) {
         guard s < argsBuffers.count else { return }
-        let a = argsBuffers[s].contents().bindMemory(to: UInt32.self, capacity: templateCount * 19)
+        let a = argsBuffers[s].contents().bindMemory(to: UInt32.self, capacity: templateCount * 29)
         var c0 = 0, c1 = 0, cs = 0, ci = 0
-        for t in 0..<templateCount { c0 += Int(a[t * 15 + 1]); c1 += Int(a[t * 15 + 6]); cs += Int(a[t * 15 + 11]); ci += Int(a[templateCount * 15 + t * 4 + 1]) }
+        for t in 0..<templateCount { c0 += Int(a[t * 25 + 1]); c1 += Int(a[t * 25 + 6]); cs += Int(a[t * 25 + 11]) + Int(a[t * 25 + 16]) + Int(a[t * 25 + 21]); ci += Int(a[templateCount * 25 + t * 4 + 1]) }
         let g = Int(grassArgs[s].contents().bindMemory(to: UInt32.self, capacity: 4)[1])
         lastCounts = (c0, c1, ci, cs, g)
     }
@@ -463,7 +464,7 @@ public final class VegetationRenderable: Renderable {
             enc.setVertexBuffer(visibleBuffers[slot], offset: 0, index: 1)
             for t in 0..<templateCount {
                 enc.drawIndexedPrimitives(type: .triangle, indexType: .uint32, indexBuffer: ib, indexBufferOffset: 0,
-                                          indirectBuffer: argsBuffers[slot], indirectBufferOffset: (t * 15 + 10) * 4)
+                                          indirectBuffer: argsBuffers[slot], indirectBufferOffset: (t * 25 + 10 + 5 * min(cascade, 2)) * 4)
             }
         }
         drawFalling(enc, lod: 2)
@@ -490,7 +491,7 @@ public final class VegetationRenderable: Renderable {
             for t in 0..<templateCount {
                 for k in 0..<2 {
                     enc.drawIndexedPrimitives(type: .triangle, indexType: .uint32, indexBuffer: ib, indexBufferOffset: 0,
-                                              indirectBuffer: argsBuffers[slot], indirectBufferOffset: (t * 15 + k * 5) * 4)
+                                              indirectBuffer: argsBuffers[slot], indirectBufferOffset: (t * 25 + k * 5) * 4)
                 }
             }
         }
@@ -501,7 +502,7 @@ public final class VegetationRenderable: Renderable {
             enc.setFragmentTexture(alb, index: 2); enc.setFragmentTexture(nrm, index: 3)
             enc.setCullMode(.none)
             for t in 0..<templateCount {
-                enc.drawPrimitives(type: .triangleStrip, indirectBuffer: argsBuffers[slot], indirectBufferOffset: (templateCount * 15 + t * 4) * 4)
+                enc.drawPrimitives(type: .triangleStrip, indirectBuffer: argsBuffers[slot], indirectBufferOffset: (templateCount * 25 + t * 4) * 4)
             }
         }
         enc.setCullMode(.back)

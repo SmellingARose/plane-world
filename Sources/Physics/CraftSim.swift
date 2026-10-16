@@ -50,6 +50,7 @@ public final class CraftSim: CraftSimulation {
     var parts: [SimPart] = []
     var strips: [WingStrip] = []
     var outputTargets: [String: Int] = [:]    // output id -> part index
+    var outputTargetCache: [Int] = []         // output index -> part index (-1 none)
 
     // mass properties (craft frame)
     public private(set) var mass = 1.0
@@ -67,6 +68,18 @@ public final class CraftSim: CraftSimulation {
     var hull: HullMesh?
     var boundingRadius = 1.0
     var stripBuf: UnsafeMutablePointer<StripResult>?, stripCap = 0
+    var wheelCount = 0
+    // contact / crash flags (sensors + evolution termination). Latched until reset.
+    /// Impact speed (m/s, into the ground) above which a non-wheel corner contact counts as a crash.
+    public var crashSpeed = 8.0
+    public private(set) var crashed = false
+    public private(set) var groundContact = false      // any corner or wheel touching this substep
+    public private(set) var maxImpactSpeed = 0.0
+    // sensors (see Sensors.swift)
+    public internal(set) var inputs: [CraftInput] = []
+    var sensorSlots: [SensorSlot] = []
+    var noiseState: UInt64 = 0x9E3779B97F4A7C15
+    public var sensorNoiseSeed: UInt64 = 0x9E3779B97F4A7C15
     var panelBuf: UnsafeMutablePointer<ForceTorque>?, panelCap = 0
 
     public init() {}
@@ -102,8 +115,9 @@ public final class CraftSim: CraftSimulation {
             if let m = parts[i].motor, parts[m].type != .motor { parts[i].motor = nil; if parts[i].type == .wheel || parts[i].type == .prop { parts[i].autoMotor = true } }
         }
         rebuildStrips()
+        wheelCount = parts.filter { $0.type == .wheel }.count
         outputs = Self.makeOutputs(craft)
-        outputTargets = [:]
+        outputTargets = [:]; outputTargetCache = []
         for (i, p) in parts.enumerated() {
             if p.type?.isOutput == true { outputTargets[p.doc.id] = i }
             if p.autoMotor {
@@ -114,6 +128,7 @@ public final class CraftSim: CraftSimulation {
             }
         }
         buildHull()
+        buildSensors()
         resetFuel()
         updateMassProperties(keepOrigin: false)
         reset(spawn: restingSpawn())
@@ -142,9 +157,20 @@ public final class CraftSim: CraftSimulation {
 
     public func setOutput(id: String, value: Double) {
         guard let i = outputs.firstIndex(where: { $0.id == id }) else { return }
-        let v = clamp(value, outputs[i].range.lowerBound, outputs[i].range.upperBound)
+        setOutput(index: i, value: value)
+    }
+    /// Index of an output by id or (user-visible) name, for resolving once before a hot loop.
+    public func outputIndex(_ idOrName: String) -> Int? { outputs.firstIndex { $0.id == idOrName } ?? outputs.firstIndex { $0.name == idOrName } }
+    /// Allocation-free output write (index into `outputs`). Used by evolution controllers every control tick.
+    public func setOutput(index i: Int, value: Double) {
+        guard i >= 0 && i < outputs.count else { return }
+        let v = clamp(value.isFinite ? value : 0, outputs[i].range.lowerBound, outputs[i].range.upperBound)
         outputs[i].value = v
-        if let pi = outputTargets[id] { parts[pi].out = v }
+        if let pi = outputTargetIndex(i) { parts[pi].out = v }
+    }
+    @inline(__always) func outputTargetIndex(_ i: Int) -> Int? {
+        if outputTargetCache.count != outputs.count { outputTargetCache = outputs.map { outputTargets[$0.id] ?? -1 } }
+        let t = outputTargetCache[i]; return t >= 0 ? t : nil
     }
 
     /// Replace a CAD part's aero mesh (body-local triangle soup, part frame) — used by the Craft importer.
@@ -176,6 +202,7 @@ public final class CraftSim: CraftSimulation {
                 var bb = AABB.empty; s.forEach { bb.expand($0) }; return (simd_max(bb.max - bb.min, Vec3d(repeating: 0.01)), bb.center)
             }
             return (Vec3d(repeating: 0.5), .zero)
+        case .sensor: return (Vec3d(repeating: 0.12), .zero)
         case nil: return (Vec3d(repeating: 0.2), .zero)
         }
     }
@@ -196,7 +223,7 @@ public final class CraftSim: CraftSimulation {
         var r = 0.5
         for p in parts {
             if let m = p.mesh { for t in m.tris { soup += [p.basePos + p.baseQ.act(t.0), p.basePos + p.baseQ.act(t.1), p.basePos + p.baseQ.act(t.2)] } }
-            else if p.type != .prop && p.type != .servo { soup += PanelMesh.boxSoup(center: p.basePos + p.baseQ.act(p.ctr), size: p.size, rotation: p.baseQ) }
+            else if p.type != .prop && p.type != .servo && p.type != .sensor { soup += PanelMesh.boxSoup(center: p.basePos + p.baseQ.act(p.ctr), size: p.size, rotation: p.baseQ) }
             r = max(r, simd_length(p.basePos) + simd_length(p.size) / 2)
         }
         boundingRadius = r
@@ -277,7 +304,31 @@ public final class CraftSim: CraftSimulation {
         updateMassProperties(keepOrigin: false)
         position = spawn.position + orientation.act(comLocal)
         velocity = .zero; angularMomentum = .zero; time = 0; stepCounter = 0
+        crashed = false; groundContact = false; maxImpactSpeed = 0; lastForce = .zero; noiseState = sensorNoiseSeed | 1
+        for i in parts.indices { parts[i].contact = false; parts[i].compression = 0 }
+        telemetry = CraftTelemetry()
         updateEffective()
+    }
+
+    /// Total number of part bounding-box corners (for preallocating `writeWorldCorners` buffers).
+    public var cornerCount: Int { var n = 0; for p in parts { n += p.corners.count }; return n }
+    /// Bounding radius of the craft about its CoM (m).
+    public var collisionRadius: Double { boundingRadius }
+    /// Writes world-space part corners into `out` (up to `capacity`); returns the count. Allocation-free.
+    public func writeWorldCorners(_ out: UnsafeMutablePointer<Vec3d>, capacity: Int) -> Int {
+        let q = orientation, origin = position - q.act(comLocal)
+        var n = 0
+        for p in parts where !p.corners.isEmpty {
+            let qp = q * p.effQ, op = origin + q.act(p.basePos)
+            for c in p.corners { if n >= capacity { return n }; out[n] = op + qp.act(c); n += 1 }
+        }
+        return n
+    }
+    /// Contact with a static headless obstacle (tree/prop/breakable). Headless obstacles have no contact
+    /// response, so any contact latches `crashed`; `impactSpeed` feeds maxImpactSpeed.
+    public func markObstacleHit(impactSpeed: Double) {
+        crashed = true
+        if impactSpeed > maxImpactSpeed { maxImpactSpeed = impactSpeed }
     }
 
     /// Set CoM linear velocity and world angular velocity (tests / spawning in flight).
@@ -359,45 +410,8 @@ public final class CraftSim: CraftSimulation {
         // --- wing strips
         if air && !strips.isEmpty {
             if stripCap < strips.count { stripBuf?.deallocate(); stripBuf = .allocate(capacity: strips.count); stripCap = strips.count }
+            runStrips(q: q, origin: origin, wW: wW, env: env, sos: atm.speedOfSound, rho: rho, nu: nu, wind: wind)
             let buf = stripBuf!
-            let partsCopy = parts, stripsCopy = strips, pos = position, vel = velocity
-            let terrain = env.terrain, time = env.time, sos = atm.speedOfSound
-            let eval: (Range<Int>) -> Void = { range in
-                for si in range {
-                    let st = stripsCopy[si], p = partsCopy[st.part]
-                    let qw = q * p.effQ
-                    let nrm = qw.act([0, 1, 0]), c = qw.act([1, 0, 0]), s = qw.act([0, 0, 1])
-                    let chord = p.p("chord")
-                    let pac = origin + q.act(p.basePos) + c * (chord * 0.25) + s * st.spanOffset
-                    let gh = terrain?.height(x: pac.x, z: pac.z) ?? 0
-                    let wl = wind.velocity(at: pac, heightAGL: pac.y - gh, time: time)
-                    var a3 = -(vel + simd_cross(wW, pac - pos) - wl)       // relative airflow
-                    a3 -= s * simd_dot(a3, s)
-                    let sp = simd_length(a3)
-                    if sp < 0.3 { buf[si] = StripResult(); continue }
-                    let alpha = atan2(simd_dot(a3, nrm), -simd_dot(a3, c))
-                    var flapDelta = 0.0
-                    if p.flapChord > 0, let sv = p.servo { flapDelta = partsCopy[sv].angle * (p.doc.invert ? -1 : 1) }
-                    let ge = Aero.groundEffect(height: pac.y - gh, span: max(2 * p.p("span"), chord))
-                    let wp = Aero.WingParams(aspectRatio: p.p("ar", 7), camberCl0: p.p("camber"), thicknessRatio: p.p("thick") / max(chord, 1e-3), flapChordFraction: p.flapChord)
-                    let co = Aero.wing(alpha: alpha, mach: sp / sos, reynolds: sp * chord / nu, params: wp, flapDeflection: flapDelta,
-                                       groundEffectInduced: ge.phi, groundLiftGain: ge.liftGain)
-                    let qS = 0.5 * rho * sp * sp * st.area
-                    let dd = a3 / sp
-                    let ld = simd_normalize(simd_cross(dd, s))
-                    let f = ld * (co.cl * qS) + dd * (co.cd * qS)
-                    let pcp = pac + c * (chord * (0.25 - co.centerOfPressure))
-                    var hinge = 0.0
-                    if p.servo != nil {
-                        if p.flapChord > 0 { let cf = p.flapChord * chord; hinge = abs(co.hingeCh) * 0.5 * rho * sp * sp * st.area * p.flapChord * cf }
-                        else { hinge = simd_length(f) * 0.12 * chord + abs(co.cl) * qS * 0.02 }   // prototype hinge-load model
-                    }
-                    buf[si] = StripResult(ft: ForceTorque(force: f, torque: simd_cross(pcp - pos, f)), hinge: hinge,
-                                          stalled: co.stalled, bigStall: co.stalled && p.p("span") * chord > 2)
-                }
-            }
-            if strips.count >= parallelThreshold { JobSystem.shared.parallelFor(strips.count, grain: 32, label: "physics.wings", eval) }
-            else { eval(0..<strips.count) }
             for si in 0..<strips.count {
                 let r = buf[si]; F += r.ft.force; T += r.ft.torque
                 if r.hinge > 0, let sv = parts[strips[si].part].servo { parts[sv].load += r.hinge }
@@ -504,6 +518,7 @@ public final class CraftSim: CraftSimulation {
             // Gains are per craft; split them across the corners currently penetrating so total
             // stiffness/damping does not scale with contact count (explicit stability: h*cB_tot/m <= 0.04).
             var nContact = 0
+            var anyContact = false
             for p in parts where !p.corners.isEmpty {
                 let qp = q * p.effQ, op = origin + q.act(p.basePos)
                 for c in p.corners { let pw = op + qp.act(c); if pw.y < groundHeight(env, pw.x, pw.z) { nContact += 1 } }
@@ -519,6 +534,9 @@ public final class CraftSim: CraftSimulation {
                     let pen = (gh - pw.y) * n.y
                     let vp = pointVel(pw)
                     let vn = simd_dot(vp, n)
+                    anyContact = true
+                    if -vn > maxImpactSpeed { maxImpactSpeed = -vn }
+                    if -vn > crashSpeed { crashed = true }
                     let N = max(0, pen * kB - vn * cB); if N <= 0 { continue }
                     let mu = env.terrain?.material(x: pw.x, z: pw.z).friction ?? 0.6
                     let vt = vp - n * vn, vts = simd_length(vt)
@@ -528,7 +546,7 @@ public final class CraftSim: CraftSimulation {
                 }
             }
             // --- wheels: suspension + Pacejka-lite tyre with implicit wheel-spin DOF
-            let nW = max(1, parts.filter { $0.type == .wheel }.count)
+            let nW = max(1, wheelCount)
             let kW = mass * kGravity / (Double(nW) * 0.08)
             let cW = 2 * 0.6 * (kW * mass / Double(nW)).squareRoot()
             for i in parts.indices where parts[i].type == .wheel {
@@ -585,8 +603,10 @@ public final class CraftSim: CraftSimulation {
                 }
                 if !contact { omega += h * motorT / Iw; omega *= (1 - 0.2 * h) }
                 parts[i].omega = omega; parts[i].contact = contact
+                if contact { anyContact = true }
                 parts[i].spinAngle = (parts[i].spinAngle + omega * h).truncatingRemainder(dividingBy: 2 * Double.pi)
             }
+            groundContact = anyContact
         }
 
         // --- buoyancy / hydrodynamics
@@ -614,6 +634,16 @@ public final class CraftSim: CraftSimulation {
 
         if massDirty && stepCounter % 10 == 0 { updateMassProperties(keepOrigin: true) }
         updateTelemetry(env: env, atm: atm, windHere: windHere, stalled: stalledCount, thrust: thrustTotal, ground: groundUnder)
+    }
+
+    /// Evaluate all wing strips into stripBuf. Separate method so the job's array references are released
+    /// before `parts` is mutated (otherwise copy-on-write would duplicate `parts` every substep).
+    @inline(never) func runStrips(q: Quatd, origin: Vec3d, wW: Vec3d, env: SimEnvironment, sos: Double, rho: Double, nu: Double, wind: WindField) {
+        let job = StripJob(buf: stripBuf!, parts: parts, strips: strips, q: q, origin: origin, wW: wW, pos: position, vel: velocity,
+                           terrain: env.terrain, time: env.time, sos: sos, rho: rho, nu: nu, wind: wind)
+        // Serial path calls the struct directly (no closure context allocation in the hot loop).
+        if strips.count >= parallelThreshold { JobSystem.shared.parallelFor(strips.count, grain: 32, label: "physics.wings") { job.run($0) } }
+        else { job.run(0..<strips.count) }
     }
 
     @inline(__always) static func rotate(_ q: Quatd, by w: Vec3d, dt: Double) -> Quatd {
@@ -652,5 +682,72 @@ public final class CraftSim: CraftSimulation {
     public var pitchDeg: Double { asin(clamp(heading.y, -1, 1)) / kDeg }
 }
 
+extension CraftSim {
+    /// Independent copy sharing nothing mutable (CAD panel meshes are deep-copied). Cheaper than `load`
+    /// (no JSON/param parsing, no hull rebuild). The copy keeps the current state; call `reset` as needed.
+    public func clone() -> CraftSim {
+        let c = CraftSim()
+        c.substepHz = substepHz; c.aeroEnabled = aeroEnabled; c.groundEnabled = groundEnabled
+        c.turbulence = turbulence; c.stripsPerWing = stripsPerWing; c.parallelThreshold = parallelThreshold
+        c.craft = craft; c.outputs = outputs; c.telemetry = telemetry
+        c.parts = parts
+        for i in c.parts.indices { if let m = c.parts[i].mesh { c.parts[i].mesh = m.deepCopy() } }
+        c.strips = strips; c.outputTargets = outputTargets; c.outputTargetCache = outputTargetCache
+        c.mass = mass; c.comLocal = comLocal; c.inertia = inertia; c.inertiaInv = inertiaInv
+        c.position = position; c.orientation = orientation; c.velocity = velocity; c.angularMomentum = angularMomentum
+        c.time = time; c.stepCounter = stepCounter; c.lastForce = lastForce
+        c.hull = hull; c.boundingRadius = boundingRadius
+        c.wheelCount = wheelCount; c.crashSpeed = crashSpeed; c.crashed = crashed; c.groundContact = groundContact
+        c.maxImpactSpeed = maxImpactSpeed
+        c.inputs = inputs; c.sensorSlots = sensorSlots; c.noiseState = noiseState; c.sensorNoiseSeed = sensorNoiseSeed
+        return c
+    }
+}
+
 /// Source compatibility with the architect's stub name (App wires `StubCraftSimulation()`).
 public typealias StubCraftSimulation = CraftSim
+
+/// Wing-strip evaluation context (value type so the serial path allocates nothing).
+struct StripJob {
+    let buf: UnsafeMutablePointer<StripResult>
+    let parts: [SimPart], strips: [WingStrip]
+    let q: Quatd, origin: Vec3d, wW: Vec3d, pos: Vec3d, vel: Vec3d
+    let terrain: (any TerrainProvider)?
+    let time: Double, sos: Double, rho: Double, nu: Double
+    let wind: WindField
+
+    func run(_ range: Range<Int>) {
+        for si in range {
+            let st = strips[si], p = parts[st.part]
+            let qw = q * p.effQ
+            let nrm = qw.act([0, 1, 0]), c = qw.act([1, 0, 0]), s = qw.act([0, 0, 1])
+            let chord = p.p("chord")
+            let pac = origin + q.act(p.basePos) + c * (chord * 0.25) + s * st.spanOffset
+            let gh = terrain?.height(x: pac.x, z: pac.z) ?? 0
+            let wl = wind.velocity(at: pac, heightAGL: pac.y - gh, time: time)
+            var a3 = -(vel + simd_cross(wW, pac - pos) - wl)       // relative airflow
+            a3 -= s * simd_dot(a3, s)
+            let sp = simd_length(a3)
+            if sp < 0.3 { buf[si] = StripResult(); continue }
+            let alpha = atan2(simd_dot(a3, nrm), -simd_dot(a3, c))
+            var flapDelta = 0.0
+            if p.flapChord > 0, let sv = p.servo { flapDelta = parts[sv].angle * (p.doc.invert ? -1 : 1) }
+            let ge = Aero.groundEffect(height: pac.y - gh, span: max(2 * p.p("span"), chord))
+            let wp = Aero.WingParams(aspectRatio: p.p("ar", 7), camberCl0: p.p("camber"), thicknessRatio: p.p("thick") / max(chord, 1e-3), flapChordFraction: p.flapChord)
+            let co = Aero.wing(alpha: alpha, mach: sp / sos, reynolds: sp * chord / nu, params: wp, flapDeflection: flapDelta,
+                               groundEffectInduced: ge.phi, groundLiftGain: ge.liftGain)
+            let qS = 0.5 * rho * sp * sp * st.area
+            let dd = a3 / sp
+            let ld = simd_normalize(simd_cross(dd, s))
+            let f = ld * (co.cl * qS) + dd * (co.cd * qS)
+            let pcp = pac + c * (chord * (0.25 - co.centerOfPressure))
+            var hinge = 0.0
+            if p.servo != nil {
+                if p.flapChord > 0 { let cf = p.flapChord * chord; hinge = abs(co.hingeCh) * 0.5 * rho * sp * sp * st.area * p.flapChord * cf }
+                else { hinge = simd_length(f) * 0.12 * chord + abs(co.cl) * qS * 0.02 }   // prototype hinge-load model
+            }
+            buf[si] = StripResult(ft: ForceTorque(force: f, torque: simd_cross(pcp - pos, f)), hinge: hinge,
+                                  stalled: co.stalled, bigStall: co.stalled && p.p("span") * chord > 2)
+        }
+    }
+}

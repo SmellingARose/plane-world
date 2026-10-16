@@ -66,6 +66,8 @@ public enum RenderSelfTests {
                 let url = dir.appendingPathComponent("pw-render-\(aa.rawValue).png")
                 writePNG(px, width: 640, height: 360, to: url)
                 ctx.log("\(aa): wrote \(url.path), GPU \(String(format: "%.2f", r.lastGPUTimeMs)) ms")
+                let pt = r.passTimesMs
+                ctx.log("  passes (ms): " + Renderer.timedPassNames.compactMap { n in pt[n].map { "\(n) " + String(format: "%.2f", $0) } }.joined(separator: ", "))
             }
         }
     }

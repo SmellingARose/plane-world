@@ -9,7 +9,9 @@ enum VegetationShaders {
 struct TreeInst { float4 posScale; float4 quat; uint tmpl; uint flags; float tint; float phase; };
 struct TreeTemplateGPU { float4 barkColor; float4 leafColor; float4 dims; uint4 lod0; uint4 lod1; uint4 region; };
 // dims: x bounding radius (unit scale), y height, z trunk radius, w species
-struct VegCull { float4 planes[6]; float4 camPos; float4 lodDist; uint4 counts; };
+struct VegCull { float4 planes[6]; float4 camPos; float4 lodDist; uint4 counts; float4x4 casc[3]; };
+// args per template: 5 indexed-indirect entries x5 uints (lod0, lod1, shadow c0, c1, c2); impostor block at T*25.
+// visible regions (stride N): 0 lod0, 1 lod1, 2..4 shadow cascade 0..2, 5 impostor
 // lodDist: x LOD0 max (per unit scale), y LOD1 max, z impostor max, w shadow caster distance
 // counts: x tree count, y template count, z total N (region stride), w unused
 constant int IMP_F = 8;
@@ -136,10 +138,18 @@ kernel void treeCull(device const TreeInst *trees [[buffer(0)]],
     float3 c = t.posScale.xyz - cu.camPos.xyz + float3(0.0, T.dims.y * 0.5 * s, 0.0);
     float r = T.dims.x * s;
     float d = length(c);
-    uint N = cu.counts.z, base = T.region.x, a5 = t.tmpl * 15u;
+    uint N = cu.counts.z, base = T.region.x, a5 = t.tmpl * 25u;
     if (d < cu.lodDist.w) {
-        uint slot = atomic_fetch_add_explicit(&args[a5 + 11u], 1u, memory_order_relaxed);
-        visible[2u * N + base + slot] = i;
+        // Per-cascade caster culling: test the bounding sphere against each cascade's ortho xy extent
+        // (depth is not culled: casters between the sun and the cascade must still be drawn).
+        for (uint k = 0u; k < 3u; k++) {
+            float4x4 m = cu.casc[k];
+            float4 q = m * float4(c, 1.0);
+            float sx = length(float3(m[0].x, m[1].x, m[2].x)), sy = length(float3(m[0].y, m[1].y, m[2].y));
+            if (fabs(q.x) > 1.0 + r * sx || fabs(q.y) > 1.0 + r * sy) continue;
+            uint slot = atomic_fetch_add_explicit(&args[a5 + 11u + 5u * k], 1u, memory_order_relaxed);
+            visible[(2u + k) * N + base + slot] = i;
+        }
     }
     for (int p = 0; p < 6; p++) if (dot(cu.planes[p].xyz, c) + cu.planes[p].w < -r) return;
     float ds = d / max(s, 0.3);
@@ -150,8 +160,8 @@ kernel void treeCull(device const TreeInst *trees [[buffer(0)]],
         uint slot = atomic_fetch_add_explicit(&args[a5 + 6u], 1u, memory_order_relaxed);
         visible[N + base + slot] = i;
     } else if (d < cu.lodDist.z) {
-        uint slot = atomic_fetch_add_explicit(&args[cu.counts.y * 15u + t.tmpl * 4u + 1u], 1u, memory_order_relaxed);
-        visible[3u * N + base + slot] = i;
+        uint slot = atomic_fetch_add_explicit(&args[cu.counts.y * 25u + t.tmpl * 4u + 1u], 1u, memory_order_relaxed);
+        visible[5u * N + base + slot] = i;
     }
 }
 

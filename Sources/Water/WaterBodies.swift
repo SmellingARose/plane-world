@@ -17,7 +17,7 @@ public struct Lake: Sendable {
 
     public init(center: Vec2d, radius: Double, level: Double) { self.center = center; self.radius = radius; self.level = level }
 
-    init(json: [String: JSONValue]) {
+    public init(json: [String: JSONValue]) {
         center = Vec2d(json["x"]?.double ?? 0, json["z"]?.double ?? 0)
         radius = json["radius"]?.double ?? 50
         level = json["level"]?.double ?? 0
@@ -70,7 +70,7 @@ public struct River: Sendable {
         controlPoints = points; self.width = width; self.speed = speed
         resample()
     }
-    init(json: [String: JSONValue]) {
+    public init(json: [String: JSONValue]) {
         var pts: [Vec3d] = []
         if case .array(let a)? = json["points"] {
             for p in a { if case .array(let c) = p, c.count >= 3, let x = c[0].double, let y = c[1].double, let z = c[2].double { pts.append(Vec3d(x, y, z)) } }
@@ -115,7 +115,7 @@ public struct River: Sendable {
     }
 
     /// Nearest centre-line point: (surface height, lateral distance, tangent) or nil if outside the channel.
-    func query(x: Double, z: Double) -> (height: Double, lateral: Double, tangent: Vec3d)? {
+    public func query(x: Double, z: Double) -> (height: Double, lateral: Double, tangent: Vec3d)? {
         guard samples.count >= 2, x >= bounds.min.x, x <= bounds.max.x, z >= bounds.min.z, z <= bounds.max.z else { return nil }
         let q = Vec2d(x, z)
         var best = Double.infinity, bh = 0.0, bt = Vec3d.zero
@@ -131,7 +131,7 @@ public struct River: Sendable {
         return lat <= width / 2 ? (bh, lat, bt) : nil
     }
 
-    func flow(x: Double, z: Double) -> Vec2d? {
+    public func flow(x: Double, z: Double) -> Vec2d? {
         guard let r = query(x: x, z: z) else { return nil }
         let s = r.lateral / (width / 2)
         let v = speed * max(0, 1 - s * s)     // parabolic cross-stream profile, centre-line = speed

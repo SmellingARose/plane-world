@@ -38,7 +38,7 @@ public final class EventBus: @unchecked Sendable {
 }
 
 // Common app-wide events (modules may define their own).
-public enum AppTab: String, CaseIterable, Sendable, Codable { case build = "BUILD", fly = "FLY", world = "WORLD" }
+public enum AppTab: String, CaseIterable, Sendable, Codable { case build = "BUILD", fly = "FLY", world = "WORLD", evolve = "EVOLVE" }
 public struct TabChangedEvent: AppEvent { public let tab: AppTab; public init(tab: AppTab) { self.tab = tab } }
 public struct CraftLoadedEvent: AppEvent { public let name: String; public init(name: String) { self.name = name } }
 public struct WorldLoadedEvent: AppEvent { public let name: String; public init(name: String) { self.name = name } }

@@ -28,6 +28,7 @@ public enum PartMeshFactory {
         case .tank: return transform(capsule(radius: f("r"), length: max(0.01, f("len") - 2 * f("r"))), rotZ90)
         case .solid: return transform(MeshBuilder.cylinder(radiusTop: f("r") * 0.8, radiusBottom: f("r"), height: f("len"), segments: 16), rotZ90)
         case .cad: return MeshBuilder.triangleSoup(Base64Floats.decode(part.cad ?? ""), scale: f("scale"))
+        case .sensor: return MeshBuilder.sphere(radius: 0.06)
         case nil: return MeshBuilder.box([0.2, 0.2, 0.2])
         }
     }

@@ -179,6 +179,21 @@ public struct CraftOutput: Sendable, Identifiable, Equatable {
     }
 }
 
+/// One named sensor channel (a craft "input"). Derived from `sensor` parts like outputs are derived from
+/// servo/motor/jet/solid parts. Controllers read inputs by `name` (unique within a craft) — see docs/EVOLUTION.md.
+public struct CraftInput: Sendable, Identifiable, Equatable {
+    public var id: String            // "<partID>" or "<partID>.<channel>"
+    public var name: String          // "<part name>" or "<part name>.<channel>" (what scripts use)
+    public var partID: String
+    public var kind: String          // sensor kind, e.g. "attitude"
+    public var channel: String       // e.g. "pitch" ("" for single-channel kinds)
+    public var unit: String          // "m", "m/s", "deg", "deg/s", "m/s2", "g", "0..1", "bool"
+    public var value: Double
+    public init(id: String, name: String, partID: String, kind: String, channel: String, unit: String, value: Double = 0) {
+        self.id = id; self.name = name; self.partID = partID; self.kind = kind; self.channel = channel; self.unit = unit; self.value = value
+    }
+}
+
 /// Environment the craft simulation needs each substep.
 public struct SimEnvironment {
     public var terrain: (any TerrainProvider)?

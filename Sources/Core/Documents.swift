@@ -9,10 +9,16 @@ import Foundation
 
 public enum PartType: String, Codable, Sendable, CaseIterable {
     case box, cylinder, cone, sphere, wing, servo, wheel, motor, prop, jet, tank, solid, cad
+    /// Measurement part (no aero/collision; small point mass). `p.kind` selects what it measures; its
+    /// channels appear in the craft's "inputs" list (see PWPhysics `CraftInputs`, docs/EVOLUTION.md).
+    case sensor
     /// Parts whose value is user-controlled in FLY (each becomes a named slider output).
     public var isOutput: Bool { [.servo, .motor, .jet, .solid].contains(self) }
-    /// Default parameters (prototype TYPES table).
-    public var defaults: (color: String, mass: Double, p: [String: JSONValue]) {
+    /// Default parameters (prototype TYPES table). Cached: `CraftPart.param` falls back to it in hot loops.
+    public var defaults: (color: String, mass: Double, p: [String: JSONValue]) { Self.defaultsTable[self]! }
+    private static let defaultsTable: [PartType: (color: String, mass: Double, p: [String: JSONValue])] =
+        Dictionary(uniqueKeysWithValues: allCases.map { ($0, $0.makeDefaults()) })
+    private func makeDefaults() -> (color: String, mass: Double, p: [String: JSONValue]) {
         func n(_ d: [String: Double]) -> [String: JSONValue] { d.mapValues { .number($0) } }
         switch self {
         case .box: return ("#d8dce2", 20, n(["sx": 1, "sy": 0.5, "sz": 0.5, "cd": 0.3]))
@@ -29,6 +35,10 @@ public enum PartType: String, Codable, Sendable, CaseIterable {
         case .tank: return ("#c9a24a", 20, n(["capacity": 200, "fill": 1, "r": 0.3, "len": 1.5]))
         case .solid: return ("#e0e0e0", 3, n(["thrust": 900, "burn": 4, "fuel": 10, "r": 0.1, "len": 0.8]))
         case .cad: return ("#a8c4e0", 20, n(["scale": 1, "cd": 0.3]))
+        case .sensor:
+            var p = n(["range": 200, "noise": 0, "tx": 0, "ty": 100, "tz": 0])
+            p["kind"] = .string("altitudeAGL"); p["dir"] = .string("down"); p["ref"] = .string("")
+            return ("#30c8ff", 0.05, p)
         }
     }
 }

@@ -99,6 +99,10 @@ final class MainViewController: NSViewController, NSToolbarDelegate, MTKViewDele
             model.tick(dt: dt)
             mtkView.applyKeyboard(dt: dt)
         }
+        // While EVOLVE trains (and nothing is being replayed), render at ~4 Hz so the cores go to training.
+        let idle = MainActor.assumeIsolated { model.tab == .evolve && model.evolve.isRunning && model.evolve.replay == nil }
+        if RenderThrottle.shared.idle != idle { RenderThrottle.shared.idle = idle }
+        guard RenderThrottle.shared.shouldRender() else { return }
         guard let renderer, let drawable = view.currentDrawable else { return }
         let cam = MainActor.assumeIsolated { model.camera.camera }
         let t = MainActor.assumeIsolated { model.services.clock.simTime }

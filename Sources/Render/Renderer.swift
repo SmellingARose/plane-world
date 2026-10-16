@@ -20,6 +20,17 @@ public struct RenderSettings: Sendable {
     public var shadowResolution = 2048
     public var aerialPerspectiveScale: Float = 1
     public var sunIlluminance: Float = 12
+    /// Shadow-map depth bias (constant, slope-scaled, clamp). Raise to remove acne/flicker on large flat receivers.
+    /// Cheap analytic sun transmittance + exponential fog instead of per-pixel atmosphere ray-marching.
+    public var fastAtmosphere = false
+    public var fogPerKm: Float = 0.3
+    public var fogColor: Vec3 = [0.035, 0.05, 0.07]
+    public var shadowBias: Float = 1.0, shadowSlopeBias: Float = 2.0, shadowBiasClamp: Float = 0.01
+    /// Far-cascade caching: cascades 2 and 3 are re-rendered on alternating frames (each every 2nd frame) and the
+    /// cached map is re-based to the current camera origin. Halves far-shadow cost; invisible at normal flight speeds.
+    public var cacheFarCascades = true
+    /// Per-pass GPU timestamps (MTLCounterSampleBuffer, stage-boundary sampling). Results in `Renderer.passTimesMs`.
+    public var passTimings = true
     public init() {}
 }
 
@@ -113,6 +124,22 @@ public final class Renderer {
     private let skyLUT: any MTLTexture
     private var lineBuffer: (any MTLBuffer)?
 
+    // Far-cascade cache (matrices are camera-relative; stored with the camera position they were built at).
+    private var cachedCascade: [Mat4] = Array(repeating: .identity, count: 4)
+    private var cachedCascadePos: [Vec3d] = Array(repeating: .zero, count: 4)
+    private var cascadeValid = [false, false, false, false]
+    private var lastSun = Vec3d.zero, lastShadowDistance: Float = 0
+
+    // Per-pass GPU timing.
+    private static let passNames = ["skyLUT", "shadow0", "shadow1", "shadow2", "shadow3", "hdr", "taa", "bloom", "tonemap"]
+    private var counterBuffer: (any MTLCounterSampleBuffer)?
+    private let timingLock = NSLock()
+    private var _passTimesMs: [String: Double] = [:]
+    /// Last completed frame's GPU time per pass (ms). Passes skipped that frame (cached cascades) are absent.
+    public var passTimesMs: [String: Double] { timingLock.lock(); defer { timingLock.unlock() }; return _passTimesMs }
+    /// Ordered pass names for display.
+    public static var timedPassNames: [String] { passNames }
+
     public init(device: any MTLDevice, queue: any MTLCommandQueue, outputFormat: MTLPixelFormat = .bgra8Unorm_srgb, registry: RenderRegistry = .shared) throws {
         self.device = device; self.queue = queue; self.outputFormat = outputFormat; self.registry = registry
         pipelines = try StandardPipelines(device: device, sampleCount: 1, outputFormat: outputFormat)
@@ -126,6 +153,47 @@ public final class Renderer {
         let ld = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: 256, height: 128, mipmapped: false)
         ld.usage = [.shaderRead, .shaderWrite]; ld.storageMode = .private
         skyLUT = device.makeTexture(descriptor: ld)!; skyLUT.label = "skyViewLUT"
+        if device.supportsCounterSampling(.atStageBoundary),
+           let set = device.counterSets?.first(where: { $0.name == MTLCommonCounterSet.timestamp.rawValue }) {
+            let d = MTLCounterSampleBufferDescriptor()
+            d.counterSet = set; d.storageMode = .shared
+            d.sampleCount = 3 * Self.passNames.count * 2
+            counterBuffer = try? device.makeCounterSampleBuffer(descriptor: d)
+        }
+    }
+
+    private func sampleBase(_ slot: Int, _ pass: Int) -> Int { (slot * Self.passNames.count + pass) * 2 }
+
+    private func attachTiming(_ rp: MTLRenderPassDescriptor, slot: Int, pass: Int) {
+        guard settings.passTimings, let cb = counterBuffer else { return }
+        let a = rp.sampleBufferAttachments[0]!
+        a.sampleBuffer = cb
+        a.startOfVertexSampleIndex = sampleBase(slot, pass); a.endOfVertexSampleIndex = MTLCounterDontSample
+        a.startOfFragmentSampleIndex = MTLCounterDontSample; a.endOfFragmentSampleIndex = sampleBase(slot, pass) + 1
+    }
+
+    private func computeEncoder(_ cb: any MTLCommandBuffer, slot: Int, pass: Int) -> (any MTLComputeCommandEncoder)? {
+        guard settings.passTimings, let ctr = counterBuffer else { return cb.makeComputeCommandEncoder() }
+        let d = MTLComputePassDescriptor()
+        let a = d.sampleBufferAttachments[0]!
+        a.sampleBuffer = ctr
+        a.startOfEncoderSampleIndex = sampleBase(slot, pass); a.endOfEncoderSampleIndex = sampleBase(slot, pass) + 1
+        return cb.makeComputeCommandEncoder(descriptor: d)
+    }
+
+    private func resolveTimings(slot: Int, used: [Bool]) {
+        guard let ctr = counterBuffer else { return }
+        let n = Self.passNames.count
+        guard let data = try? ctr.resolveCounterRange(sampleBase(slot, 0)..<sampleBase(slot, 0) + 2 * n) else { return }
+        var out: [String: Double] = [:]
+        data.withUnsafeBytes { raw in
+            let ts = raw.bindMemory(to: MTLCounterResultTimestamp.self)
+            for p in 0..<n where used[p] && 2 * p + 1 < ts.count {
+                let a = ts[2 * p].timestamp, b = ts[2 * p + 1].timestamp
+                if a != MTLCounterErrorValue, b != MTLCounterErrorValue, b >= a { out[Self.passNames[p]] = Double(b - a) / 1e6 }  // Apple GPU ticks are ns
+            }
+        }
+        timingLock.lock(); _passTimesMs = out; timingLock.unlock()
     }
 
     // MARK: Sun
@@ -255,7 +323,21 @@ public final class Renderer {
         u.invViewProj = u.viewProj.inverse
         let shift = (camera.position - prevCameraPos).float           // re-base previous frame to current origin
         u.prevViewProj = historyValid ? prevViewProj * Mat4(translation: shift) : u.viewProjNoJitter
-        let (cascades, splits) = computeCascades(camera: camera, aspect: aspect, sun: sun)
+        var (cascades, splits) = computeCascades(camera: camera, aspect: aspect, sun: sun)
+        if simd_distance(sun, lastSun) > 1e-4 || settings.shadowDistance != lastShadowDistance || !settings.cacheFarCascades {
+            cascadeValid = [false, false, false, false]; lastSun = sun; lastShadowDistance = settings.shadowDistance
+        }
+        var renderCascade = [true, true, true, true]
+        for c in 2..<4 {
+            let due = (frameIndex % 2) == (c - 2)
+            if settings.cacheFarCascades && cascadeValid[c] && !due {
+                // Re-base the cached (camera-relative) matrix to the current camera origin.
+                cascades[c] = cachedCascade[c] * Mat4(translation: (camera.position - cachedCascadePos[c]).float)
+                renderCascade[c] = false
+            } else {
+                cachedCascade[c] = cascades[c]; cachedCascadePos[c] = camera.position; cascadeValid[c] = true
+            }
+        }
         u.cascadeViewProj = (cascades[0], cascades[1], cascades[2], cascades[3])
         u.cascadeSplits = splits
         u.cameraWorld = Vec4(camera.position.float, Float(max(camera.position.y, 1)))
@@ -265,6 +347,8 @@ public final class Renderer {
         u.resolution = Vec4(Float(size.x), Float(size.y), 1 / Float(size.x), 1 / Float(size.y))
         u.atmos = Vec4(settings.aerialPerspectiveScale * Float(environment.fogDensity), settings.shadowDistance, Float(frameIndex), settings.bloomStrength)
         u.cameraForward = Vec4(camera.forward.float, camera.near)
+        u.quality = Vec4(settings.fastAtmosphere ? 1 : 0, settings.fogPerKm, 0, 0)
+        u.fogColor = Vec4(settings.fogColor, 0)
         let wa = environment.windDirectionDeg * kDeg
         u.wind = Vec4(Float(sin(wa) * environment.windSpeed), 0, Float(cos(wa) * environment.windSpeed), Float(time))
         let uOff = slot * uniformStride
@@ -278,7 +362,9 @@ public final class Renderer {
         for r in renderables { r.prepare(ctx) }
 
         // ---- 1. sky-view LUT
-        if let ce = cb.makeComputeCommandEncoder() {
+        var used = [Bool](repeating: false, count: Self.passNames.count)
+        if let ce = computeEncoder(cb, slot: slot, pass: 0) {
+            used[0] = true
             ce.label = "skyLUT"
             ce.setComputePipelineState(pipelines.skyLUT)
             ce.setTexture(skyLUT, index: 0)
@@ -288,14 +374,15 @@ public final class Renderer {
         }
 
         // ---- 2. shadows
-        for c in 0..<4 {
+        for c in 0..<4 where renderCascade[c] {
             let rp = MTLRenderPassDescriptor()
+            attachTiming(rp, slot: slot, pass: 1 + c); used[1 + c] = true
             rp.depthAttachment.texture = shadowMap; rp.depthAttachment.slice = c
             rp.depthAttachment.loadAction = .clear; rp.depthAttachment.clearDepth = 1; rp.depthAttachment.storeAction = .store
             guard let e = cb.makeRenderCommandEncoder(descriptor: rp) else { continue }
             e.label = "shadow\(c)"
             e.setDepthStencilState(pipelines.depthShadow)
-            e.setDepthBias(1.0, slopeScale: 2.0, clamp: 0.01)
+            e.setDepthBias(settings.shadowBias, slopeScale: settings.shadowSlopeBias, clamp: settings.shadowBiasClamp)
             e.setCullMode(.none)
             for r in renderables {
                 e.setRenderPipelineState(pipelines.shadow)
@@ -316,6 +403,7 @@ public final class Renderer {
         rp.depthAttachment.texture = depth
         rp.depthAttachment.loadAction = .clear; rp.depthAttachment.clearDepth = 0
         rp.depthAttachment.storeAction = msaa ? .dontCare : .store
+        attachTiming(rp, slot: slot, pass: 5); used[5] = true
         if let e = cb.makeRenderCommandEncoder(descriptor: rp) {
             e.label = "hdr"
             // Sky (no depth write, drawn first behind everything).
@@ -343,7 +431,8 @@ public final class Renderer {
 
         // ---- 4. TAA
         var resolved: any MTLTexture = hdr
-        if useTAA, !msaa, let ce = cb.makeComputeCommandEncoder() {
+        if useTAA, !msaa, let ce = computeEncoder(cb, slot: slot, pass: 6) {
+            used[6] = true
             ce.label = "taa"
             let src = history[frameIndex % 2], dst = history[(frameIndex + 1) % 2]
             ce.setComputePipelineState(pipelines.taa)
@@ -357,7 +446,8 @@ public final class Renderer {
         } else { historyValid = false }
 
         // ---- 5. bloom
-        if let ce = cb.makeComputeCommandEncoder() {
+        if let ce = computeEncoder(cb, slot: slot, pass: 7) {
+            used[7] = true
             ce.label = "bloom"
             var src: any MTLTexture = resolved
             for (i, v) in bloomViews.enumerated() {
@@ -381,6 +471,7 @@ public final class Renderer {
         // ---- 6. tonemap
         let tp = MTLRenderPassDescriptor()
         tp.colorAttachments[0].texture = output; tp.colorAttachments[0].loadAction = .dontCare; tp.colorAttachments[0].storeAction = .store
+        attachTiming(tp, slot: slot, pass: 8); used[8] = true
         if let e = cb.makeRenderCommandEncoder(descriptor: tp) {
             e.label = "tonemap"
             e.setRenderPipelineState(pipelines.tonemap)
@@ -388,6 +479,10 @@ public final class Renderer {
             e.setFragmentTexture(resolved, index: 0); e.setFragmentTexture(bloomViews.first ?? bloom, index: 1)
             e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             e.endEncoding()
+        }
+        if settings.passTimings, counterBuffer != nil {
+            let usedNow = used
+            cb.addCompletedHandler { [weak self] _ in self?.resolveTimings(slot: slot, used: usedNow) }
         }
         present?(cb)
         cb.commit()

@@ -7,6 +7,7 @@ import SwiftUI
 import Metal
 import simd
 import PWCore
+import PWEvolution
 import PWRender
 import PWPhysics
 import PWCollision
@@ -48,6 +49,7 @@ final class AppModel: ObservableObject {
     @Published var library: [CraftDocument] = []
     @Published var selectedPartID: String?
     @Published var outputs: [CraftOutput] = []
+    @Published var inputs: [CraftInput] = []
     @Published var environment = EnvironmentSpec() { didSet { services.environment = environment; renderer?.environment = environment } }
     @Published var renderSettings = RenderSettings() { didSet { renderer?.settings = renderSettings } }
     @Published var world = WorldDocument(name: "Untitled world")
@@ -108,6 +110,8 @@ final class AppModel: ObservableObject {
     var vegRenderable: VegetationRenderable?
     let collision = RigidWorld()
     let sim = CraftSim()
+    /// EVOLVE tab state (evolve-ui builder).
+    lazy var evolve: EvolveModel = MainActor.assumeIsolated { EvolveModel() }
     var importedPropMesh: TriMesh?
     var objects: [PlacedObject] = []
     var outputNameOverrides: [String: String] = [:]
@@ -115,6 +119,10 @@ final class AppModel: ObservableObject {
     private var treeGrid: [Int64: [Int]] = [:]       // spatial hash of trunk proxies (40 m cells)
     private var treeProxies: [Int: (pos: Vec3d, radius: Double, breakImpulse: Double)] = [:]
     private var collisionAccum = 0.0
+    /// Evolved controller flying the FLY craft (set by EvolveModel.setAutopilot); ticked before each sim substep.
+    var activeAutopilot: EvolvedAutopilot?
+    /// PW_LOG_STATS=1 prints the HUD stats line (fps, GPU ms, sim ms) to stdout, for headless fps measurement.
+    static let logStats = ProcessInfo.processInfo.environment["PW_LOG_STATS"] != nil
     private let collisionHz = 240.0
     private var nextPartID = 1000
 
@@ -664,6 +672,7 @@ final class AppModel: ObservableObject {
             _ = measure("sim.frame") {
                 s.clock.advance(realDelta: dt) { h in
                     let env = s.makeEnvironment()
+                    self.activeAutopilot?.update(sim: self.sim, env: env, dt: h)
                     self.sim.step(dt: h, env: env)
                     self.water.step(dt: h, time: s.clock.simTime)
                     self.collisionAccum += h
@@ -690,6 +699,7 @@ final class AppModel: ObservableObject {
         if statAccum > 0.2 {
             statAccum = 0
             telemetry = sim.telemetry
+            if tab == .fly { sim.updateInputValues(env: s.makeEnvironment()); inputs = sim.inputs }
             let t = telemetry
             let alt = sim.bodyState.centerOfMass.y
             let rho = Atmosphere.isa(altitude: alt).density
@@ -708,6 +718,7 @@ final class AppModel: ObservableObject {
             let js = JobSystem.shared.stats.snapshot()
             stats = String(format: "%.0f fps · GPU %.2f ms · sim %.2f ms · %d bodies · %d trees · %d threads",
                            1 / max(dt, 1e-6), renderer?.lastGPUTimeMs ?? 0, js["sim.frame"] ?? 0, collision.bodyCount(), vegetation.aliveTreeCount, JobSystem.shared.threadCount)
+            if Self.logStats { print("[stats] \(tab.rawValue) \(stats)"); fflush(stdout) }
         }
     }
 

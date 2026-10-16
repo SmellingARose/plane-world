@@ -153,6 +153,8 @@ public enum VegetationSelfTests {
             for k in 0..<20 { veg.interact(at: [Double(k) * 1.5 + 4, 10, -2], radius: 1.2, impulse: [0, 0, 0]) }
             let withVeg = avgGPU(frames: 16)
             let c = vr.lastCounts
+            let pt = r.passTimesMs
+            ctx.log("passes (ms): " + Renderer.timedPassNames.compactMap { n in pt[n].map { "\(n) " + String(format: "%.2f", $0) } }.joined(separator: ", "))
             ctx.expect(c.lod0 + c.lod1 + c.impostor > 100, "trees visible (\(c))")
             ctx.expect(c.grass > 10_000, "grass blades generated (\(c.grass))")
             ctx.log(String(format: "impostor bake %.0f ms for %d templates", vr.impostorBakeMs, veg.templates.count))

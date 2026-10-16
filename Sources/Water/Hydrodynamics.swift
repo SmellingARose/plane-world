@@ -30,11 +30,11 @@ struct HydroPartial {
     var splashPos = Vec3d.zero, splashVel = Vec3d.zero, splashWeight = 0.0
 }
 
-enum Hydrodynamics {
+public enum Hydrodynamics {
     /// - Parameters:
     ///   - heightAt: water surface height at world x,z (thread-safe).
     ///   - waterVelocity: water velocity at a world point (current + orbital).
-    static func compute(hull: HullMesh, state: BodyState, density rho: Double, gravity g: Double,
+    public static func compute(hull: HullMesh, state: BodyState, density rho: Double, gravity g: Double,
                         settings: HydroSettings, heightAt: @escaping (Double, Double) -> Double,
                         waterVelocity: Vec3d,
                         jobs: JobSystem = .shared) -> (ForceTorque, volume: Double, wetted: Double, splash: (Vec3d, Vec3d, Double)?) {

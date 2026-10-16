@@ -15,7 +15,6 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .executable(name: "PlaneWorld", targets: ["PlaneWorld"]),
-        .executable(name: "GermWar", targets: ["GermWar"]),
     ],
     targets: [
         .target(name: "PWCore", path: "Sources/Core", swiftSettings: common),
@@ -26,17 +25,14 @@ let package = Package(
         .target(name: "PWVegetation", dependencies: ["PWCore", "PWRender"], path: "Sources/Vegetation", swiftSettings: common),
         .target(name: "PWWater", dependencies: ["PWCore", "PWRender"], path: "Sources/Water", swiftSettings: common),
         .target(name: "PWCraft", dependencies: ["PWCore", "PWRender", "PWPhysics"], path: "Sources/Craft", swiftSettings: common),
+        // Evolution workbench (EVOLVE tab): headless world, evaluators, algorithms, JavaScriptCore scripting.
+        .target(name: "PWEvolution", dependencies: ["PWCore", "PWPhysics", "PWCollision", "PWTerrain", "PWWater", "PWVegetation"], path: "Sources/Evolution",
+                swiftSettings: common, linkerSettings: [.linkedFramework("JavaScriptCore")]),
         .executableTarget(
             name: "PlaneWorld",
-            dependencies: ["PWCore", "PWRender", "PWPhysics", "PWCollision", "PWTerrain", "PWVegetation", "PWWater", "PWCraft"],
+            dependencies: ["PWCore", "PWRender", "PWPhysics", "PWCollision", "PWTerrain", "PWVegetation", "PWWater", "PWCraft", "PWEvolution"],
             path: "Sources/App",
             resources: [.copy("Resources/Crafts")],
-            swiftSettings: common),
-        .executableTarget(
-            name: "GermWar",
-            dependencies: ["PWCore", "PWRender"],
-            path: "Sources/GermWar",
-            resources: [.copy("mods")],
             swiftSettings: common),
         .testTarget(name: "CoreTests", dependencies: ["PWCore"], path: "Tests/CoreTests", swiftSettings: common),
     ],

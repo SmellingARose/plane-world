@@ -1,0 +1,36 @@
+experiment 'Hold 100 m - MAP-Elites (final x, final altitude)'  algorithm map-elites  genes 172  population 64  workers 10  episode 40.0s x1  world flat
+terms: speed, track, hold, level, crash   out: /tmp/pw-runs/d-me
+gen    0  best      4.647  mean      1.229  median      1.150  fail   0     7.2 sims/s    213.6 sim-s/s  [speed=5.14 track=0.44 hold=0.00 level=-0.94 crash=0.00] coverage=2.0%
+gen    1  best      5.128  mean      2.770  median      3.423  fail   0     6.6 sims/s    195.4 sim-s/s  [speed=5.00 track=0.39 hold=0.00 level=-0.26 crash=0.00] coverage=2.3%
+gen    2  best      5.367  mean      3.682  median      4.234  fail   0     5.0 sims/s    148.3 sim-s/s  [speed=6.58 track=0.39 hold=0.00 level=-1.60 crash=0.00] coverage=2.3%
+gen    3  best      5.859  mean      1.366  median      4.102  fail   0     5.2 sims/s    150.0 sim-s/s  [speed=5.96 track=0.39 hold=0.00 level=-0.49 crash=0.00] coverage=2.3%
+gen    4  best      7.673  mean      2.766  median      4.243  fail   0     5.0 sims/s    147.1 sim-s/s  [speed=7.99 track=1.90 hold=0.00 level=-2.21 crash=0.00] coverage=2.3%
+gen    5  best      6.514  mean      3.722  median      4.669  fail   0     5.2 sims/s    154.5 sim-s/s  [speed=6.76 track=0.39 hold=0.00 level=-0.64 crash=0.00] coverage=2.3%
+gen    6  best     10.894  mean      2.965  median      4.659  fail   0     5.4 sims/s    161.6 sim-s/s  [speed=8.99 track=3.61 hold=0.00 level=-1.70 crash=0.00] coverage=3.0%
+gen    7  best      9.940  mean      3.070  median      4.730  fail   0     5.7 sims/s    168.8 sim-s/s  [speed=9.82 track=3.04 hold=0.00 level=-2.92 crash=0.00] coverage=3.7%
+gen    8  best     15.483  mean      3.105  median      4.984  fail   0     6.8 sims/s    203.3 sim-s/s  [speed=9.24 track=10.10 hold=0.00 level=-3.86 crash=0.00] coverage=4.7%
+gen    9  best     15.605  mean      3.335  median      5.035  fail   0     6.9 sims/s    212.0 sim-s/s  [speed=9.24 track=8.06 hold=0.00 level=-1.70 crash=0.00] coverage=5.3%
+gen   10  best     16.363  mean      4.945  median      4.710  fail   0     6.2 sims/s    198.2 sim-s/s  [speed=8.56 track=11.49 hold=0.00 level=-3.69 crash=0.00] coverage=6.7%
+gen   11  best     13.510  mean      3.839  median      4.643  fail   0     5.9 sims/s    191.2 sim-s/s  [speed=8.78 track=5.91 hold=0.00 level=-1.18 crash=0.00] coverage=8.0%
+gen   12  best     15.489  mean      4.482  median      5.500  fail   0     6.5 sims/s    209.4 sim-s/s  [speed=8.39 track=9.89 hold=0.00 level=-2.79 crash=0.00] coverage=9.7%
+gen   13  best     16.608  mean      5.159  median      5.496  fail   0     6.6 sims/s    217.7 sim-s/s  [speed=7.86 track=9.91 hold=1.44 level=-2.60 crash=0.00] coverage=10.7%
+gen   14  best     16.679  mean      4.735  median      5.840  fail   0     6.7 sims/s    215.9 sim-s/s  [speed=9.55 track=10.58 hold=0.00 level=-3.45 crash=0.00] coverage=11.3%
+gen   15  best     18.219  mean      4.145  median      5.426  fail   0     6.9 sims/s    224.9 sim-s/s  [speed=8.93 track=9.83 hold=0.00 level=-0.54 crash=0.00] coverage=12.0%
+gen   16  best     18.183  mean      5.531  median      5.601  fail   0     7.3 sims/s    243.1 sim-s/s  [speed=9.16 track=11.82 hold=0.00 level=-2.80 crash=0.00] coverage=12.3%
+gen   17  best     19.324  mean      6.722  median      6.434  fail   0     6.4 sims/s    219.3 sim-s/s  [speed=8.39 track=12.70 hold=0.00 level=-1.77 crash=0.00] coverage=13.3%
+gen   18  best     17.678  mean      3.889  median      5.101  fail   0     6.6 sims/s    215.8 sim-s/s  [speed=8.53 track=11.19 hold=0.00 level=-2.03 crash=0.00] coverage=13.7%
+gen   19  best     22.696  mean      8.269  median      6.603  fail   0     6.9 sims/s    235.8 sim-s/s  [speed=8.18 track=13.84 hold=3.58 level=-2.90 crash=0.00] coverage=14.7%
+gen   20  best     21.884  mean      7.276  median      9.569  fail   0     6.4 sims/s    223.0 sim-s/s  [speed=8.30 track=13.54 hold=0.78 level=-0.74 crash=0.00] coverage=15.0%
+gen   21  best     23.775  mean      9.658  median      9.828  fail   0     6.3 sims/s    223.6 sim-s/s  [speed=8.01 track=14.45 hold=4.16 level=-2.84 crash=0.00] coverage=15.7%
+gen   22  best     25.741  mean      9.656  median     10.771  fail   0     6.2 sims/s    220.1 sim-s/s  [speed=8.21 track=14.92 hold=4.92 level=-2.31 crash=0.00] coverage=16.3%
+gen   23  best     29.413  mean      8.392  median      6.273  fail   0     6.2 sims/s    212.8 sim-s/s  [speed=7.86 track=16.66 hold=6.90 level=-2.01 crash=0.00] coverage=17.0%
+gen   24  best     28.676  mean      6.670  median      5.690  fail   0     6.2 sims/s    211.9 sim-s/s  [speed=8.07 track=15.62 hold=6.28 level=-1.30 crash=0.00] coverage=17.7%
+gen   25  best     29.219  mean     11.558  median     13.058  fail   0     6.0 sims/s    216.4 sim-s/s  [speed=7.86 track=16.16 hold=5.56 level=-0.37 crash=0.00] coverage=19.0%
+gen   26  best     24.676  mean     11.124  median     13.136  fail   0     5.9 sims/s    215.4 sim-s/s  [speed=8.48 track=14.57 hold=3.02 level=-1.39 crash=0.00] coverage=19.0%
+gen   27  best     29.415  mean     10.706  median     12.706  fail   0     5.6 sims/s    200.1 sim-s/s  [speed=7.80 track=17.53 hold=5.26 level=-1.17 crash=0.00] coverage=19.3%
+gen   28  best     30.905  mean     10.053  median     13.189  fail   0     5.9 sims/s    208.4 sim-s/s  [speed=7.96 track=16.41 hold=7.06 level=-0.53 crash=0.00] coverage=19.7%
+gen   29  best     28.811  mean      9.265  median      9.488  fail   0     5.7 sims/s    198.0 sim-s/s  [speed=8.51 track=16.37 hold=5.10 level=-1.17 crash=0.00] coverage=19.7%
+best overall: gen 28 fitness 30.905  -> /tmp/pw-runs/d-me/best-craft.json
+best descriptor: ["888.484", "105.492"]
+archive coverage 19.7%
+total wall 314.6 s

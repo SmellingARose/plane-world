@@ -63,6 +63,8 @@ public struct FrameUniforms {
     public var atmos = Vec4(1, 2000, 0, 0.04)
     public var cameraForward = Vec4(0, 0, -1, 0.1)
     public var wind = Vec4.zero
+    public var quality = Vec4.zero      // x fast atmosphere, y fog per km
+    public var fogColor = Vec4.zero
     public init() {}
 }
 

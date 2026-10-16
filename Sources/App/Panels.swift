@@ -6,6 +6,7 @@ import PWCore
 import PWRender
 import PWCraft
 import PWCollision
+import PWPhysics
 
 struct SidePanel: View {
     @EnvironmentObject var model: AppModel
@@ -16,6 +17,7 @@ struct SidePanel: View {
                 case .build: BuildPanel()
                 case .fly: FlyPanel()
                 case .world: WorldPanel()
+                case .evolve: EvolvePanel()
                 }
                 if !model.status.isEmpty {
                     Divider()
@@ -113,6 +115,18 @@ struct BuildPanel: View {
                 Text("\(o.kind.rawValue) · \(o.info)").font(.caption2).foregroundStyle(.secondary)
             }
         }
+        SectionHeader(title: "Inputs (auto, from sensors)")
+        let ins = CraftInputs.list(model.craft)
+        if ins.isEmpty { Text("No sensors. Add a 'sensor' part; each sensor adds named inputs that controllers read.").font(.caption2).foregroundStyle(.secondary) }
+        ForEach(ins) { i in
+            HStack {
+                Text(i.name).font(.caption.bold()).lineLimit(1)
+                Spacer()
+                Text("\(i.kind) · \(i.unit)").font(.caption2).foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { model.selectedPartID = i.partID }
+        }
         Text("Viewport: click = select part · ⇧-drag = move · ⌘-drag = rotate · right-drag = orbit").font(.caption2).foregroundStyle(.tertiary)
     }
 }
@@ -138,9 +152,10 @@ struct PartInspector: View {
                     TextField("", value: Binding(get: { p.param(k) }, set: { v in model.updateSelected { $0.p[k] = .number(v) } }), format: .number)
                 }
             }
+            if p.partType == .sensor { SensorInspector(part: p) }
             let servos = model.craft.parts.filter { $0.type == "servo" && $0.id != p.id }
             let motors = model.craft.parts.filter { $0.type == "motor" && $0.id != p.id }
-            if p.type != "servo" {
+            if p.type != "servo" && p.type != "sensor" {
                 Picker("Servo link", selection: Binding(get: { p.servo ?? "" }, set: { v in model.updateSelected { $0.servo = v.isEmpty ? nil : v } })) {
                     Text("—").tag(""); ForEach(servos) { s in Text(s.name).tag(s.id) }
                 }
@@ -162,6 +177,35 @@ struct PartInspector: View {
             LabeledSlider(label: "Offset", value: $model.cutOffset, range: -5...5, format: "%.2f m")
             Button("Cut selected part") { model.cutSelected() }
         }
+    }
+}
+
+/// Sensor configuration: kind, ray direction, referenced part. Numeric params (range, noise, tx/ty/tz) are
+/// edited in the generic param rows above.
+struct SensorInspector: View {
+    @EnvironmentObject var model: AppModel
+    let part: CraftPart
+    var body: some View {
+        let kind = SensorKind(rawValue: part.paramString("kind", "altitudeAGL")) ?? .altitudeAGL
+        Picker("Measures", selection: Binding(get: { kind.rawValue }, set: { v in model.updateSelected { $0.p["kind"] = .string(v) } })) {
+            ForEach(SensorKind.allCases, id: \.rawValue) { k in Text(k.rawValue).tag(k.rawValue) }
+        }
+        Text(kind.summary + " → " + kind.channels.map { $0.name.isEmpty ? part.name : part.name + "." + $0.name }.joined(separator: ", "))
+            .font(.caption2).foregroundStyle(.secondary)
+        if kind == .raycast {
+            Picker("Direction", selection: Binding(get: { part.paramString("dir", "down") }, set: { v in model.updateSelected { $0.p["dir"] = .string(v) } })) {
+                ForEach(["down", "forward", "back", "up", "left", "right"], id: \.self) { Text($0).tag($0) }
+            }
+            Text("Direction is in the sensor part's frame (rotate the part to aim it).").font(.caption2).foregroundStyle(.tertiary)
+        }
+        if kind == .servoAngle || kind == .wheelSpeed {
+            let t = kind == .servoAngle ? "servo" : "wheel"
+            let cands = model.craft.parts.filter { $0.type == t }
+            Picker("Part", selection: Binding(get: { part.paramString("ref", "") }, set: { v in model.updateSelected { $0.p["ref"] = .string(v) } })) {
+                Text("— (first \(t))").tag(""); ForEach(cands) { c in Text(c.name).tag(c.id) }
+            }
+        }
+        if kind == .target { Text("Target point: tx, ty, tz (world metres).").font(.caption2).foregroundStyle(.tertiary) }
     }
 }
 
@@ -189,6 +233,7 @@ struct VecRow: View {
 struct FlyPanel: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
+        EvolvedAutopilotToggle()
         SectionHeader(title: "Outputs — \(model.craft.name)")
         if model.outputs.isEmpty { Text("This craft has no outputs.").foregroundStyle(.secondary) }
         ForEach(model.outputs) { o in
@@ -196,6 +241,12 @@ struct FlyPanel: View {
                 HStack { Text(o.name).bold(); Spacer(); Text(String(format: "%+.2f", o.value)).monospacedDigit().foregroundStyle(Color.accentColor) }
                 Slider(value: Binding(get: { o.value }, set: { model.setOutput(o.id, $0) }), in: o.range)
                 Text(o.info).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        if !model.inputs.isEmpty {
+            SectionHeader(title: "Inputs (sensors)")
+            ForEach(model.inputs) { i in
+                HStack { Text(i.name).font(.caption); Spacer(); Text(String(format: "%.2f %@", i.value, i.unit)).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
             }
         }
         SectionHeader(title: "Camera")

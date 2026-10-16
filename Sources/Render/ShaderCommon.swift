@@ -27,6 +27,8 @@ struct FrameUniforms {
     float4 atmos;                // x aerial-perspective scale, y shadow distance, z frame index, w bloom strength
     float4 cameraForward;        // xyz forward, w = near plane
     float4 wind;                 // xyz wind velocity (m/s), w = gust phase
+    float4 quality;              // x 1 = fast analytic atmosphere, y fog extinction per km
+    float4 fogColor;             // rgb fog colour (per unit sun illuminance) for the fast path
 };
 
 // Per-instance data for the standard PBR mesh pipeline (80 bytes).
@@ -73,6 +75,14 @@ inline float miePhase(float mu) {
     return 3.0 / (8.0 * PI) * ((1.0 - g2) * (1.0 + mu * mu)) / ((2.0 + g2) * pow(max(1.0 + g2 - 2.0 * g * mu, 1e-4), 1.5));
 }
 // Transmittance from point p (km, planet-centred) toward the sun. Soft horizon via ground test.
+// Fast path: Kasten–Young air mass through an exponential atmosphere (no ray-march).
+inline float3 fastSunTransmittance(float3 sunDir) {
+    float mu = clamp(sunDir.y, -0.1, 1.0);
+    float elevDeg = asin(max(mu, 0.0)) * 57.2958;
+    float air = 1.0 / (max(mu, 0.0) + 0.15 * pow(max(93.885 - elevDeg, 0.1), -1.253));
+    float3 od = (float3(5.802, 13.558, 33.1) * 1e-3 * 8.0 + 4.40e-3 * 1.2 + float3(0.650, 1.881, 0.085) * 1e-3 * 0.8) * air;
+    return exp(-od) * smoothstep(-0.03, 0.02, sunDir.y);
+}
 inline float3 transmittanceToSun(float3 p, float3 sunDir) {
     float r = length(p);
     float muH = -sqrt(max(0.0, 1.0 - (Rg * Rg) / (r * r)));      // cos of horizon angle
@@ -191,7 +201,7 @@ inline float3 shadeSurface(constant FrameUniforms &f, texture2d<float> skyLUT, d
 
     float viewDepth = dot(rel, f.cameraForward.xyz);
     float shadow = NoL > 0.0 ? sampleShadow(f, shadowMap, rel, N, viewDepth) : 0.0;
-    float3 sunT = transmittanceToSun(planetPos(f, rel), Ls);
+    float3 sunT = f.quality.x > 0.5 ? fastSunTransmittance(Ls) : transmittanceToSun(planetPos(f, rel), Ls);
     float3 sunE = f.sunColor.rgb * f.sunDir.w * sunT;
 
     float3 H = normalize(V + Ls);
@@ -214,6 +224,10 @@ inline float3 shadeSurface(constant FrameUniforms &f, texture2d<float> skyLUT, d
 }
 
 inline float3 applyAerial(constant FrameUniforms &f, float3 color, float3 rel) {
+    if (f.quality.x > 0.5) {
+        float T = exp(-length(rel) * 1e-3 * f.quality.y);
+        return color * T + f.fogColor.rgb * f.sunDir.w * (1.0 - T);
+    }
     float3 T; float3 L = aerialPerspective(f, rel, T);
     return color * T + L;
 }
