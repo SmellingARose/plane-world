@@ -24,7 +24,13 @@
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "up",
+    "neg": "down",
+    "mode": "ramp",
+    "rate": 0.8
+   }
   },
   {
    "id": "p2",
@@ -49,7 +55,13 @@
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "up",
+    "neg": "down",
+    "mode": "ramp",
+    "rate": 0.8
+   }
   },
   {
    "id": "p3",
@@ -75,7 +87,13 @@
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "d",
+    "neg": "a",
+    "mode": "spring",
+    "rate": 3
+   }
   },
   {
    "id": "p4",
@@ -101,7 +119,13 @@
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "w",
+    "neg": "s",
+    "mode": "spring",
+    "rate": 3
+   }
   },
   {
    "id": "p5",

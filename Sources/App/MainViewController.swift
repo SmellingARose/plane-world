@@ -183,7 +183,9 @@ final class ViewportView: MTKView {
     }
     override func keyUp(with e: NSEvent) { keys.remove(e.keyCode) }
     @MainActor func applyKeyboard(dt: Double) {
-        guard let model, !keys.isEmpty, model.tab != .fly else { return }
+        guard let model else { return }
+        if model.tab == .fly { model.applyOutputKeybinds(held: keys, dt: dt); return }   // output keybinds (spring needs ticks with no key held)
+        guard !keys.isEmpty else { return }
         let c = model.camera.camera
         var fwd = c.forward; fwd.y = 0; fwd = fwd.normalizedSafe
         var move = Vec3d.zero

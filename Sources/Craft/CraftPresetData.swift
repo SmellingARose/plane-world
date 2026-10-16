@@ -31,7 +31,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "d",
+    "neg": "a",
+    "mode": "spring",
+    "rate": 3
+   }
   },
   {
    "id": "p2",
@@ -57,7 +63,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "s",
+    "neg": "w",
+    "mode": "spring",
+    "rate": 3
+   }
   },
   {
    "id": "p3",
@@ -83,7 +95,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "e",
+    "neg": "q",
+    "mode": "spring",
+    "rate": 3
+   }
   },
   {
    "id": "p4",
@@ -108,7 +126,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "up",
+    "neg": "down",
+    "mode": "ramp",
+    "rate": 0.8
+   }
   },
   {
    "id": "p5",
@@ -457,7 +481,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "d",
+    "neg": "a",
+    "mode": "spring",
+    "rate": 3
+   }
   },
   {
    "id": "p2",
@@ -483,7 +513,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "s",
+    "neg": "w",
+    "mode": "spring",
+    "rate": 3
+   }
   },
   {
    "id": "p3",
@@ -509,7 +545,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "e",
+    "neg": "q",
+    "mode": "spring",
+    "rate": 3
+   }
   },
   {
    "id": "p5",
@@ -801,7 +843,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "up",
+    "neg": "down",
+    "mode": "ramp",
+    "rate": 0.8
+   }
   },
   {
    "id": "p18",
@@ -859,7 +907,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "w",
+    "neg": "s",
+    "mode": "spring",
+    "rate": 2
+   }
   },
   {
    "id": "p2",
@@ -885,7 +939,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "d",
+    "neg": "a",
+    "mode": "spring",
+    "rate": 2
+   }
   },
   {
    "id": "p3",
@@ -1099,7 +1159,13 @@ public enum CraftPresetData {
    },
    "servo": null,
    "invert": false,
-   "motor": null
+   "motor": null,
+   "keys": {
+    "pos": "space",
+    "neg": null,
+    "mode": "spring",
+    "rate": 5
+   }
   },
   {
    "id": "p4",

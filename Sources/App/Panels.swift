@@ -113,7 +113,9 @@ struct BuildPanel: View {
                     .onSubmit { if let n = model.outputRenames[o.id] { model.renameOutput(o.id, n); model.outputRenames[o.id] = nil } }
                     .font(.body.bold())
                 Text("\(o.kind.rawValue) · \(o.info)").font(.caption2).foregroundStyle(.secondary)
+                KeybindEditor(output: o)
             }
+            .padding(.bottom, 4)
         }
         SectionHeader(title: "Inputs (auto, from sensors)")
         let ins = CraftInputs.list(model.craft)
@@ -238,7 +240,15 @@ struct FlyPanel: View {
         if model.outputs.isEmpty { Text("This craft has no outputs.").foregroundStyle(.secondary) }
         ForEach(model.outputs) { o in
             VStack(alignment: .leading, spacing: 2) {
-                HStack { Text(o.name).bold(); Spacer(); Text(String(format: "%+.2f", o.value)).monospacedDigit().foregroundStyle(Color.accentColor) }
+                HStack {
+                    Text(o.name).bold()
+                    if let kb = model.craft.part(o.id)?.keybind, !kb.isEmpty {
+                        Text(kb.label).font(.caption.monospaced()).padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                            .help("Keyboard: \(KeyNames.display(kb.pos)) = more, \(KeyNames.display(kb.neg)) = less (\(kb.mode.rawValue))")
+                    }
+                    Spacer(); Text(String(format: "%+.2f", o.value)).monospacedDigit().foregroundStyle(Color.accentColor)
+                }
                 Slider(value: Binding(get: { o.value }, set: { model.setOutput(o.id, $0) }), in: o.range)
                 Text(o.info).font(.caption2).foregroundStyle(.secondary)
             }
@@ -252,7 +262,7 @@ struct FlyPanel: View {
         SectionHeader(title: "Camera")
         Picker("", selection: $model.cameraMode) { ForEach(CameraMode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).labelsHidden()
         SectionHeader(title: "Simulation")
-        Text("R reset · P pause · C camera · drag to look").font(.caption).foregroundStyle(.secondary)
+        Text("R reset · P pause · C camera · drag to look · output keys shown next to each slider (set them in BUILD)").font(.caption).foregroundStyle(.secondary)
         HStack { Text("Physics"); Spacer(); Text("\(Int(model.sim.substepHz)) Hz substeps").monospacedDigit() }
         HStack { Text("Collision world"); Spacer(); Text("240 Hz").monospacedDigit() }
     }
