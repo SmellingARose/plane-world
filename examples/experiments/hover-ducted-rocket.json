@@ -1,0 +1,116 @@
+{
+ "algorithm": {
+  "kind": "sep-cmaes",
+  "values": {
+   "sigma0": 0.5
+  }
+ },
+ "checkpointEvery": 10,
+ "controller": {
+  "hz": 50,
+  "mode": "mlp"
+ },
+ "crafts": [
+  {
+   "path": "../crafts/ducted-rocket.json"
+  }
+ ],
+ "descriptorAxes": [],
+ "episode": {
+  "aggregate": "mean",
+  "commonRandomNumbers": true,
+  "crashSpeed": 6,
+  "duration": 20,
+  "episodesPerCandidate": 2,
+  "physicsHz": 1000,
+  "spawn": {
+   "altitudeAGL": 0,
+   "headingDeg": 0,
+   "jitterAttitudeDeg": 0,
+   "jitterHeadingDeg": 0,
+   "jitterPosition": 0,
+   "jitterSpeed": 0,
+   "mode": "runway",
+   "speed": 0
+  },
+  "stopOnCrash": true,
+  "wind": {
+   "directionMaxDeg": 360,
+   "directionMinDeg": 0,
+   "speedMax": 2,
+   "speedMin": 0,
+   "turbulence": 0.2
+  }
+ },
+ "generations": 150,
+ "genome": {
+  "design": [],
+  "mlp": {
+   "activation": "tanh",
+   "hidden": [
+    16
+   ],
+   "inputScale": {
+    "att.pitch": 30,
+    "att.roll": 30,
+    "rate.roll": 90,
+    "rate.pitch": 90,
+    "rate.yaw": 90,
+    "target.dx": 5,
+    "target.dy": 10,
+    "target.dz": 5,
+    "vs": 5
+   },
+   "inputs": [
+    "att.pitch",
+    "att.roll",
+    "rate.roll",
+    "rate.pitch",
+    "rate.yaw",
+    "target.dx",
+    "target.dy",
+    "target.dz",
+    "vs"
+   ],
+   "outputActivation": "tanh",
+   "outputs": [
+    "Lift upper",
+    "Lift lower",
+    "Vane X",
+    "Vane Z"
+   ],
+   "weightRange": 3
+  },
+  "preset": "neural"
+ },
+ "headless": {
+  "breakables": false,
+  "oceanWaves": false,
+  "terrain": true,
+  "vegetation": false,
+  "water": true
+ },
+ "name": "Ducted rocket - hover (CMA-ES)",
+ "notes": "Ducted rocket: climb to 10 m and hover over the start point. Two counter-rotating ducted props (separate throttles) and two exhaust vanes on servos. Full slipstream physics.",
+ "population": 48,
+ "rewardTerms": [
+  "height",
+  "hover",
+  "calm",
+  "drift",
+  "upright",
+  "spin",
+  "crash"
+ ],
+ "scripts": {
+  "callBudgetMs": 5,
+  "language": "javascript",
+  "source": "// Ducted rocket: lift off, climb to 10 m and hover over the start point, upright.\n// Outputs: Lift upper, Lift lower (differential speed = yaw), Vane X / Vane Z (exhaust vanes tilt the craft).\n// Named reward terms (\"points\"); all shaped so every candidate gets a gradient toward hovering:\n//   height - always-on penalty for height error (capped at 20 m)\n//   hover  - seconds within +-1.5 m of 10 m and 2 m horizontally (the headline number)\n//   calm   - penalty for vertical speed (weighted more near the target)\n//   drift  - penalty for horizontal distance from the start point\n//   upright- penalty for tilt\n//   spin   - penalty for yaw rate\n//   crash  - one-off penalty (crash, tipped over or flew away above 30 m)\nfunction terms() { return [\"height\", \"hover\", \"calm\", \"drift\", \"upright\", \"spin\", \"crash\"]; }\n\nfunction reward(ctx) {\n  const i = ctx.in, dt = ctx.dt;\n  const dy = Math.abs(i[\"target.dy\"]);\n  const dh = Math.sqrt(i[\"target.dx\"] * i[\"target.dx\"] + i[\"target.dz\"] * i[\"target.dz\"]);\n  const tilt = Math.min(Math.sqrt(i[\"att.pitch\"] * i[\"att.pitch\"] + i[\"att.roll\"] * i[\"att.roll\"]) / 90, 1);\n  const near = dy < 3 ? 1 : 0.3;\n  return {\n    height: -Math.min(dy, 20) / 10 * dt,\n    hover: (dy < 1.5 && dh < 2) ? dt : 0,\n    calm: -Math.min(Math.abs(i.vs) / 5, 1) * near * dt * 0.5,\n    drift: -Math.min(dh / 10, 1) * dt * 0.5,\n    upright: -tilt * dt,\n    spin: -Math.min(Math.abs(i[\"rate.yaw\"]) / 180, 1) * dt * 0.3,\n  };\n}\n\nfunction failed(ctx) {\n  const i = ctx.in;\n  return ctx.state.crashed || Math.abs(i[\"att.pitch\"]) > 80 || Math.abs(i[\"att.roll\"]) > 80 || i.alt > 30;\n}\n// End early on failure (saves sim time); the remaining time is charged via the crash penalty.\nfunction terminate(ctx) { return failed(ctx); }\n\nfunction fitness(ctx) {\n  const crash = failed(ctx) ? -2 * (20 - ctx.t) - 5 : 0;   // losing the rest of the episode costs ~2 points/s\n  const s = ctx.sum;\n  return { fitness: s.height + s.hover + s.calm + s.drift + s.upright + s.spin + crash, terms: { crash: crash } };\n}\n\nfunction descriptor(ctx) { return [ctx.in[\"target.dx\"], ctx.in[\"target.dz\"]]; }\n"
+ },
+ "seed": 1,
+ "version": 1,
+ "workers": 0,
+ "world": {
+  "source": "flat"
+ }
+}
