@@ -258,5 +258,62 @@ public enum PhysicsSelfTests {
             ctx.log(String(format: "%d panels: parallel %.2f ms/substep, serial %.2f ms/substep, speedup %.1fx, diff %.1e", soup.count / 3, tp * 10, ts * 10, ts / tp, err))
             ctx.expect(err < 1e-6, "parallel matches serial")
         }
+    
+        SelfTestRegistry.register("physics", "trajectory-digest") { ctx in
+            // Bit-exact regression guard for hot-loop optimisations: FNV-1a over every state bit of
+            // several crafts after 3 s of 1 kHz substeps with turbulence, servos, wheels, prop, jet, solid, CAD panels.
+            ctx.expect(kDegF.bitPattern == kDeg.bitPattern, "kDegF matches kDeg bit-for-bit")
+            let d = PhysicsSelfTests.trajectoryDigest()
+            ctx.log(String(format: "digest %016llx", d))
+            ctx.expect(d == PhysicsSelfTests.expectedDigest, String(format: "trajectory digest %016llx matches reference %016llx", d, PhysicsSelfTests.expectedDigest))
+        }
+}
+}
+
+extension PhysicsSelfTests {
+    /// Reference digest of `trajectoryDigest()`; update only for an intentional physics change.
+    /// The digest depends on the optimisation level (release contracts multiply-adds into FMA), so
+    /// debug/sanitizer builds carry their own reference. Release is the authoritative one.
+    #if DEBUG
+    static let expectedDigest: UInt64 = 0x144cb400e4c99c37
+    #else
+    static let expectedDigest: UInt64 = 0x77acda15065ef25b
+    #endif
+    static func trajectoryDigest() -> UInt64 {
+        var h: UInt64 = 0xcbf29ce484222325
+        func mix(_ x: Double) { var b = x.bitPattern; for _ in 0..<8 { h = (h ^ (b & 0xff)) &* 0x100000001b3; b >>= 8 } }
+        func mix(_ v: Vec3d) { mix(v.x); mix(v.y); mix(v.z) }
+        func run(_ doc: CraftDocument, air: Bool, mesh: [Vec3d]? = nil, cmd: (CraftOutput) -> Double) {
+            let s = CraftSim()
+            guard (try? s.load(doc)) != nil else { h ^= 0xdead; return }
+            if let mesh { s.setPartMesh(partID: "cad", soup: mesh) }
+            s.turbulence = 0.3
+            if air { s.reset(spawn: Transform(position: [0, 300, 0])); s.setVelocity(linear: [45, 0, 0], angular: [0.05, 0.02, -0.03]) }
+            else { s.reset(spawn: s.restingSpawn(groundHeight: 0)) }
+            var env = SimEnvironment(wind: [2, 0, 1])
+            for k in 0..<150 {
+                for i in 0..<s.outputs.count { s.setOutput(index: i, value: cmd(s.outputs[i]) * (k % 40 < 20 ? 1 : -1) * (s.outputs[i].kind == .servo ? 1 : -1)) }
+                s.step(dt: 0.02, env: env); env.time += 0.02
+                mix(s.position); mix(s.velocity); mix(s.angularMomentum); mix(s.orientation.vector.x); mix(s.orientation.vector.y)
+                mix(s.orientation.vector.z); mix(s.orientation.vector.w); mix(s.totalFuel); mix(s.telemetry.thrustN)
+                for p in s.partPoses() { mix(p.transform.position); mix(p.transform.rotation.vector.x) }
+            }
+        }
+        let servoCmd: (CraftOutput) -> Double = { $0.kind == .motor ? -0.8 : 0.3 }
+        run(PhysicsPresets.trainer(), air: true, cmd: servoCmd)
+        run(PhysicsPresets.trainer(), air: false, cmd: servoCmd)
+        run(PhysicsPresets.rover(), air: false, cmd: { $0.kind == .motor ? -0.7 : 0.5 })
+        run(PhysicsPresets.rocket(), air: false, cmd: { _ in -1 })
+        var jet = PhysicsPresets.trainer()
+        jet.parts.removeAll { $0.id == "prop" || $0.id == "eng" || $0.id == "spin" }
+        jet.parts.append(PhysicsPresets.part(.tank, "tank", "Tank", pos: [0, 0, 0], mass: 20, p: PhysicsPresets.n(["capacity": 200, "fill": 1, "r": 0.3, "len": 1.5])))
+        jet.parts.append(PhysicsPresets.part(.jet, "jet", "Jet", pos: [-2, 0, 0], mass: 80, p: PhysicsPresets.n(["thrust": 6000, "flow": 0.4, "r": 0.3, "len": 1.5])))
+        run(jet, air: true, cmd: { $0.kind == .jet ? -0.9 : 0.2 })
+        var cad = PhysicsPresets.trainer()
+        cad.parts.append(PhysicsPresets.part(.cad, "cad", "Pod", pos: [0, -0.4, 0], mass: 20))
+        var soup: [Vec3d] = []
+        for i in 0..<12 { soup += PanelMesh.boxSoup(center: [Double(i % 4) * 0.3, Double(i / 4) * 0.3, 0], size: [0.25, 0.2, 0.3]) }
+        run(cad, air: true, mesh: soup, cmd: servoCmd)
+        return h
     }
 }

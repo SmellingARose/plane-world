@@ -70,5 +70,44 @@ public enum RenderSelfTests {
                 ctx.log("  passes (ms): " + Renderer.timedPassNames.compactMap { n in pt[n].map { "\(n) " + String(format: "%.2f", $0) } }.joined(separator: ", "))
             }
         }
+        SelfTestRegistry.register("render", "upscale") { ctx in
+            // Temporal upsampling must converge to (close to) the native-resolution TAA image on a static view.
+            guard let gpu = GPU.shared else { ctx.fail("no Metal device"); return }
+            let registry = RenderRegistry()
+            let r = try Renderer(device: gpu.device, queue: gpu.queue, registry: registry)
+            let scene = InstancedMeshRenderable()
+            let ground = GPUMesh(device: gpu.device, mesh: MeshBuilder.plane(size: 20000, divisions: 4))!
+            let box = GPUMesh(device: gpu.device, mesh: MeshBuilder.box())!
+            let sphere = GPUMesh(device: gpu.device, mesh: MeshBuilder.sphere())!
+            scene.setBatches([
+                (ground, [.init(transform: .identity, albedo: [0.18, 0.22, 0.12], roughness: 0.9, pattern: 1)]),
+                (box, [.init(transform: Transform(position: [0, 1, 0]), scale: [2, 2, 2], albedo: [0.8, 0.1, 0.1], roughness: 0.4)]),
+                (sphere, [.init(transform: Transform(position: [3, 1, 0]), scale: [2, 2, 2], albedo: [0.95, 0.95, 0.95], roughness: 0.15, metallic: 1)]),
+            ])
+            registry.add(scene)
+            var cam = Camera(); cam.lookAt([0, 1, 0], from: [8, 4, 10])
+            let W = 960, H = 540
+            let dir = ProcessInfo.processInfo.environment["PW_SELFTEST_OUT"].map { URL(fileURLWithPath: $0) } ?? FileManager.default.temporaryDirectory
+            r.settings.antiAliasing = .taa; r.settings.upscaling = .native
+            guard let ref = renderOffscreen(renderer: r, camera: cam, width: W, height: H, frames: 48) else { ctx.fail("render failed"); return }
+            func psnr(_ a: [UInt8], _ b: [UInt8]) -> Double {
+                var se = 0.0
+                for i in 0..<a.count where i % 4 != 3 { let d = Double(a[i]) - Double(b[i]); se += d * d }
+                let mse = se / Double(a.count / 4 * 3)
+                return mse <= 0 ? 99 : 10 * log10(255 * 255 / mse)
+            }
+            for fx in [false, true] {
+                for m in Upscaling.allCases where m != .native {
+                    r.settings.useMetalFX = fx; r.settings.upscaling = m
+                    guard let px = renderOffscreen(renderer: r, camera: cam, width: W, height: H, frames: 48) else { ctx.fail("render failed"); continue }
+                    let p = psnr(ref, px)
+                    let name = "\(fx ? "metalfx" : "taau")-\(m.rawValue)"
+                    writePNG(px, width: W, height: H, to: dir.appendingPathComponent("pw-upscale-\(name).png"))
+                    ctx.log("\(name): internal \(r.renderSize.x)x\(r.renderSize.y), PSNR vs native \(String(format: "%.1f", p)) dB")
+                    if !fx { ctx.expect(p > 30, "\(name): PSNR \(p) dB too low") }
+                }
+            }
+            writePNG(ref, width: W, height: H, to: dir.appendingPathComponent("pw-upscale-native.png"))
+        }
     }
 }

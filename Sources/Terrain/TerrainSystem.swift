@@ -35,7 +35,7 @@ public final class TerrainSystem: TerrainProvider, @unchecked Sendable {
     private var extraParams: [String: JSONValue] = [:]
 
     // DEM streaming state
-    private struct PendingTile { let id: TileID; let heights: [Float]; let generation: Int }
+    private struct PendingTile { let id: TileID; let heights: [Float]; let moisture: [Float]; let generation: Int }
     private var pending: [PendingTile] = []
     private let pendingLock = NSLock()
     private var generation = 0
@@ -189,7 +189,9 @@ public final class TerrainSystem: TerrainProvider, @unchecked Sendable {
                 guard let self else { return }
                 switch res {
                 case .success(let h):
-                    self.pendingLock.lock(); self.pending.append(PendingTile(id: t, heights: h, generation: gen)); self.pendingLock.unlock()
+                    // Moisture is derived on this (utility) thread so the main-thread apply is two row memcpys.
+                    let m = Self.tileMoisture(h)
+                    self.pendingLock.lock(); self.pending.append(PendingTile(id: t, heights: h, moisture: m, generation: gen)); self.pendingLock.unlock()
                 case .failure(let e):
                     self.pendingLock.lock(); self.tilesFailed += 1; self.pendingLock.unlock()
                     print("[Terrain] DEM tile \(t) failed: \(e)")
@@ -201,6 +203,11 @@ public final class TerrainSystem: TerrainProvider, @unchecked Sendable {
             _ = centerDone.wait(timeout: .now() + timeout)
             applyPendingTiles(maxTiles: .max)
         }
+    }
+
+    /// Ocean (≤ 0.5 m) is wet, everything else gets moisture from height (lowlands wetter).
+    static func tileMoisture(_ h: [Float]) -> [Float] {
+        h.map { $0 <= 0.5 ? 1 : max(0.15, min(0.9, 0.75 - $0 / 4000)) }
     }
 
     /// Drain decoded DEM tiles into the field (main thread).
@@ -224,12 +231,11 @@ public final class TerrainSystem: TerrainProvider, @unchecked Sendable {
                 filledPlaceholder = true
                 f.recompute(f.fullRect)
             }
-            p.heights.withUnsafeBufferPointer { h in
-                for y in 0..<ts { (f.base.ptr + (oy + y) * f.width + ox).update(from: h.baseAddress! + y * ts, count: ts) }
-            }
-            // ocean (≤ 0 m) is wet, everything else gets moisture from height (lowlands wetter)
-            for y in oy..<(oy + ts) { for x in ox..<(ox + ts) {
-                let h = f.base[x, y]; f.moisture[x, y] = h <= 0.5 ? 1 : max(0.15, min(0.9, 0.75 - h / 4000))
+            p.heights.withUnsafeBufferPointer { h in p.moisture.withUnsafeBufferPointer { m in
+                for y in 0..<ts {
+                    (f.base.ptr + (oy + y) * f.width + ox).update(from: h.baseAddress! + y * ts, count: ts)
+                    (f.moisture.ptr + (oy + y) * f.width + ox).update(from: m.baseAddress! + y * ts, count: ts)
+                }
             } }
             tilesLoaded += 1; applied += 1
             if tilesLoaded == tilesRequested - tilesFailed { finishBase(f, edgeBase: true) }

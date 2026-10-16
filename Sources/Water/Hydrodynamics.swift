@@ -8,7 +8,8 @@
 //  * Hydrodynamic: pressure drag on faces advancing into the water (½ρC_D A vₙ|vₙ|), weaker suction on receding
 //    faces, and ITTC-1957 skin friction on the tangential flow.
 //  * Fast entry of a face through the surface emits splash particles.
-// Work is split over the JobSystem for large hulls; partial sums are reduced deterministically.
+// Very large hulls (>= parallelTriangleThreshold) split the triangle pass over the JobSystem; partial sums are
+// reduced deterministically. Scratch is reused so steady-state calls make no heap allocations.
 import Foundation
 import simd
 import PWCore
@@ -30,7 +31,43 @@ struct HydroPartial {
     var splashPos = Vec3d.zero, splashVel = Vec3d.zero, splashWeight = 0.0
 }
 
+/// A water-surface height source. Generic so the hull vertex loop is specialised (no closure call per vertex).
+protocol HydroHeightSource {
+    func height(_ x: Double, _ z: Double) -> Double
+}
+struct ClosureHeightSource: HydroHeightSource {
+    let f: (Double, Double) -> Double
+    @inline(__always) func height(_ x: Double, _ z: Double) -> Double { f(x, z) }
+}
+
+/// Reusable per-call scratch (world-space vertices, signed heights, partial sums). Grows, never shrinks, so
+/// steady-state calls do not allocate. Owned by one caller at a time (WaterSystem guards it with a try-lock).
+final class HydroScratch: @unchecked Sendable {
+    var world = UnsafeMutablePointer<Vec3d>.allocate(capacity: 0)
+    var dist = UnsafeMutablePointer<Double>.allocate(capacity: 0)
+    var partials = UnsafeMutablePointer<HydroPartial>.allocate(capacity: 0)
+    private(set) var vCap = 0, pCap = 0
+    func reserve(vertices: Int, partials np: Int) {
+        if vertices > vCap {
+            world.deallocate(); dist.deallocate()
+            vCap = max(vertices, vCap * 2)
+            world = .allocate(capacity: vCap); dist = .allocate(capacity: vCap)
+        }
+        if np > pCap {
+            partials.deallocate(); pCap = max(np, 8)
+            partials = .allocate(capacity: pCap)
+        }
+    }
+    deinit { world.deallocate(); dist.deallocate(); partials.deallocate() }
+}
+
 public enum Hydrodynamics {
+    /// Sizes above which the triangle / vertex passes are split over the JobSystem (which allocates job closures).
+    /// Measured on M4 with bench `buoyancy` (docs/PERF.md): serial wins at 2.3k triangles / 1.2k vertices,
+    /// parallel wins at 16k triangles / 8k vertices.
+    nonisolated(unsafe) static var parallelTriangleThreshold = 8192
+    nonisolated(unsafe) static var parallelVertexThreshold = 4096
+
     /// - Parameters:
     ///   - heightAt: water surface height at world x,z (thread-safe).
     ///   - waterVelocity: water velocity at a world point (current + orbital).
@@ -38,62 +75,66 @@ public enum Hydrodynamics {
                         settings: HydroSettings, heightAt: @escaping (Double, Double) -> Double,
                         waterVelocity: Vec3d,
                         jobs: JobSystem = .shared) -> (ForceTorque, volume: Double, wetted: Double, splash: (Vec3d, Vec3d, Double)?) {
+        compute(hull: hull, state: state, density: rho, gravity: g, settings: settings, height: ClosureHeightSource(f: heightAt),
+                waterVelocity: waterVelocity, jobs: jobs, scratch: nil)
+    }
+
+    static func compute<H: HydroHeightSource>(hull: HullMesh, state: BodyState, density rho: Double, gravity g: Double,
+                        settings: HydroSettings, height: H, waterVelocity: Vec3d, jobs: JobSystem,
+                        scratch given: HydroScratch?) -> (ForceTorque, volume: Double, wetted: Double, splash: (Vec3d, Vec3d, Double)?) {
         let nv = hull.positions.count, nt = hull.indices.count / 3
         guard nv > 0, nt > 0 else { return (.zero, 0, 0, nil) }
         let tf = state.transform
         // Hull winding: CAD meshes may be inside-out; the signed volume tells us which way normals point.
         let orient = signedVolume(hull) < 0 ? -1.0 : 1.0
-        var world = [Vec3d](repeating: .zero, count: nv)
-        var dist = [Double](repeating: 0, count: nv)
+        let chunks = nt >= parallelTriangleThreshold ? min(jobs.threadCount * 4, max(1, nt / 512)) : 1
+        let scratch = given ?? HydroScratch()
+        scratch.reserve(vertices: nv, partials: chunks)
+        let wpp = scratch.world, dpp = scratch.dist, PB = scratch.partials
         var bmin = Vec3d(repeating: .infinity), bmax = Vec3d(repeating: -.infinity)
-        // Vertex pass (parallel for large hulls).
-        world.withUnsafeMutableBufferPointer { wp in
-            dist.withUnsafeMutableBufferPointer { dp in
-                let wpp = wp.baseAddress!, dpp = dp.baseAddress!
-                let body: (Range<Int>) -> Void = { r in
-                    for i in r {
-                        let p = tf.apply(hull.positions[i].double)
-                        wpp[i] = p
-                        dpp[i] = p.y - heightAt(p.x, p.z)
-                    }
-                }
-                if nv >= 1024 { jobs.parallelFor(nv, grain: 256, label: "water.hull.verts", body) } else { body(0..<nv) }
-            }
-        }
         var anySub = false
-        for i in 0..<nv { bmin = simd_min(bmin, world[i]); bmax = simd_max(bmax, world[i]); if dist[i] < 0 { anySub = true } }
+        // Vertex pass. Per vertex this is ~9 ocean bilinear samples (~50-80 ns), so only big hulls go parallel.
+        hull.positions.withUnsafeBufferPointer { pp in
+            let P = pp.baseAddress!
+            let body: (Range<Int>) -> Void = { r in
+                for i in r {
+                    let p = tf.apply(P[i].double)
+                    wpp[i] = p
+                    dpp[i] = p.y - height.height(p.x, p.z)
+                }
+            }
+            if nv >= parallelVertexThreshold { jobs.parallelFor(nv, grain: 512, label: "water.hull.verts", body) } else { body(0..<nv) }
+        }
+        for i in 0..<nv { let p = wpp[i]; bmin = simd_min(bmin, p); bmax = simd_max(bmax, p); if dpp[i] < 0 { anySub = true } }
         guard anySub else { return (.zero, 0, 0, nil) }
         let lengthRef = max(simd_reduce_max(bmax - bmin), 0.1)
         let com = state.centerOfMass
-        let chunks = nt >= 2048 ? min(jobs.threadCount * 4, max(1, nt / 512)) : 1
-        var partials = [HydroPartial](repeating: HydroPartial(), count: chunks)
-        world.withUnsafeBufferPointer { wb in dist.withUnsafeBufferPointer { db in
-            hull.indices.withUnsafeBufferPointer { ib in
-                partials.withUnsafeMutableBufferPointer { pb in
-                    let W = wb.baseAddress!, D = db.baseAddress!, I = ib.baseAddress!, PB = pb.baseAddress!
-                    let per = (nt + chunks - 1) / chunks
-                    let body: (Range<Int>) -> Void = { r in
-                        for ch in r {
-                            var acc = HydroPartial()
-                            let t0 = ch * per, t1 = min(nt, t0 + per)
-                            if t0 < t1 {
-                                for t in t0..<t1 {
-                                    let a = Int(I[t * 3]), b = Int(I[t * 3 + 1]), c = Int(I[t * 3 + 2])
-                                    if orient > 0 { clipTriangle(W[a], W[b], W[c], D[a], D[b], D[c], rho: rho, g: g, com: com, state: state,
-                                                 waterVel: waterVelocity, lengthRef: lengthRef, settings: settings, acc: &acc)
-                                    } else { clipTriangle(W[a], W[c], W[b], D[a], D[c], D[b], rho: rho, g: g, com: com, state: state,
-                                                 waterVel: waterVelocity, lengthRef: lengthRef, settings: settings, acc: &acc) }
-                                }
-                            }
-                            PB[ch] = acc
+        hull.indices.withUnsafeBufferPointer { ib in
+            let W = UnsafePointer(wpp), D = UnsafePointer(dpp), I = ib.baseAddress!
+            let per = (nt + chunks - 1) / chunks
+            let body: (Range<Int>) -> Void = { r in
+                for ch in r {
+                    var acc = HydroPartial()
+                    let t0 = ch * per, t1 = min(nt, t0 + per)
+                    if t0 < t1 {
+                        for t in t0..<t1 {
+                            let a = Int(I[t * 3]), b = Int(I[t * 3 + 1]), c = Int(I[t * 3 + 2])
+                            let da = D[a], db = D[b], dc = D[c]
+                            if da >= 0 && db >= 0 && dc >= 0 { continue }   // dry triangle (clipTriangle would return)
+                            if orient > 0 { clipTriangle(W[a], W[b], W[c], da, db, dc, rho: rho, g: g, com: com, state: state,
+                                         waterVel: waterVelocity, lengthRef: lengthRef, settings: settings, acc: &acc)
+                            } else { clipTriangle(W[a], W[c], W[b], da, dc, db, rho: rho, g: g, com: com, state: state,
+                                         waterVel: waterVelocity, lengthRef: lengthRef, settings: settings, acc: &acc) }
                         }
                     }
-                    if chunks > 1 { jobs.parallelFor(chunks, grain: 1, label: "water.hull.tris", body) } else { body(0..<1) }
+                    PB[ch] = acc
                 }
             }
-        } }
+            if chunks > 1 { jobs.parallelFor(chunks, grain: 1, label: "water.hull.tris", body) } else { body(0..<1) }
+        }
         var total = HydroPartial()
-        for p in partials {
+        for i in 0..<chunks {
+            let p = PB[i]
             total.force += p.force; total.torque += p.torque; total.volume += p.volume; total.wetted += p.wetted
             total.splashPos += p.splashPos; total.splashVel += p.splashVel; total.splashWeight += p.splashWeight
         }
@@ -107,12 +148,14 @@ public enum Hydrodynamics {
     /// Signed enclosed volume (positive for outward-facing CCW winding).
     static func signedVolume(_ hull: HullMesh) -> Double {
         var v = 0.0
-        let P = hull.positions, I = hull.indices
-        var t = 0
-        while t + 2 < I.count {
-            let a = P[Int(I[t])].double, b = P[Int(I[t + 1])].double, c = P[Int(I[t + 2])].double
-            v += simd_dot(a, simd_cross(b, c)); t += 3
-        }
+        hull.positions.withUnsafeBufferPointer { pp in hull.indices.withUnsafeBufferPointer { ib in
+            let P = pp.baseAddress!, I = ib.baseAddress!, n = ib.count
+            var t = 0
+            while t + 2 < n {
+                let a = P[Int(I[t])].double, b = P[Int(I[t + 1])].double, c = P[Int(I[t + 2])].double
+                v += simd_dot(a, simd_cross(b, c)); t += 3
+            }
+        } }
         return v / 6
     }
 

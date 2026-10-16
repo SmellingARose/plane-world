@@ -2,6 +2,7 @@
 //   PlaneWorld                         launch the app
 //   PlaneWorld --selftest <name|all|list>   headless tests, exit status 0/1
 //   PlaneWorld --train <experiment.json> [--generations N] [--out dir] [--workers N]   headless training
+//   PlaneWorld --bench <name|all|list> [--reps N] [--quick] [--json f]   benchmarks (release build; docs/PERF.md)
 //   PlaneWorld --make-experiment "<preset>" <out.json>
 //   PlaneWorld --quit-after <seconds>  launch and quit automatically (smoke testing)
 import AppKit
@@ -38,6 +39,7 @@ if let i = args.firstIndex(of: "--selftest") {
     exit(SelfTestRegistry.run(name) ? 0 : 1)
 }
 
+if args.contains("--bench") { exit(Bench.run(args)) }
 if args.contains("--train") { exit(TrainCLI.run(args)) }
 if args.contains("--make-experiment") { exit(TrainCLI.makeExperiment(args)) }
 

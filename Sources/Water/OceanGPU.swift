@@ -48,6 +48,10 @@ final class OceanGPU: @unchecked Sendable {
     let N: Int, cascades: Int
     let Ls: [Double]
     private let specPSO, fftPSO, finalPSO: any MTLComputePipelineState
+    private let rowPSO, colPSO: any MTLComputePipelineState
+    private let twBuf: any MTLBuffer
+    /// Fused 2-dispatch FFT (default). PW_OCEAN_LEGACY=1 selects the original 4-pass path for A/B benchmarks.
+    var fused = ProcessInfo.processInfo.environment["PW_OCEAN_LEGACY"] == nil
     private let h0Buf, omegaBuf, specBuf, foamBuf: any MTLBuffer
     let sets: [OceanSet]
     private let lock = NSLock()
@@ -70,6 +74,14 @@ final class OceanGPU: @unchecked Sendable {
         specPSO = try device.makeComputePipelineState(function: try ShaderLibrary.shared.function(lib, "oceanSpectrum"))
         fftPSO = try device.makeComputePipelineState(function: try ShaderLibrary.shared.function(lib, "oceanFFT"))
         finalPSO = try device.makeComputePipelineState(function: try ShaderLibrary.shared.function(lib, "oceanFinalize"))
+        rowPSO = try device.makeComputePipelineState(function: try ShaderLibrary.shared.function(lib, "oceanSpecRowFFT"))
+        colPSO = try device.makeComputePipelineState(function: try ShaderLibrary.shared.function(lib, "oceanColFFTFinalize"))
+        let nTw = spectrum.N
+        let tw: [SIMD2<Float>] = (0..<max(1, nTw / 2)).map { k in
+            let a = 2 * Double.pi * Double(k) / Double(nTw); return SIMD2(Float(cos(a)), Float(sin(a)))
+        }
+        guard let twb = device.makeBuffer(bytes: tw, length: tw.count * 8, options: .storageModeShared) else { throw RenderError.pipeline("ocean twiddles") }
+        twBuf = twb
         var h0: [SIMD4<Float>] = [], om: [Float] = []
         for c in spectrum.cascades { h0 += c.h0; om += c.omega }
         guard let a = device.makeBuffer(bytes: h0, length: h0.count * 16, options: .storageModeShared),
@@ -140,6 +152,24 @@ final class OceanGPU: @unchecked Sendable {
         guard let ce = cb.makeComputeCommandEncoder() else { return }
         ce.label = "ocean"
         let grid = MTLSize(width: N, height: N, depth: cascades), tg = MTLSize(width: 16, height: 16, depth: 1)
+        if fused {
+            let lines = MTLSize(width: N, height: cascades, depth: 1), tpg = MTLSize(width: N / 2, height: 1, depth: 1)
+            ce.setComputePipelineState(rowPSO)
+            ce.setBuffer(h0Buf, offset: 0, index: 0); ce.setBuffer(omegaBuf, offset: 0, index: 1); ce.setBuffer(specBuf, offset: 0, index: 2)
+            ce.setBytes(&P, length: MemoryLayout<OceanParamsGPU>.stride, index: 3); ce.setBuffer(twBuf, offset: 0, index: 4)
+            ce.setThreadgroupMemoryLength(N * 32, index: 0)
+            ce.dispatchThreadgroups(lines, threadsPerThreadgroup: tpg)
+            ce.setComputePipelineState(colPSO)
+            ce.setBuffer(specBuf, offset: 0, index: 0); ce.setBuffer(foamBuf, offset: 0, index: 1)
+            ce.setBuffer(set.dispBuf, offset: 0, index: 2); ce.setBuffer(set.derivBuf, offset: 0, index: 3)
+            ce.setBytes(&P, length: MemoryLayout<OceanParamsGPU>.stride, index: 4); ce.setBuffer(twBuf, offset: 0, index: 5)
+            ce.setTexture(set.dispTex, index: 0); ce.setTexture(set.derivTex, index: 1)
+            ce.setThreadgroupMemoryLength(N * 32, index: 0)
+            ce.dispatchThreadgroups(lines, threadsPerThreadgroup: tpg)
+            ce.endEncoding()
+            if let be = cb.makeBlitCommandEncoder() { be.generateMipmaps(for: set.derivTex); be.endEncoding() }
+            return
+        }
         ce.setComputePipelineState(specPSO)
         ce.setBuffer(h0Buf, offset: 0, index: 0); ce.setBuffer(omegaBuf, offset: 0, index: 1); ce.setBuffer(specBuf, offset: 0, index: 2)
         ce.setBytes(&P, length: MemoryLayout<OceanParamsGPU>.stride, index: 3)
@@ -177,13 +207,14 @@ final class OceanGPU: @unchecked Sendable {
         return (view(c), p.map { view($0) })
     }
 
-    @inline(__always) static func wrap(_ i: Int, _ n: Int) -> Int { let m = i % n; return m < 0 ? m + n : m }
+    /// N is a power of two (checked in init), so the positive modulo is a mask: identical results, no integer divide.
+    @inline(__always) static func wrap(_ i: Int, _ n: Int) -> Int { i & (n - 1) }
 
     @inline(__always)
     static func bilinear(_ p: UnsafePointer<SIMD4<Float>>, _ N: Int, _ u: Double, _ v: Double) -> SIMD4<Double> {
         let fu = u.rounded(.down), fv = v.rounded(.down)
         let tx = u - fu, ty = v - fv
-        let x0 = wrap(Int(fu), N), y0 = wrap(Int(fv), N), x1 = (x0 + 1) % N, y1 = (y0 + 1) % N
+        let x0 = wrap(Int(fu), N), y0 = wrap(Int(fv), N), x1 = (x0 + 1) & (N - 1), y1 = (y0 + 1) & (N - 1)
         func g(_ x: Int, _ y: Int) -> SIMD4<Double> { let f = p[y * N + x]; return SIMD4(Double(f.x), Double(f.y), Double(f.z), Double(f.w)) }
         let a = g(x0, y0) * (1 - tx) + g(x1, y0) * tx
         let b = g(x0, y1) * (1 - tx) + g(x1, y1) * tx
@@ -220,16 +251,21 @@ struct OceanView: @unchecked Sendable {
     let N: Int, cascades: Int
     let Ls: SIMD4<Double>
     let time: Double
+    let texelsPerMetre: SIMD4<Double>
+    init(disp: UnsafePointer<SIMD4<Float>>, deriv: UnsafePointer<SIMD4<Float>>, N: Int, cascades: Int, Ls: SIMD4<Double>, time: Double) {
+        self.disp = disp; self.deriv = deriv; self.N = N; self.cascades = cascades; self.Ls = Ls; self.time = time
+        texelsPerMetre = SIMD4<Double>(repeating: Double(N)) / Ls
+    }
 
     /// Sum over cascades of (Dx, h, Dz, J−1) at undisplaced world position (x, z).
     @inline(__always)
     func displacement(x: Double, z: Double, cubic: Bool) -> SIMD4<Double> {
         var r = SIMD4<Double>.zero
-        let n = Double(N)
+        let NN = N * N
         for c in 0..<cascades {
-            let L = Ls[c]
-            var s = cubic ? OceanGPU.catmull(disp + c * N * N, N, x / L * n, z / L * n)
-                          : OceanGPU.bilinear(disp + c * N * N, N, x / L * n, z / L * n)
+            let k = texelsPerMetre[c]          // N / L, precomputed (one multiply instead of divide + multiply)
+            var s = cubic ? OceanGPU.catmull(disp + c * NN, N, x * k, z * k)
+                          : OceanGPU.bilinear(disp + c * NN, N, x * k, z * k)
             s.w -= 1
             r += s
         }
@@ -238,8 +274,7 @@ struct OceanView: @unchecked Sendable {
     @inline(__always)
     func derivatives(x: Double, z: Double) -> SIMD4<Double> {
         var r = SIMD4<Double>.zero
-        let n = Double(N)
-        for c in 0..<cascades { let L = Ls[c]; r += OceanGPU.bilinear(deriv + c * N * N, N, x / L * n, z / L * n) }
+        for c in 0..<cascades { let k = texelsPerMetre[c]; r += OceanGPU.bilinear(deriv + c * N * N, N, x * k, z * k) }
         return r
     }
     /// Surface height at world (x, z) relative to sea level, inverting the choppy displacement.

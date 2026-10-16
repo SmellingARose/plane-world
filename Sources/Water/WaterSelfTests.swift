@@ -148,6 +148,35 @@ public enum WaterSelfTests {
             ctx.log(String(format: "surfaceHeight: %.1f M queries/s, heightSampler (hull path): %.1f M queries/s (all cores)", qps1, Double(n * 5) / Date().timeIntervalSince(t2) / 1e6))
         }
 
+        SelfTestRegistry.register("water", "buoyancy-cpu-vs-gpu") { ctx in
+            // Placement decision for hull buoyancy. The physics step needs the force synchronously every substep, so
+            // a GPU path costs at least one commit + wait round trip. Measure that floor against the CPU path.
+            guard let gpu = GPU.shared else { ctx.fail("no Metal device"); return }
+            var rt: [Double] = []
+            for _ in 0..<200 {
+                let t0 = DispatchTime.now().uptimeNanoseconds
+                let cb = gpu.queue.makeCommandBuffer()!; cb.commit(); cb.waitUntilCompleted()
+                rt.append(Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e3)
+            }
+            rt.sort()
+            var s = OceanSettings(); s.windSpeed = 8
+            let water = WaterSystem(); water.setOcean(s); water.oceanEnabled = true; water.updateOceanSync(time: 1)
+            var line = ""
+            for (seg, rings) in [(16, 8), (48, 24), (128, 64)] {
+                let m = MeshBuilder.sphere(radius: 2, segments: seg, rings: rings)
+                let hull = HullMesh(positions: m.vertices.map { Vec3($0.px, $0.py, $0.pz) * Vec3(3, 1, 1) }, indices: m.indices)
+                let st = BodyState(transform: Transform(position: [0, 0.3, 0]), linearVelocity: [3, 0, 0], centerOfMass: [0, 0.3, 0])
+                var best = Double.infinity
+                for _ in 0..<30 {
+                    let t0 = DispatchTime.now().uptimeNanoseconds
+                    _ = water.submergedForces(hull: hull, state: st, time: 1)
+                    best = min(best, Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e3)
+                }
+                line += String(format: "%d tris %.1f µs; ", m.indices.count / 3, best)
+            }
+            ctx.log(String(format: "GPU empty commit+wait: median %.1f µs, min %.1f µs; CPU buoyancy (min): %@", rt[rt.count / 2], rt[0], line))
+        }
+
         SelfTestRegistry.register("water", "ocean-floating-box") { ctx in
             guard GPU.shared != nil else { ctx.fail("no Metal device"); return }
             // Box in moderate sea: must stay afloat, mean draft close to Archimedes and heave with the waves.
@@ -209,6 +238,29 @@ public enum WaterSelfTests {
             }
         }
 
+        SelfTestRegistry.register("water", "fluid-sort-ab") { ctx in
+            // Does ordering particles by cell speed up the GPU step? Interleaved A/B on a mixed (post dam-break) zone.
+            guard let gpu = GPU.shared else { ctx.fail("no Metal device"); return }
+            let zone = try FluidZone(device: gpu.device, queue: gpu.queue, origin: .zero, dims: [64, 64, 64], cellSize: 4.0 / 64, fill: .damBreak)
+            zone.autoSortInterval = 0
+            for _ in 0..<60 { zone.stepSync(dt: 1.0 / 120) }
+            // shuffle to emulate long-run mixing
+            let p = zone.posBuf.contents().assumingMemoryBound(to: SIMD4<Float>.self), v = zone.velBuf.contents().assumingMemoryBound(to: SIMD4<Float>.self)
+            var rng = PCG32(seed: 7)
+            for i in stride(from: zone.particleCount - 1, to: 0, by: -1) { let j = Int(rng.next32() % UInt32(i + 1)); swap(&p[i], &p[j]); swap(&v[i], &v[j]) }
+            var a: [Double] = [], b: [Double] = []
+            for _ in 0..<3 {
+                for _ in 0..<5 { zone.stepSync(dt: 1.0 / 120); a.append(zone.lastGPUTimeMs) }
+                let t0 = Date(); zone.sortParticlesByCell(); let sortMs = Date().timeIntervalSince(t0) * 1000
+                for _ in 0..<5 { zone.stepSync(dt: 1.0 / 120); b.append(zone.lastGPUTimeMs) }
+                ctx.log(String(format: "CPU counting sort of %d particles: %.2f ms", zone.particleCount, sortMs))
+                for i in stride(from: zone.particleCount - 1, to: 0, by: -1) { let j = Int(rng.next32() % UInt32(i + 1)); swap(&p[i], &p[j]); swap(&v[i], &v[j]) }
+            }
+            a.sort(); b.sort()
+            ctx.log(String(format: "64³ GPU ms per substep: shuffled median %.2f min %.2f; sorted median %.2f min %.2f", a[a.count / 2], a[0], b[b.count / 2], b[0]))
+            ctx.expect(zone.stats().nonFinite == 0, "finite after sort")
+        }
+
         SelfTestRegistry.register("water", "fluid-coupling") { ctx in
             guard let gpu = GPU.shared else { ctx.fail("no Metal device"); return }
             // A fixed 1×0.5×1 m block half-immersed in a still pool: fluid pressure force ≈ ρ g V_sub upward.
@@ -241,6 +293,28 @@ public enum WaterSelfTests {
             ctx.expect(f.x > 1, "river flows downstream at centre-line (\(f))")
             let data = try JSONIO.encode(out); let back = try JSONIO.decode(WaterSpec.self, from: data)
             ctx.expect(back == out, "WaterSpec JSON round-trip")
+        }
+
+        SelfTestRegistry.register("water", "ocean-fft-ab") { ctx in
+            // A/B of the fused 2-dispatch ocean FFT vs the original 4-pass path, interleaved so GPU clock and
+            // contention from other work affect both equally. Also checks both produce the same surface.
+            guard let gpu = GPU.shared else { ctx.fail("no Metal device"); return }
+            var s = OceanSettings(); s.windSpeed = 8
+            let o = try OceanGPU(device: gpu.device, queue: gpu.queue, settings: s)
+            var ta: [Double] = [], tb: [Double] = []
+            var maxDiff = 0.0
+            for i in 0..<120 {
+                let T = 10 + Double(i) * 0.016
+                o.fused = false; o.updateSync(time: T); if i >= 20 { ta.append(o.lastGPUTimeMs) }
+                let ha = o.views()!.0.height(x: 37, z: -12)
+                o.fused = true; o.updateSync(time: T + 1e-9); if i >= 20 { tb.append(o.lastGPUTimeMs) }
+                let hb = o.views()!.0.height(x: 37, z: -12)
+                maxDiff = max(maxDiff, abs(ha - hb))
+            }
+            ta.sort(); tb.sort()
+            ctx.log(String(format: "ocean FFT GPU ms  4-pass: median %.3f min %.3f   fused: median %.3f min %.3f   max |dh| %.2e m",
+                           ta[ta.count / 2], ta[0], tb[tb.count / 2], tb[0], maxDiff))
+            ctx.expect(maxDiff < 1e-3, "fused and 4-pass FFT agree (max |dh| \(maxDiff) m)")
         }
 
         SelfTestRegistry.register("water", "render") { ctx in

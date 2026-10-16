@@ -80,6 +80,107 @@ kernel void oceanFFT(device float2 *data [[buffer(0)]],
     }
 }
 
+// ---- Fused path (default): 2 dispatches instead of 4, spectrum and finalize live in threadgroup memory. ----
+// A: one threadgroup (N/2 threads) per (row, cascade): evaluate h(k,t) for the row straight into threadgroup memory
+//    (bit-reversed), inverse-FFT it, write the row once. B: one threadgroup per (column, cascade): load the column,
+//    inverse-FFT it and finalize each texel. Saves two full read+write round trips of the 4-field complex grid.
+//    Twiddles come from a table (computed in double on the CPU) instead of per-stage precise sin/cos.
+inline void oceanSpecAt(device const float4 *h0, device const float *omega, constant OceanParams &P,
+                        uint x, uint y, uint c, thread float2 out[4]) {
+    uint N = P.N;
+    uint idx = (c * N + y) * N + x;
+    float L = P.L[c];
+    float2 k = 2.0 * PI * (float2(x, y) - float(N / 2)) / L;
+    float kl = length(k);
+    float2 kn = kl > 1e-6 ? k / kl : float2(0.0);
+    float4 hv = h0[idx];
+    float ph = omega[idx] * P.time;
+    float cs = precise::cos(ph), sn = precise::sin(ph);
+    float2 h = cmul(hv.xy, float2(cs, sn)) + cmul(hv.zw, float2(cs, -sn));
+    float2 ih = float2(-h.y, h.x);
+    float2 hDx = -ih * kn.x, hDz = -ih * kn.y, hHx = ih * k.x, hHz = ih * k.y;
+    float inv = kl > 1e-6 ? 1.0 / kl : 0.0;
+    out[0] = cpack(h, hDx);
+    out[1] = cpack(hDz, hHx);
+    out[2] = cpack(hHz, h * (k.x * k.x * inv));
+    out[3] = cpack(h * (k.y * k.y * inv), h * (k.x * k.y * inv));
+}
+
+// In-place radix-2 butterflies over 4 interleaved fields (buf[e*4+f]); tw[k] = exp(i·2πk/N), k < N/2.
+inline void oceanButterflies(threadgroup float2 *buf, constant float2 *tw, uint N, uint logN, uint t) {
+    for (uint s = 1; s <= logN; s++) {
+        uint m = 1u << s, hm = m >> 1;
+        uint j = t & (hm - 1);
+        uint i0 = (t >> (s - 1)) * m + j, i1 = i0 + hm;
+        float2 w = tw[j << (logN - s)];
+        for (uint f = 0; f < 4; f++) {
+            float2 a = buf[i0 * 4 + f], b = cmul(buf[i1 * 4 + f], w);
+            buf[i0 * 4 + f] = a + b; buf[i1 * 4 + f] = a - b;
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+}
+
+kernel void oceanSpecRowFFT(device const float4 *h0 [[buffer(0)]],
+                            device const float *omega [[buffer(1)]],
+                            device float2 *spec [[buffer(2)]],
+                            constant OceanParams &P [[buffer(3)]],
+                            constant float2 *tw [[buffer(4)]],
+                            threadgroup float2 *buf [[threadgroup(0)]],
+                            uint2 tg [[threadgroup_position_in_grid]],
+                            uint t [[thread_index_in_threadgroup]]) {
+    uint N = P.N, logN = P.logN, y = tg.x, c = tg.y;
+    for (uint e = t; e < N; e += N / 2) {
+        float2 v[4];
+        oceanSpecAt(h0, omega, P, e, y, c, v);
+        uint r = reverse_bits(e) >> (32 - logN);
+        for (uint f = 0; f < 4; f++) buf[r * 4 + f] = v[f];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    oceanButterflies(buf, tw, N, logN, t);
+    for (uint e = t; e < N; e += N / 2) {
+        uint i = (c * N + y) * N + e;
+        for (uint f = 0; f < 4; f++) spec[i * 4 + f] = buf[e * 4 + f];
+    }
+}
+
+kernel void oceanColFFTFinalize(device const float2 *data [[buffer(0)]],
+                                device float *foam [[buffer(1)]],
+                                device float4 *outDisp [[buffer(2)]],
+                                device float4 *outDeriv [[buffer(3)]],
+                                constant OceanParams &P [[buffer(4)]],
+                                constant float2 *tw [[buffer(5)]],
+                                texture2d_array<float, access::write> dispTex [[texture(0)]],
+                                texture2d_array<float, access::write> derivTex [[texture(1)]],
+                                threadgroup float2 *buf [[threadgroup(0)]],
+                                uint2 tg [[threadgroup_position_in_grid]],
+                                uint t [[thread_index_in_threadgroup]]) {
+    uint N = P.N, logN = P.logN, x = tg.x, c = tg.y;
+    for (uint e = t; e < N; e += N / 2) {
+        uint i = (c * N + e) * N + x;
+        uint r = reverse_bits(e) >> (32 - logN);
+        for (uint f = 0; f < 4; f++) buf[r * 4 + f] = data[i * 4 + f];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    oceanButterflies(buf, tw, N, logN, t);
+    float decay = exp(-P.dt / max(P.foamDecay, 1e-3));
+    float lam = P.choppy;
+    for (uint y = t; y < N; y += N / 2) {
+        uint idx = (c * N + y) * N + x;
+        float sg = ((x + y) & 1) ? -1.0 : 1.0;
+        float2 v0 = buf[y * 4 + 0] * sg, v1 = buf[y * 4 + 1] * sg, v2 = buf[y * 4 + 2] * sg, v3 = buf[y * 4 + 3] * sg;
+        float h = v0.x, dx = v0.y * lam, dz = v1.x * lam, hx = v1.y, hz = v2.x;
+        float dxx = v2.y * lam, dzz = v3.x * lam, dxz = v3.y * lam;
+        float J = (1.0 + dxx) * (1.0 + dzz) - dxz * dxz;
+        float fo = max(foam[idx] * decay, saturate((P.foamThreshold - J) * P.foamGain));
+        foam[idx] = fo;
+        outDisp[idx] = float4(dx, h, dz, J);
+        outDeriv[idx] = float4(hx, hz, dxx, dzz);
+        dispTex.write(float4(dx, h, dz, fo), uint2(x, y), c);
+        derivTex.write(float4(hx, hz, dxx, dzz), uint2(x, y), c);
+    }
+}
+
 // Sign-correct the centred spectrum, build displacement/derivative maps, Jacobian foam with temporal decay,
 // and write both the textures (rendering) and shared buffers (CPU height queries).
 kernel void oceanFinalize(device const float2 *data [[buffer(0)]],

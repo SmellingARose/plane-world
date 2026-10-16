@@ -35,8 +35,11 @@ public final class PanelMesh {
         var vol = 0.0
         for (p0, p1, p2) in t { vol += simd_dot(p0, simd_cross(p1, p2)) }
         if vol < 0 { flipped = true } else { flipped = false }
+        orientedNormals = flipped ? n.map { -$0 } : n
     }
     public private(set) var flipped: Bool
+    /// `normal(k)` for every panel (flip applied), for the hot evaluation loop.
+    private(set) var orientedNormals: [Vec3d] = []
     public var count: Int { centers.count }
     func normal(_ i: Int) -> Vec3d { flipped ? -normals[i] : normals[i] }
 
@@ -83,18 +86,23 @@ public final class PanelMesh {
     func evaluate(range: Range<Int>, toWorld q: Quatd, origin: Vec3d, com: Vec3d, linVel: Vec3d, angVel: Vec3d,
                              wind: Vec3d, rho: Double, nu: Double, speedOfSound: Double) -> ForceTorque {
         var F = Vec3d.zero, T = Vec3d.zero
+        // Raw pointers over the (immutable) panel arrays: no bounds checks, no per-panel class-property
+        // access/exclusivity checks. `orientedNormals` is `normal(k)` precomputed. Same arithmetic, same order.
+        let refL = referenceLength
+        centers.withUnsafeBufferPointer { C in orientedNormals.withUnsafeBufferPointer { N in areas.withUnsafeBufferPointer { AR in
+        shadowed.withUnsafeBufferPointer { SH in
         for k in range {
-            let pw = origin + q.act(centers[k])
+            let pw = origin + q.act(C[k])
             let r = pw - com
             let vrel = linVel + simd_cross(angVel, r) - wind
             let sp = simd_length(vrel); if sp < 0.05 { continue }
             let u = -vrel / sp                      // air direction
-            let n = q.act(normal(k))
-            let qdyn = 0.5 * rho * sp * sp, A = areas[k]
+            let n = q.act(N[k])
+            let qdyn = 0.5 * rho * sp * sp, A = AR[k]
             let c = simd_dot(n, u)                  // < 0 : windward
             var f = Vec3d.zero
             if c < 0 {
-                if !shadowed[k] {
+                if !SH[k] {
                     let M = sp / speedOfSound
                     let cpmax = 1 + M * M / 4       // stagnation Cp (compressible, subsonic)
                     f -= n * (cpmax * c * c * qdyn * A)
@@ -105,12 +113,13 @@ public final class PanelMesh {
             // skin friction along the tangential flow
             let tang = u - n * c, tl = simd_length(tang)
             if tl > 1e-6 {
-                let re = max(1e4, sp * referenceLength / nu)
+                let re = max(1e4, sp * refL / nu)
                 let cf = 0.455 / pow(log10(re), 2.58)
                 f += tang / tl * (cf * qdyn * A * tl)
             }
             F += f; T += simd_cross(r, f)
         }
+        } } } }
         return ForceTorque(force: F, torque: T)
     }
 }

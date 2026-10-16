@@ -250,6 +250,13 @@ public final class HeadlessWorld: @unchecked Sendable {
         return h
     }
 
+    /// A copy whose terrain is private (perf: workers never share the terrain object's refcount cache line).
+    /// Water and obstacles are immutable and stay shared.
+    public func isolatedCopy() -> HeadlessWorld {
+        HeadlessWorld(name: name, terrain: terrain.map { BakedTerrain(copying: $0.field) }, water: water, spawn: spawn,
+                      environment: environment, obstacles: obstacles)
+    }
+
     public func makeEnvironment(wind: Vec3d, time: Double = 0) -> SimEnvironment {
         SimEnvironment(terrain: terrain, water: water, collision: nil, wind: wind, time: time)
     }

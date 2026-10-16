@@ -12,6 +12,7 @@
 import Foundation
 import Metal
 import simd
+import os
 import PWCore
 import PWRender
 
@@ -49,6 +50,12 @@ public final class WaterSystem: WaterProvider, Renderable, @unchecked Sendable {
     public var seaLevel = 0.0
     public private(set) var oceanSettings = OceanSettings()
     public var hydro = HydroSettings()
+    /// Reused buoyancy scratch (zero allocations per call); a try-lock lets concurrent callers fall back to a temp.
+    let hydroScratch = HydroScratch()
+    private let hydroScratchLockPtr: UnsafeMutablePointer<os_unfair_lock> = {
+        let p = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1); p.initialize(to: os_unfair_lock()); return p
+    }()
+    deinit { hydroScratchLockPtr.deinitialize(count: 1); hydroScratchLockPtr.deallocate() }
     public var seawaterDensity = 1025.0
     /// Absorption (1/m, rgb) and scattering (1/m) of the water column; defaults: clear coastal seawater.
     public var absorption = SIMD3<Float>(0.42, 0.075, 0.04)
@@ -189,9 +196,21 @@ public final class WaterSystem: WaterProvider, Renderable, @unchecked Sendable {
         var rho = 1000.0
         if oceanEnabled && abs(s.surfaceHeight - oceanHeightFast(x: com.x, z: com.z, time: time)) < 0.5 { rho = seawaterDensity }
         else if let l = lakes.first(where: { $0.contains(x: com.x, z: com.z) }) { rho = l.density }
-        let r = Hydrodynamics.compute(hull: hull, state: state, density: rho, gravity: kGravity, settings: hydro,
-                                      heightAt: heightSampler(time: time),
-                                      waterVelocity: s.velocity)
+        let r: (ForceTorque, volume: Double, wetted: Double, splash: (Vec3d, Vec3d, Double)?)
+        let own = os_unfair_lock_trylock(hydroScratchLockPtr)
+        let scratch = own ? hydroScratch : nil
+        if lakes.isEmpty && rivers.isEmpty {
+            // Ocean only (or no surface): specialised height source, no closure or captured arrays per call.
+            let view = oceanEnabled ? ocean?.views()?.0 : nil
+            r = Hydrodynamics.compute(hull: hull, state: state, density: rho, gravity: kGravity, settings: hydro,
+                                      height: OceanHeightSource(view: view, sea: seaLevel, on: oceanEnabled),
+                                      waterVelocity: s.velocity, jobs: .shared, scratch: scratch)
+        } else {
+            r = Hydrodynamics.compute(hull: hull, state: state, density: rho, gravity: kGravity, settings: hydro,
+                                      height: ClosureHeightSource(f: heightSampler(time: time)),
+                                      waterVelocity: s.velocity, jobs: .shared, scratch: scratch)
+        }
+        if own { os_unfair_lock_unlock(hydroScratchLockPtr) }
         if let (p, v, w) = r.splash {
             splashes.emit(at: p, velocity: v, count: min(64, Int(w * 6) + 1), spread: 0.45, radius: min(2, w.squareRoot() * 0.3))
         }
@@ -502,5 +521,14 @@ public final class WaterSystem: WaterProvider, Renderable, @unchecked Sendable {
             enc.setVertexBuffer(buf, offset: off, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: inst.count / 2)
         }
+    }
+}
+
+/// Ocean-only height source for the hull vertex pass (same maths as `heightSampler` without lakes/rivers).
+struct OceanHeightSource: HydroHeightSource {
+    let view: OceanView?, sea: Double, on: Bool
+    @inline(__always) func height(_ x: Double, _ z: Double) -> Double {
+        guard on else { return -1e9 }
+        return sea + (view?.height(x: x, z: z) ?? 0)
     }
 }

@@ -4,6 +4,7 @@
 // with JobSystem.parallelFor(grain: 1); a worker is checked out for the whole candidate (all its episodes).
 // Results depend only on (genome, experiment, run seed, generation, candidate index) — never on scheduling.
 import Foundation
+import Synchronization
 import simd
 import PWCore
 import PWPhysics
@@ -118,13 +119,30 @@ public final class EvalWorker {
     // swept-corner buffers for static headless obstacles (reallocated only when the design grows)
     var cornersPrev: UnsafeMutablePointer<Vec3d> = .allocate(capacity: 1), cornersCur: UnsafeMutablePointer<Vec3d> = .allocate(capacity: 1)
     var cornerCap = 1
+    /// Worker-private deep copies (perf, docs/PERF.md "scaling"): this worker's sim never retains/releases a heap
+    /// object that another worker's sim also touches, so Swift's atomic refcounting stays core-local.
+    let craft: CraftDocument
+    let world: HeadlessWorld
+    // worker-local copies of the context's MLP maps (reading `ctx.<array>` in the tick loop retains the shared buffer)
+    let mlpIn: [Int], mlpOut: [Int], mlpScale: [Double], ranges: [ClosedRange<Double>]
+
+    /// Deep copy through JSON (Swift's encoder writes shortest round-trip doubles, so the copy is value-identical).
+    static func isolatedCopy(_ d: CraftDocument) -> CraftDocument {
+        guard let data = try? JSONEncoder().encode(d), let c = try? JSONDecoder().decode(CraftDocument.self, from: data), c == d else { return d }
+        return c
+    }
 
     public init(context: ExperimentContext, runtime: any ScriptRuntime) throws {
         ctx = context; self.runtime = runtime
+        let shared = ProcessInfo.processInfo.environment["PW_EVAL_SHARED_HEAP"] == "1"   // A/B knob for benches
+        craft = shared ? context.craft : EvalWorker.isolatedCopy(context.craft)
+        world = shared ? context.world : context.world.isolatedCopy()
+        mlpIn = Array(context.mlpInputs); mlpOut = Array(context.mlpOutputs)
+        mlpScale = Array(context.mlpInputScale); ranges = Array(context.outputRanges)
         try runtime.compile(context.experiment.scripts, experiment: context.experiment)
         frame = ControlFrame(inputNames: context.inputNames, outputNames: context.outputNames, termNames: context.termNames)
         baseSim = CraftSim()
-        try baseSim.load(context.craft)
+        try baseSim.load(craft)
         baseSim.substepHz = context.experiment.episode.physicsHz
         baseSim.crashSpeed = context.experiment.episode.crashSpeed
         sim = baseSim
@@ -155,7 +173,7 @@ public final class EvalWorker {
 
     /// Prepare sim + policy for a genome (allocates only when the design changes per candidate).
     public func prepare(_ g: Genome) throws -> CraftDocument {
-        var doc = ctx.craft
+        var doc = craft
         if ctx.needsPerCandidateCraft {
             if let r = ctx.designRange { doc = try DesignDecoder.apply(ctx.experiment.genome.design, values: g.values[r], to: doc) }
             doc = try runtime.decode(genome: g, layout: ctx.layout, craft: doc)
@@ -174,54 +192,86 @@ public final class EvalWorker {
         return doc
     }
 
+    /// A/B knob for benches: PW_EVAL_SPLIT=0 schedules whole candidates (the old granularity).
+    static let splitEpisodes = ProcessInfo.processInfo.environment["PW_EVAL_SPLIT"] != "0"
+
+    /// One episode's raw result (aggregated per candidate by `aggregate`).
+    public struct EpisodeResult {
+        var outcome = EpisodeOutcome(), sums: [Double] = [], simT = 0.0, ticks = 0
+        var error: String? = nil
+    }
+
+    @inline(__always) func episodeSeed(generation: Int, candidate: Int, episode ep: Int) -> UInt64 {
+        let e = ctx.experiment
+        return e.episode.commonRandomNumbers ? EvoRNG.derive(e.seed, generation, -1, ep) : EvoRNG.derive(e.seed, generation, candidate, ep)
+    }
+
+    /// Prepare (when `prepared` is false) and run episode `ep` of a candidate. Errors are captured, never thrown.
+    func runEpisodeItem(_ g: Genome, generation: Int, candidate: Int, episode ep: Int, prepared: Bool) -> EpisodeResult {
+        do {
+            if !prepared { _ = try prepare(g) }
+            let (out, sums, t, k) = try runEpisode(g, generation: generation, candidate: candidate, episode: ep,
+                                                   seed: episodeSeed(generation: generation, candidate: candidate, episode: ep), observer: nil)
+            return EpisodeResult(outcome: out, sums: sums, simT: t, ticks: k)
+        } catch let s as ScriptError { return EpisodeResult(error: s.description) }
+        catch { return EpisodeResult(error: "\(error)") }
+    }
+
+    /// Candidate fitness from its episodes in episode order (identical to evaluating them sequentially).
+    func aggregate(_ eps: UnsafeBufferPointer<EpisodeResult>) -> Fitness {
+        let e = ctx.experiment.episode
+        if let err = eps.first(where: { $0.error != nil })?.error { return .failed(err) }
+        var totals: [Double] = [], termRows: [[Double]] = [], descs: [[Double]] = []
+        var extraTerms: [String: [Double]] = [:]
+        var ticks = 0, simT = 0.0
+        for r in eps {
+            var row = r.sums
+            for (name, v) in r.outcome.terms {
+                if let i = ctx.termNames.firstIndex(of: name) { row[i] = v } else { extraTerms[name, default: []].append(v) }
+            }
+            totals.append(r.outcome.fitness ?? row.reduce(0, +))
+            termRows.append(row)
+            if let d = r.outcome.descriptor { descs.append(d) }
+            ticks += r.ticks; simT += r.simT
+        }
+        func agg(_ xs: [Double]) -> Double {
+            guard !xs.isEmpty else { return 0 }
+            switch e.aggregate {
+            case "min": return xs.min()!
+            case "median": let s = xs.sorted(); return s.count % 2 == 1 ? s[s.count / 2] : 0.5 * (s[s.count / 2 - 1] + s[s.count / 2])
+            default: return xs.reduce(0, +) / Double(xs.count)
+            }
+        }
+        var f = Fitness(total: agg(totals))
+        for (i, name) in ctx.termNames.enumerated() { f.terms[name] = agg(termRows.map { $0[i] }) }
+        for (k, v) in extraTerms { f.terms[k] = agg(v) }
+        if let d0 = descs.first, descs.allSatisfy({ $0.count == d0.count }) {
+            f.descriptor = (0..<d0.count).map { j in descs.reduce(0) { $0 + $1[j] } / Double(descs.count) }
+        }
+        f.episodes = eps.count; f.simSeconds = simT; f.controlTicks = ticks
+        if !f.total.isFinite { return .failed("fitness is not finite (\(f.total))") }
+        return f
+    }
+
     /// Evaluate one candidate over all its episodes.
     public func evaluate(_ g: Genome, generation: Int, candidate: Int) -> Fitness {
-        let e = ctx.experiment.episode
-        do {
-            _ = try prepare(g)
-            let n = max(1, e.episodesPerCandidate)
-            var totals: [Double] = [], termRows: [[Double]] = [], descs: [[Double]] = []
-            var extraTerms: [String: [Double]] = [:]
-            var ticks = 0, simT = 0.0
-            for ep in 0..<n {
-                let seed = e.commonRandomNumbers ? EvoRNG.derive(ctx.experiment.seed, generation, -1, ep) : EvoRNG.derive(ctx.experiment.seed, generation, candidate, ep)
-                let (out, sums, t, k) = try runEpisode(g, generation: generation, candidate: candidate, episode: ep, seed: seed, observer: nil)
-                var row = sums
-                for (name, v) in out.terms {
-                    if let i = ctx.termNames.firstIndex(of: name) { row[i] = v } else { extraTerms[name, default: []].append(v) }
-                }
-                totals.append(out.fitness ?? row.reduce(0, +))
-                termRows.append(row)
-                if let d = out.descriptor { descs.append(d) }
-                ticks += k; simT += t
-            }
-            func agg(_ xs: [Double]) -> Double {
-                guard !xs.isEmpty else { return 0 }
-                switch e.aggregate {
-                case "min": return xs.min()!
-                case "median": let s = xs.sorted(); return s.count % 2 == 1 ? s[s.count / 2] : 0.5 * (s[s.count / 2 - 1] + s[s.count / 2])
-                default: return xs.reduce(0, +) / Double(xs.count)
-                }
-            }
-            var f = Fitness(total: agg(totals))
-            for (i, name) in ctx.termNames.enumerated() { f.terms[name] = agg(termRows.map { $0[i] }) }
-            for (k, v) in extraTerms { f.terms[k] = agg(v) }
-            if let d0 = descs.first, descs.allSatisfy({ $0.count == d0.count }) {
-                f.descriptor = (0..<d0.count).map { j in descs.reduce(0) { $0 + $1[j] } / Double(descs.count) }
-            }
-            f.episodes = n; f.simSeconds = simT; f.controlTicks = ticks
-            if !f.total.isFinite { return .failed("fitness is not finite (\(f.total))") }
-            return f
-        } catch let s as ScriptError {
-            return .failed(s.description)
-        } catch {
-            return .failed("\(error)")
+        let n = max(1, ctx.experiment.episode.episodesPerCandidate)
+        var eps: [EpisodeResult] = []
+        eps.reserveCapacity(n)
+        do { _ = try prepare(g) }
+        catch let s as ScriptError { return .failed(s.description) }
+        catch { return .failed("\(error)") }
+        for ep in 0..<n {
+            let r = runEpisodeItem(g, generation: generation, candidate: candidate, episode: ep, prepared: true)
+            eps.append(r)
+            if r.error != nil { break }
         }
+        return eps.withUnsafeBufferPointer { aggregate($0) }
     }
 
     /// Spawn transform + initial velocity for an episode.
     func spawn(_ rng: inout EvoRNG) -> (Transform, Vec3d) {
-        let s = ctx.experiment.episode.spawn, w = ctx.world
+        let s = ctx.experiment.episode.spawn, w = world
         var p = s.position.map { $0.count >= 3 ? Vec3d($0[0], $0[1], $0[2]) : w.spawn.position } ?? w.spawn.position
         if s.jitterPosition > 0 { p.x += rng.uniform(-1, 1) * s.jitterPosition; p.z += rng.uniform(-1, 1) * s.jitterPosition }
         let heading = s.headingDeg + (s.jitterHeadingDeg > 0 ? rng.uniform(-1, 1) * s.jitterHeadingDeg : 0)
@@ -243,7 +293,7 @@ public final class EvalWorker {
     }
 
     @inline(__always) func fillState(_ env: SimEnvironment, spawnXZ: Vec2d) {
-        frame.state = CraftStateSnapshot.capture(sim, time: env.time, surface: ctx.world.surfaceHeight(x: sim.position.x, z: sim.position.z), spawnXZ: spawnXZ)
+        frame.state = CraftStateSnapshot.capture(sim, time: env.time, surface: world.surfaceHeight(x: sim.position.x, z: sim.position.z), spawnXZ: spawnXZ)
     }
 
     @inline(__always) func observe(_ env: SimEnvironment) {
@@ -267,7 +317,7 @@ public final class EvalWorker {
         for i in 0..<sim.outputs.count { sim.setOutput(index: i, value: 0) }
         neat?.reset(); mlp?.reset()
 
-        var env = ctx.world.makeEnvironment(wind: Vec3d(sin(windDir), 0, cos(windDir)) * windSpeed, time: 0)
+        var env = world.makeEnvironment(wind: Vec3d(sin(windDir), 0, cos(windDir)) * windSpeed, time: 0)
         let hz = max(1, e.controller.hz), dt = 1 / hz
         let steps = max(1, Int((e.episode.duration * hz).rounded()))
         let spawnXZ = Vec2d(sp.position.x, sp.position.z)
@@ -278,11 +328,11 @@ public final class EvalWorker {
         frame.info = info
         for i in 0..<frame.outputs.count { frame.outputs[i] = 0 }
         for i in 0..<frame.termSums.count { frame.termSums[i] = 0 }
-        let bounds = ctx.world.terrain?.bounds
+        let bounds = world.terrain?.bounds
         let mode = e.controller.mode
         fillState(env, spawnXZ: spawnXZ); observe(env)
         try runtime.beginEpisode(genome: g, frame: frame)
-        let obstacles = ctx.world.obstacles
+        let obstacles = world.obstacles
         var nCorners = obstacles != nil ? sim.writeWorldCorners(cornersPrev, capacity: cornerCap) : 0
         var prevPos = sim.position
 
@@ -291,10 +341,10 @@ public final class EvalWorker {
             frame.tick = k
             // native policy
             if mode == "mlp", let mlp {
-                for j in 0..<ctx.mlpInputs.count { mlpX[j] = frame.inputs[ctx.mlpInputs[j]] * ctx.mlpInputScale[j] }
+                for j in 0..<mlpIn.count { mlpX[j] = frame.inputs[mlpIn[j]] * mlpScale[j] }
                 mlp.forward(mlpX, mlpY)
-                for j in 0..<ctx.mlpOutputs.count {
-                    let o = ctx.mlpOutputs[j], r = ctx.outputRanges[o]
+                for j in 0..<mlpOut.count {
+                    let o = mlpOut[j], r = ranges[o]
                     frame.outputs[o] = r.lowerBound + (mlpY[j] + 1) * 0.5 * (r.upperBound - r.lowerBound)
                 }
             } else if mode == "neat", let net = neat {
@@ -364,21 +414,38 @@ public final class SimEvaluator: Evaluator {
         let t0 = DispatchTime.now().uptimeNanoseconds
         // One job per worker; each pulls the next candidate index (dynamic balancing, workers never shared).
         let workers = pool.all
-        let lock = NSLock()
-        var next = 0
+        // Work items are (candidate, episode) pairs when the craft is shared (no per-candidate rebuild), so a
+        // generation's tail is one episode, not one candidate. Each item writes its own slot; candidates are
+        // aggregated in episode order afterwards, so results never depend on scheduling. Lock-free counter.
+        let E = max(1, context.experiment.episode.episodesPerCandidate)
+        let split = E > 1 && EvalWorker.splitEpisodes && !context.needsPerCandidateCraft && context.experiment.controller.mode != "neat"
+        let items = split ? n * E : n
+        let eps = UnsafeMutablePointer<EvalWorker.EpisodeResult>.allocate(capacity: max(1, split ? items : 0))
+        let next = Atomic<Int>(0)
         let body: (Range<Int>) -> Void = { r in
             for wi in r {
                 let w = workers[wi]
                 while true {
-                    lock.lock(); let i = next; next += 1; lock.unlock()
-                    if i >= n { break }
-                    if cancel?() == true { (out + i).initialize(to: .failed("cancelled")); continue }
-                    (out + i).initialize(to: w.evaluate(genomes[i], generation: generation, candidate: i))
+                    let k = next.wrappingAdd(1, ordering: .relaxed).oldValue
+                    if k >= items { break }
+                    if split {
+                        let i = k / E, ep = k % E
+                        if cancel?() == true { (eps + k).initialize(to: .init(error: "cancelled")); continue }
+                        (eps + k).initialize(to: w.runEpisodeItem(genomes[i], generation: generation, candidate: i, episode: ep, prepared: false))
+                    } else {
+                        if cancel?() == true { (out + k).initialize(to: .failed("cancelled")); continue }
+                        (out + k).initialize(to: w.evaluate(genomes[k], generation: generation, candidate: k))
+                    }
                 }
             }
         }
-        let jobsN = min(workers.count, n)
+        let jobsN = min(workers.count, items)
         if jobsN <= 1 { body(0..<1) } else { jobs.parallelFor(jobsN, grain: 1, label: "evolution.eval", body) }
+        if split {
+            for i in 0..<n { (out + i).initialize(to: workers[0].aggregate(UnsafeBufferPointer(start: eps + i * E, count: E))) }
+            eps.deinitialize(count: items)
+        }
+        eps.deallocate()
         let res = Array(UnsafeBufferPointer(start: out, count: n))
         out.deinitialize(count: n); out.deallocate()
         var s = EvalStats()

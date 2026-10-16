@@ -121,6 +121,65 @@ kernel void erodeAdvect(constant ErosionU &u [[buffer(0)]], device float *d [[bu
 }
 
 // Thermal weathering: move material from cells steeper than the talus angle (8-neighbourhood, gather form).
+// Fused erodeWater + erodeSediment (+ the evaporation from erodeAdvect): every term the sediment step needs from the
+// water step is own-cell (d, vel), and the neighbour reads (flux, b) are not written here, so one dispatch gives
+// bit-identical results with one fewer full-grid pass and no re-read of d / vel.
+kernel void erodeWaterSediment(constant ErosionU &u [[buffer(0)]], device const float *b [[buffer(1)]], device float *d [[buffer(2)]],
+                               device const float4 *flux [[buffer(3)]], device float2 *vel [[buffer(4)]],
+                               device const float *sIn [[buffer(5)]], device float *sOut [[buffer(6)]], device float *moist [[buffer(7)]],
+                               device float *bOut [[buffer(8)]], uint2 g [[thread_position_in_grid]]) {
+    if (g.x >= u.w || g.y >= u.h) return;
+    int x = int(g.x), y = int(g.y); uint i = eidx(u, x, y);
+    float4 f = flux[i];
+    float inL = x > 0 ? flux[eidx(u,x-1,y)].y : 0.0;
+    float inR = x < int(u.w) - 1 ? flux[eidx(u,x+1,y)].x : 0.0;
+    float inT = y > 0 ? flux[eidx(u,x,y-1)].w : 0.0;
+    float inB = y < int(u.h) - 1 ? flux[eidx(u,x,y+1)].z : 0.0;
+    float dV = u.dt * ((inL + inR + inT + inB) - (f.x + f.y + f.z + f.w));
+    float d0 = d[i];
+    float d1 = max(0.0, d0 + dV / (u.cell * u.cell));
+    float dAvg = max(0.5 * (d0 + d1), 1e-3);
+    float wx = 0.5 * (inL - f.x + f.y - inR), wy = 0.5 * (inT - f.z + f.w - inB);
+    float2 v = float2(wx, wy) / (u.cell * dAvg);
+    float vmax = 0.5 * u.cell / u.dt;
+    float vl = length(v); if (vl > vmax) v *= vmax / vl;
+    vel[i] = v;
+    float r = ehash(g.x / 16u + (u.iter / 16u) * 7919u, g.y / 16u + u.iter / 16u);
+    float water = d1 + u.rain * u.dt * (0.4 + 1.2 * r);
+    moist[i] += min(d1, 2.0) + 0.02 * min(vl, 10.0);
+    // sediment
+    float bx = (b[eidx(u,x+1,y)] - b[eidx(u,x-1,y)]) / (2.0 * u.cell);
+    float by = (b[eidx(u,x,y+1)] - b[eidx(u,x,y-1)]) / (2.0 * u.cell);
+    float slope2 = bx * bx + by * by;
+    float sinA = sqrt(slope2 / (1.0 + slope2));
+    float depthTerm = saturate(1.0 - max(0.0, u.maxDepth - water) / u.maxDepth);
+    depthTerm = sqrt(depthTerm);
+    float C = u.Kc * u.strength * max(sinA, 0.03) * length(v) * depthTerm;
+    float s = sIn[i];
+    float bb = b[i];
+    if (C > s) {
+        float e = min(u.Ks * u.dt * (C - s), 0.05 * u.cell);
+        bb -= e; s += e;
+    } else {
+        float dep = u.Kd * u.dt * (s - C);
+        bb += dep; s -= dep;
+    }
+    bOut[i] = bb;
+    sOut[i] = s;
+    d[i] = water * (1.0 - u.evap * u.dt);          // evaporation (was in erodeAdvect)
+}
+
+kernel void erodeAdvectOnly(constant ErosionU &u [[buffer(0)]], device const float2 *vel [[buffer(4)]],
+                            device const float *sIn [[buffer(6)]], device float *sOut [[buffer(5)]], uint2 g [[thread_position_in_grid]]) {
+    if (g.x >= u.w || g.y >= u.h) return;
+    int x = int(g.x), y = int(g.y); uint i = eidx(u, x, y);
+    float2 p = float2(g) - vel[i] * u.dt / u.cell;
+    p = clamp(p, float2(0.0), float2(u.w - 1, u.h - 1));
+    int2 p0 = int2(floor(p)); float2 fr = p - float2(p0);
+    float s00 = sIn[eidx(u,p0.x,p0.y)], s10 = sIn[eidx(u,p0.x+1,p0.y)], s01 = sIn[eidx(u,p0.x,p0.y+1)], s11 = sIn[eidx(u,p0.x+1,p0.y+1)];
+    sOut[i] = mix(mix(s00, s10, fr.x), mix(s01, s11, fr.x), fr.y);
+}
+
 inline float thermalOut(constant ErosionU &u, device const float *b, int x, int y, thread float &total) {
     float h = b[eidx(u,x,y)], maxD = 0.0; total = 0.0;
     for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
@@ -173,6 +232,9 @@ kernel void erodeThermal(constant ErosionU &u [[buffer(0)]], device const float 
         func pso(_ n: String) throws -> any MTLComputePipelineState { try device.makeComputePipelineState(function: ShaderLibrary.shared.function(lib, n)) }
         let pRainFlux = try pso("erodeRainFlux"), pWater = try pso("erodeWater"), pSed = try pso("erodeSediment")
         let pAdvect = try pso("erodeAdvect"), pThermal = try pso("erodeThermal")
+        let pWaterSed = try pso("erodeWaterSediment"), pAdvectOnly = try pso("erodeAdvectOnly")
+        // Fused 3-pass hydraulic step (default); PW_EROSION_LEGACY=1 runs the original 4 passes for A/B.
+        let fused = ProcessInfo.processInfo.environment["PW_EROSION_LEGACY"] == nil
 
         let W = field.width, H = field.height, n = W * H
         let fbytes = n * 4
@@ -205,6 +267,16 @@ kernel void erodeThermal(constant ErosionU &u [[buffer(0)]], device const float 
                     e.setComputePipelineState(pRainFlux)
                     e.setBuffer(bCur, offset: 0, index: 1); e.setBuffer(water, offset: 0, index: 2); e.setBuffer(flux, offset: 0, index: 3)
                     e.dispatchThreads(grid, threadsPerThreadgroup: tg)
+                    if fused {
+                        e.setComputePipelineState(pWaterSed)
+                        e.setBuffer(vel, offset: 0, index: 4); e.setBuffer(moist, offset: 0, index: 7)
+                        e.setBuffer(sA, offset: 0, index: 5); e.setBuffer(sB, offset: 0, index: 6); e.setBuffer(bOther, offset: 0, index: 8)
+                        e.dispatchThreads(grid, threadsPerThreadgroup: tg)
+                        swap(&bCur, &bOther)
+                        e.setComputePipelineState(pAdvectOnly)
+                        e.setBuffer(sB, offset: 0, index: 6); e.setBuffer(sA, offset: 0, index: 5)
+                        e.dispatchThreads(grid, threadsPerThreadgroup: tg)
+                    } else {
                     e.setComputePipelineState(pWater)
                     e.setBuffer(vel, offset: 0, index: 4); e.setBuffer(moist, offset: 0, index: 7)
                     e.dispatchThreads(grid, threadsPerThreadgroup: tg)
@@ -215,6 +287,7 @@ kernel void erodeThermal(constant ErosionU &u [[buffer(0)]], device const float 
                     e.setComputePipelineState(pAdvect)
                     e.setBuffer(sB, offset: 0, index: 6); e.setBuffer(sA, offset: 0, index: 5)
                     e.dispatchThreads(grid, threadsPerThreadgroup: tg)
+                    }
                     // a light thermal pass every 4 hydraulic steps keeps channels from over-steepening
                     if it % 4 == 3 {
                         e.setComputePipelineState(pThermal)

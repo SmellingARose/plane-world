@@ -114,6 +114,9 @@ public enum Terrarium {
 public final class DEMTileFetcher: @unchecked Sendable {
     public static let shared = DEMTileFetcher()
     private let session: URLSession
+    /// Disk-cache reads and PNG decode run here: utility QoS (E-cores welcome), off the main thread and off the
+    /// JobSystem pool that physics/training use.
+    private let io = DispatchQueue(label: "terrain.dem.io", qos: .utility, attributes: .concurrent)
     public init(timeout: TimeInterval = 20) {
         let c = URLSessionConfiguration.default
         c.timeoutIntervalForRequest = timeout
@@ -127,18 +130,22 @@ public final class DEMTileFetcher: @unchecked Sendable {
     /// Completion is called on an arbitrary thread with heights (256², top row north) or an error.
     public func fetch(_ t: TileID, completion: @escaping @Sendable (Result<[Float], FetchError>) -> Void) {
         let cache = Terrarium.cacheURL(t)
-        if let data = try? Data(contentsOf: cache) {
-            JobSystem.shared.submit {
+        io.async { [self] in
+            if let data = try? Data(contentsOf: cache) {
                 if let d = Terrarium.decodePNG(data), d.width == Terrarium.tileSize, d.height == Terrarium.tileSize { completion(.success(d.heights)) }
                 else { try? FileManager.default.removeItem(at: cache); completion(.failure(.decode)) }
+                return
             }
-            return
+            fetchNetwork(t, cache: cache, completion: completion)
         }
+    }
+
+    private func fetchNetwork(_ t: TileID, cache: URL, completion: @escaping @Sendable (Result<[Float], FetchError>) -> Void) {
         session.dataTask(with: Terrarium.url(t)) { data, resp, err in
             if let err { completion(.failure(.network(err.localizedDescription))); return }
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200, let data else { completion(.failure(.http(code))); return }
-            JobSystem.shared.submit {
+            self.io.async {
                 guard let d = Terrarium.decodePNG(data), d.width == Terrarium.tileSize, d.height == Terrarium.tileSize else { completion(.failure(.decode)); return }
                 try? FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try? data.write(to: cache, options: .atomic)

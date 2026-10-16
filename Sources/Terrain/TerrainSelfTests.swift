@@ -119,6 +119,28 @@ public enum TerrainSelfTests {
             ctx.log("hillshades: \(outDir.appendingPathComponent("pw-terrain-eroded.png").path)")
         }
 
+        SelfTestRegistry.register("terrain", "erosion-fused-ab") { ctx in
+            // The fused 3-pass hydraulic step must be bit-identical to the original 4-pass one; also times both.
+            guard GPU.shared != nil else { ctx.fail("no Metal device"); return }
+            let size = 513
+            var p = ProceduralParams(); p.size = size; p.spacing = 8; p.erosionIterations = 0; p.thermalIterations = 0
+            let half = Double(size - 1) * 4
+            let f = HeightField(width: size, height: size, spacing: 8, origin: Vec2d(-half, -half))
+            ProceduralTerrain.generate(into: f, seed: 3, params: p)
+            let base = Array(f.base.buffer)
+            var ep = ErosionParams(); ep.iterations = 120; ep.thermalIterations = 20
+            var outs: [[Float]] = [], ms: [Double] = []
+            for legacy in [true, false, true, false] {
+                if legacy { setenv("PW_EROSION_LEGACY", "1", 1) } else { unsetenv("PW_EROSION_LEGACY") }
+                base.withUnsafeBufferPointer { b in f.base.ptr.update(from: b.baseAddress!, count: b.count) }
+                let r = try TerrainErosion.run(field: f, params: ep)
+                outs.append(Array(f.base.buffer)); ms.append(r.gpuMs)
+            }
+            unsetenv("PW_EROSION_LEGACY")
+            ctx.expect(outs[0] == outs[1] && outs[2] == outs[3], "fused erosion bit-identical to 4-pass")
+            ctx.log(String(format: "513², 140 iterations GPU ms: 4-pass %.1f / %.1f, fused %.1f / %.1f", ms[0], ms[2], ms[1], ms[3]))
+        }
+
         SelfTestRegistry.register("terrain", "dem-decode") { ctx in
             for h: Float in [-10994, -1, 0, 0.5, 8848.25, 123.75] {
                 let (r, g, b) = Terrarium.encode(h)

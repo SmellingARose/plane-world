@@ -193,6 +193,8 @@ public final class FluidZone: @unchecked Sendable {
 
     private func finish(_ cb: any MTLCommandBuffer, substeps: Int, simulated: Double) {
         let f = forceBuf.contents().assumingMemoryBound(to: Float.self)
+        // GPU work is complete and inFlight is still set, so the particle buffers are ours to reorder.
+        if autoSortInterval > 0 && simulatedTime + simulated - lastSortTime >= autoSortInterval { sortCore() }
         lock.lock()
         for (i, id) in obstacleIDs.enumerated() {
             let s = 1.0 / Double(substeps)
@@ -289,6 +291,47 @@ public final class FluidZone: @unchecked Sendable {
             ce.endEncoding()
         }
         return cb
+    }
+
+    // MARK: particle ordering
+
+    /// Simulated seconds between automatic re-sorts (0 = never). Measured on M4, 64³ / 595k particles: a fully
+    /// mixed order costs 7.4 ms per GPU substep vs 3.1 ms sorted; the CPU sort takes ~4 ms, so once per
+    /// simulated second is a clear win. Runs on the Metal completion thread, never on the sim/main thread.
+    public var autoSortInterval = 1.0
+    private var lastSortTime = 0.0
+    private var sortCounts: [UInt32] = [], sortPos: [SIMD4<Float>] = [], sortVel: [SIMD4<Float>] = []
+    /// Reorder particles by cell (counting sort, CPU, in place on the shared buffers - zero-copy, no GPU transfer),
+    /// so the P2G atomics and G2P gathers of neighbouring threads hit neighbouring cache lines.
+    /// Call only when no step is in flight. Scratch is allocated once.
+    public func sortParticlesByCell() {
+        lock.lock(); let busy = inFlight; lock.unlock()
+        guard !busy else { return }
+        sortCore()
+    }
+    private func sortCore() {
+        guard particleCount > 1 else { return }
+        lastSortTime = simulatedTime
+        let nCells = dims.x * dims.y * dims.z
+        if sortCounts.count != nCells + 1 { sortCounts = [UInt32](repeating: 0, count: nCells + 1) }
+        if sortPos.count < particleCount {
+            sortPos = [SIMD4<Float>](repeating: .zero, count: particleCount); sortVel = sortPos
+        }
+        let p = posBuf.contents().assumingMemoryBound(to: SIMD4<Float>.self)
+        let v = velBuf.contents().assumingMemoryBound(to: SIMD4<Float>.self)
+        let inv = Float(1 / cellSize), nx = dims.x, ny = dims.y, nz = dims.z, n = particleCount
+        @inline(__always) func cell(_ q: SIMD4<Float>) -> Int {
+            let cx = min(max(Int(q.x * inv), 0), nx - 1), cy = min(max(Int(q.y * inv), 0), ny - 1), cz = min(max(Int(q.z * inv), 0), nz - 1)
+            return cx + nx * (cy + ny * cz)
+        }
+        sortCounts.withUnsafeMutableBufferPointer { cb in sortPos.withUnsafeMutableBufferPointer { sp in sortVel.withUnsafeMutableBufferPointer { sv in
+            let C = cb.baseAddress!, SP = sp.baseAddress!, SV = sv.baseAddress!
+            for i in 0...nCells { C[i] = 0 }
+            for i in 0..<n { C[cell(p[i]) + 1] += 1 }
+            for i in 0..<nCells { C[i + 1] += C[i] }
+            for i in 0..<n { let c = cell(p[i]); let d = Int(C[c]); C[c] += 1; SP[d] = p[i]; SV[d] = v[i] }
+            p.update(from: SP, count: n); v.update(from: SV, count: n)
+        } } }
     }
 
     // MARK: diagnostics (CPU reads of shared particle buffers; call when no step is in flight)

@@ -164,6 +164,24 @@ inline float3 ycocg2rgb(float3 c) { return float3(c.x + c.y - c.z, c.x + c.z, c.
 inline float3 tmap(float3 c) { return c / (1.0 + max(c.r, max(c.g, c.b))); }
 inline float3 tunmap(float3 c) { return c / max(1.0 - max(c.r, max(c.g, c.b)), 1e-4); }
 
+kernel void motionFromDepth(depth2d<float> depth [[texture(0)]],
+                            texture2d<half, access::write> mv [[texture(1)]],
+                            constant FrameUniforms &f [[buffer(2)]],
+                            uint2 gid [[thread_position_in_grid]]) {
+    uint w = mv.get_width(), h = mv.get_height();
+    if (gid.x >= w || gid.y >= h) return;
+    float d = depth.read(gid);
+    float2 uv = (float2(gid) + 0.5) / float2(w, h);
+    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    float4 rel = f.invViewProj * float4(ndc, max(d, 1e-7), 1.0);
+    rel /= rel.w;
+    float4 prev = f.prevViewProj * float4(rel.xyz, 1.0);
+    float4 cur = f.viewProjNoJitter * float4(rel.xyz, 1.0);
+    float2 prevUV = float2(prev.x / prev.w * 0.5 + 0.5, 0.5 - prev.y / prev.w * 0.5);
+    float2 curUV = float2(cur.x / cur.w * 0.5 + 0.5, 0.5 - cur.y / cur.w * 0.5);
+    mv.write(half4(half2(prevUV - curUV), 0.0h, 0.0h), gid);
+}
+
 kernel void taaResolve(texture2d<float> current [[texture(0)]],
                        texture2d<float> history [[texture(1)]],
                        depth2d<float> depth [[texture(2)]],
@@ -203,6 +221,60 @@ kernel void taaResolve(texture2d<float> current [[texture(0)]],
         hist = clamp(hist, lo, hi);
         float speed = length(velocity * float2(w, h));
         float alpha = mix(0.08, 0.25, saturate(speed / 8.0));
+        result = ycocg2rgb(mix(hist, cur, alpha));
+    }
+    out.write(float4(tunmap(max(result, 0.0)), 1.0), gid);
+}
+
+// Temporal upsampling (TAAU): scene rendered at a lower, jittered internal resolution; resolved into an
+// output-resolution history. Each output pixel takes the nearest jittered input sample, weighted by its distance
+// (so accumulation converges to a sharp output-resolution image), with a YCoCg neighbourhood clamp.
+kernel void taauResolve(texture2d<float> current [[texture(0)]],
+                        texture2d<float> history [[texture(1)]],
+                        depth2d<float> depth [[texture(2)]],
+                        texture2d<float, access::write> out [[texture(3)]],
+                        constant FrameUniforms &f [[buffer(2)]],
+                        constant uint &resetHistory [[buffer(3)]],
+                        uint2 gid [[thread_position_in_grid]]) {
+    uint w = out.get_width(), h = out.get_height();
+    if (gid.x >= w || gid.y >= h) return;
+    int iw = int(current.get_width()), ih = int(current.get_height());
+    float2 isz = float2(iw, ih);
+    constexpr sampler ls(filter::linear, address::clamp_to_edge);
+    float2 uv = (float2(gid) + 0.5) / float2(w, h);
+    float2 jUV = float2(f.params.z, -f.params.w) * 0.5;          // NDC jitter -> UV (y down)
+    float2 p = (uv + jUV) * isz - 0.5;                           // continuous input-pixel coordinate
+    int2 ip = int2(round(p));
+    float2 dpx = p - float2(ip);
+    float3 m1 = 0.0, m2 = 0.0; float3 cur = 0.0;
+    float closest = 0.0; int2 cOff = int2(0);
+    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+        uint2 q = uint2(clamp(ip + int2(x, y), int2(0), int2(iw - 1, ih - 1)));
+        float3 c = rgb2ycocg(tmap(current.read(q).rgb));
+        m1 += c; m2 += c * c;
+        if (x == 0 && y == 0) cur = c;
+        float d = depth.read(q);
+        if (d > closest) { closest = d; cOff = int2(x, y); }
+    }
+    float3 mean = m1 / 9.0, sd = sqrt(max(m2 / 9.0 - mean * mean, 0.0));
+    float2 uvC = (float2(ip + cOff) + 0.5) / isz;                // jittered UV of the closest sample
+    float2 ndc = float2(uvC.x * 2.0 - 1.0, 1.0 - uvC.y * 2.0);
+    float4 rel = f.invViewProj * float4(ndc, max(closest, 1e-7), 1.0);
+    rel /= rel.w;
+    float4 prev = f.prevViewProj * float4(rel.xyz, 1.0);
+    float2 prevUV = float2(prev.x / prev.w * 0.5 + 0.5, 0.5 - prev.y / prev.w * 0.5);
+    float2 velocity = prevUV - (uvC - jUV);
+    float2 hUV = uv + velocity;
+    float3 result;
+    if (resetHistory != 0 || any(hUV < 0.0) || any(hUV > 1.0)) {
+        result = ycocg2rgb(rgb2ycocg(tmap(current.sample(ls, uv + jUV).rgb)));
+    } else {
+        float3 hist = rgb2ycocg(tmap(history.sample(ls, hUV).rgb));
+        float3 lo = mean - sd * 1.25, hi = mean + sd * 1.25;
+        hist = clamp(hist, lo, hi);
+        float speed = length(velocity * float2(w, h));
+        float wSample = exp(-2.5 * dot(dpx, dpx));               // 1 at a sample centre, ~0.53 at the cell corner
+        float alpha = mix(0.08, 0.25, saturate(speed / 8.0)) * wSample;
         result = ycocg2rgb(mix(hist, cur, alpha));
     }
     out.write(float4(tunmap(max(result, 0.0)), 1.0), gid);

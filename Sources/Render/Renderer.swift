@@ -9,11 +9,24 @@ import Metal
 import simd
 import Foundation
 import PWCore
+import MetalFX
+
+/// Internal render resolution. `.native` renders at output resolution with the built-in TAA. The other modes render
+/// the scene at a reduced internal resolution and reconstruct with the MetalFX temporal upscaler (which replaces TAA).
+/// The default can be overridden with the environment variable PW_UPSCALE=native|quality|balanced|performance.
+public enum Upscaling: String, Sendable, CaseIterable {
+    case native, quality, balanced, performance
+    public var scale: Double { switch self { case .native: 1; case .quality: 1 / 1.5; case .balanced: 1 / 1.7; case .performance: 0.5 } }
+}
 
 public enum AntiAliasing: String, Sendable, CaseIterable { case taa, msaa4 }
 
 public struct RenderSettings: Sendable {
     public var antiAliasing: AntiAliasing = .taa
+    /// Reconstruction used when `upscaling != .native`: the built-in TAAU (default, ~2 ms at 3200x1920 on M4) or the
+    /// MetalFX temporal scaler (measured ~5.6 ms at the same output size, so slower than rendering natively).
+    public var useMetalFX = ProcessInfo.processInfo.environment["PW_UPSCALER"] == "metalfx"
+    public var upscaling: Upscaling = ProcessInfo.processInfo.environment["PW_UPSCALE"].flatMap(Upscaling.init(rawValue:)) ?? .native
     public var exposure: Float = 0.45
     public var bloomStrength: Float = 0.04
     public var shadowDistance: Float = 1500
@@ -50,6 +63,8 @@ public final class StandardPipelines {
     let tonemap: any MTLRenderPipelineState
     let skyLUT: any MTLComputePipelineState
     let taa: any MTLComputePipelineState
+    let motion: any MTLComputePipelineState
+    let taau: any MTLComputePipelineState
     let bloomDown: any MTLComputePipelineState
     let bloomUp: any MTLComputePipelineState
 
@@ -80,6 +95,8 @@ public final class StandardPipelines {
         tonemap = try rp("fullscreenVertex", "tonemapFragment", color: outputFormat, depth: nil, samples: 1)
         skyLUT = try device.makeComputePipelineState(function: F("skyViewLUT"))
         taa = try device.makeComputePipelineState(function: F("taaResolve"))
+        motion = try device.makeComputePipelineState(function: F("motionFromDepth"))
+        taau = try device.makeComputePipelineState(function: F("taauResolve"))
         bloomDown = try device.makeComputePipelineState(function: F("bloomDownsample"))
         bloomUp = try device.makeComputePipelineState(function: F("bloomUpsample"))
         func ds(_ cmp: MTLCompareFunction, _ write: Bool) -> any MTLDepthStencilState {
@@ -95,7 +112,10 @@ public final class StandardPipelines {
 public final class Renderer {
     public let device: any MTLDevice
     public let queue: any MTLCommandQueue
-    public var settings = RenderSettings() { didSet { if settings.antiAliasing != oldValue.antiAliasing { pipelinesDirty = true; targetsSize = .zero } } }
+    public var settings = RenderSettings() { didSet {
+        if settings.antiAliasing != oldValue.antiAliasing { pipelinesDirty = true; targetsSize = .zero }
+        if settings.upscaling != oldValue.upscaling || settings.useMetalFX != oldValue.useMetalFX { targetsSize = .zero }
+    } }
     public let registry: RenderRegistry
     public let outputFormat: MTLPixelFormat
     public private(set) var pipelines: StandardPipelines
@@ -123,6 +143,13 @@ public final class Renderer {
     private let shadowMap: any MTLTexture
     private let skyLUT: any MTLTexture
     private var lineBuffer: (any MTLBuffer)?
+    // MetalFX path (internal-resolution scene + temporal upscale to output size).
+    private var internalSize = SIMD2<Int>.zero
+    private var motionTex: (any MTLTexture)?
+    private var upscaled: (any MTLTexture)?
+    private var scaler: (any MTLFXTemporalScaler)?
+    /// Size the scene is actually rendered at (equals the output size unless MetalFX upscaling is active).
+    public var renderSize: SIMD2<Int> { internalSize }
 
     // Far-cascade cache (matrices are camera-relative; stored with the camera position they were built at).
     private var cachedCascade: [Mat4] = Array(repeating: .identity, count: 4)
@@ -131,7 +158,7 @@ public final class Renderer {
     private var lastSun = Vec3d.zero, lastShadowDistance: Float = 0
 
     // Per-pass GPU timing.
-    private static let passNames = ["skyLUT", "shadow0", "shadow1", "shadow2", "shadow3", "hdr", "taa", "bloom", "tonemap"]
+    private static let passNames = ["skyLUT", "shadow0", "shadow1", "shadow2", "shadow3", "hdr", "taa", "bloom", "tonemap", "motion", "upscale"]
     private var counterBuffer: (any MTLCounterSampleBuffer)?
     private let timingLock = NSLock()
     private var _passTimesMs: [String: Double] = [:]
@@ -217,6 +244,35 @@ public final class Renderer {
         }
         guard size != targetsSize, size.x > 0, size.y > 0 else { return }
         targetsSize = size; historyValid = false
+        let outSize = size
+        scaler = nil; motionTex = nil; upscaled = nil
+        var size = size
+        if settings.upscaling != .native, settings.antiAliasing == .taa {
+            let s = settings.upscaling.scale
+            let isz = SIMD2(max(8, Int((Double(size.x) * s).rounded())), max(8, Int((Double(size.y) * s).rounded())))
+            internalSize = isz
+        }
+        if settings.upscaling != .native, settings.antiAliasing == .taa, settings.useMetalFX, MTLFXTemporalScalerDescriptor.supportsDevice(device) {
+            let isz = internalSize
+            let d = MTLFXTemporalScalerDescriptor()
+            d.colorTextureFormat = .rgba16Float; d.depthTextureFormat = .depth32Float; d.motionTextureFormat = .rg16Float
+            d.outputTextureFormat = .rgba16Float
+            d.inputWidth = isz.x; d.inputHeight = isz.y; d.outputWidth = size.x; d.outputHeight = size.y
+            d.isAutoExposureEnabled = false
+            if let sc = d.makeTemporalScaler(device: device) {
+                sc.isDepthReversed = true
+                sc.motionVectorScaleX = Float(isz.x); sc.motionVectorScaleY = Float(isz.y)
+                let od = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: size.x, height: size.y, mipmapped: false)
+                od.usage = sc.outputTextureUsage.union(.shaderRead); od.storageMode = .private
+                upscaled = device.makeTexture(descriptor: od)
+                let md = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rg16Float, width: isz.x, height: isz.y, mipmapped: false)
+                md.usage = sc.motionTextureUsage.union(.shaderWrite); md.storageMode = .private
+                motionTex = device.makeTexture(descriptor: md)
+                scaler = sc
+            }
+        }
+        if settings.upscaling == .native || settings.antiAliasing != .taa { internalSize = size }
+        size = internalSize
         func tex(_ f: MTLPixelFormat, _ usage: MTLTextureUsage, samples: Int = 1, mips: Int = 1, w: Int = size.x, h: Int = size.y) -> any MTLTexture {
             let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: f, width: w, height: h, mipmapped: false)
             d.usage = usage; d.storageMode = .private; d.mipmapLevelCount = mips
@@ -233,8 +289,8 @@ public final class Renderer {
         } else {
             depth = tex(.depth32Float, [.renderTarget, .shaderRead])
         }
-        history = (0..<2).map { _ in tex(.rgba16Float, [.shaderRead, .shaderWrite]) }
-        let bw = max(1, size.x / 2), bh = max(1, size.y / 2)
+        history = scaler == nil ? (0..<2).map { _ in tex(.rgba16Float, [.shaderRead, .shaderWrite], w: outSize.x, h: outSize.y) } : []
+        let bw = max(1, outSize.x / 2), bh = max(1, outSize.y / 2)
         let levels = min(6, Int(log2(Double(min(bw, bh)))) )
         let b = tex(.rgba16Float, [.shaderRead, .shaderWrite], mips: max(1, levels), w: bw, h: bh)
         bloom = b
@@ -295,8 +351,9 @@ public final class Renderer {
     public func render(to output: any MTLTexture, camera: Camera, time: Double,
                        present: ((any MTLCommandBuffer) -> Void)? = nil, waitUntilCompleted: Bool = false) {
         inFlight.wait()
-        let size = SIMD2(output.width, output.height)
-        ensureTargets(size)
+        let outSize = SIMD2(output.width, output.height)
+        ensureTargets(outSize)
+        let size = internalSize
         guard let hdr, let depth, let bloom, let cb = queue.makeCommandBuffer() else { inFlight.signal(); return }
         cb.label = "frame \(frameIndex)"
         let slot = frameIndex % 3
@@ -429,17 +486,35 @@ public final class Renderer {
             e.endEncoding()
         }
 
-        // ---- 4. TAA
+        // ---- 4. TAA, or MetalFX temporal upscale
         var resolved: any MTLTexture = hdr
-        if useTAA, !msaa, let ce = computeEncoder(cb, slot: slot, pass: 6) {
+        if let scaler, let motionTex, let upscaled, useTAA, !msaa {
+            if let ce = computeEncoder(cb, slot: slot, pass: 9) {
+                used[9] = true
+                ce.label = "motion"
+                ce.setComputePipelineState(pipelines.motion)
+                ce.setTexture(depth, index: 0); ce.setTexture(motionTex, index: 1)
+                ce.setBuffer(uniformBuffer, offset: uOff, index: 2)
+                ce.dispatchThreads(MTLSize(width: size.x, height: size.y, depth: 1), threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+                ce.endEncoding()
+            }
+            scaler.colorTexture = hdr; scaler.depthTexture = depth; scaler.motionTexture = motionTex; scaler.outputTexture = upscaled
+            // Jitter in input pixels (+x right, +y down); the projection offset was applied in NDC (+y up).
+            scaler.jitterOffsetX = -jitter.x * Float(size.x) * 0.5
+            scaler.jitterOffsetY = jitter.y * Float(size.y) * 0.5
+            scaler.reset = !historyValid
+            scaler.encode(commandBuffer: cb)
+            resolved = upscaled
+            historyValid = true
+        } else if useTAA, !msaa, let ce = computeEncoder(cb, slot: slot, pass: 6) {
             used[6] = true
             ce.label = "taa"
             let src = history[frameIndex % 2], dst = history[(frameIndex + 1) % 2]
-            ce.setComputePipelineState(pipelines.taa)
+            ce.setComputePipelineState(size == outSize ? pipelines.taa : pipelines.taau)
             ce.setTexture(hdr, index: 0); ce.setTexture(src, index: 1); ce.setTexture(depth, index: 2); ce.setTexture(dst, index: 3)
             ce.setBuffer(uniformBuffer, offset: uOff, index: 2)
             var reset: UInt32 = historyValid ? 0 : 1; ce.setBytes(&reset, length: 4, index: 3)
-            ce.dispatchThreads(MTLSize(width: size.x, height: size.y, depth: 1), threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+            ce.dispatchThreads(MTLSize(width: outSize.x, height: outSize.y, depth: 1), threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
             ce.endEncoding()
             resolved = dst
             historyValid = true
