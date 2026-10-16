@@ -185,12 +185,49 @@ public enum PhysicsSelfTests {
                 sim.reset(spawn: sim.restingSpawn())
                 let env = SimEnvironment(), y0 = sim.position.y
                 for o in sim.outputs { sim.setOutput(id: o.id, value: 1) }
-                for _ in 0..<(4 * 60) { sim.step(dt: 1.0 / 60, env: env) }
+                for k in 0..<(4 * 60) {
+                    sim.step(dt: 1.0 / 60, env: env)
+                    if k % 60 == 59 {
+                        let props = sim.parts.filter { $0.type == .prop }
+                        ctx.log(String(format: "  t=%.0f y=%.1f up=%.4f thrust %@ vi %@ ducted %@ ω %@", Double(k + 1) / 60, sim.position.y, sim.orientation.act([0, 1, 0]).y,
+                                       props.map { String(format: "%.0f", $0.thrustNow) }.joined(separator: "/"), props.map { String(format: "%.1f", $0.vi) }.joined(separator: "/"),
+                                       props.map { $0.kDucted ? "y" : "n" }.joined(separator: "/"), props.map { String(format: "%.0f", $0.omega) }.joined(separator: "/")))
+                    }
+                }
                 ctx.log(String(format: "ducted-rocket: climbed %.1f m in 4 s, yaw rate %.5f rad/s, up.y %.3f", sim.position.y - y0, sim.angularVelocityWorld.y,
                                sim.orientation.act([0, 1, 0]).y))
                 ctx.expect(sim.position.y - y0 > 5, "ducted rocket should climb")
-                ctx.expect(abs(sim.angularVelocityWorld.y) < 1e-3, "ducted rocket should not spin")
+                // Counter-rotation cancels most torque; the lower rotor works in the upper one's downwash, so a small residual remains (as in real coaxials).
+                ctx.expect(abs(sim.angularVelocityWorld.y) < 0.02, "ducted rocket should barely yaw")
             } else { ctx.log("examples/crafts/ducted-rocket.json not found from cwd; skipped") }
+        }
+
+        SelfTestRegistry.register("physics", "trainer-full-throttle-roll") { ctx in
+            // Hands-off full-throttle ground roll: torque + prop wash must not flip the craft on the runway.
+            let sim = CraftSim()
+            try sim.load(PhysicsPresets.trainer())
+            sim.reset(spawn: sim.restingSpawn())
+            let env = SimEnvironment()
+            sim.setOutput(id: "eng", value: 1)
+            var t = 0.0, worstUp = 1.0
+            while t < 8 {
+                sim.step(dt: 1.0 / 60, env: env); t += 1.0 / 60
+                let up = sim.orientation.act([0, 1, 0]).y; worstUp = min(worstUp, up)
+                if Int(t * 60) % 60 == 0 {
+                    ctx.log(String(format: "t=%.0f x=%.1f y=%.2f z=%.2f v=%.1f up=%.3f yawRate=%.3f rollRate=%.3f crashed=%@", t, sim.position.x, sim.position.y,
+                                   sim.position.z, simd_length(sim.velocity), up, sim.angularVelocityWorld.y, simd_dot(sim.angularVelocityWorld, sim.heading),
+                                   sim.crashed ? "yes" : "no"))
+                }
+            }
+            ctx.expect(!sim.crashed && worstUp > 0.9, "trainer stays upright on a full-throttle ground roll (worst up.y \(worstUp))")
+            for (elev, ail) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.5, 0.5)] {
+                let s2 = CraftSim(); try s2.load(PhysicsPresets.trainer()); s2.reset(spawn: s2.restingSpawn()); s2.turbulence = 0.3
+                var env = env; env.wind = [2.5, 0, -2.5]
+                s2.setOutput(id: "eng", value: 1); s2.setOutput(id: "elev", value: elev); s2.setOutput(id: "ail", value: ail)
+                var tc = -1.0, tt = 0.0, maxPitch = 0.0
+                while tt < 10 { s2.step(dt: 1.0 / 60, env: env); tt += 1.0 / 60; maxPitch = max(maxPitch, abs(s2.pitchDeg)); if s2.crashed && tc < 0 { tc = tt } }
+                ctx.log(String(format: "elev %+.1f ail %+.1f: crashed at %.2f s, max |pitch| %.0f°, final y %.1f v %.1f", elev, ail, tc, maxPitch, s2.position.y, simd_length(s2.velocity)))
+            }
         }
 
         SelfTestRegistry.register("physics", "many-part-resting-stable") { ctx in
@@ -299,9 +336,15 @@ public enum PhysicsSelfTests {
             // Bit-exact regression guard for hot-loop optimisations: FNV-1a over every state bit of
             // several crafts after 3 s of 1 kHz substeps with turbulence, servos, wheels, prop, jet, solid, CAD panels.
             ctx.expect(kDegF.bitPattern == kDeg.bitPattern, "kDegF matches kDeg bit-for-bit")
-            let d = PhysicsSelfTests.trajectoryDigest()
-            ctx.log(String(format: "digest %016llx", d))
+            // Slipstream off: the isolated-part model must stay bit-identical to the pre-slipstream reference.
+            let d = PhysicsSelfTests.trajectoryDigest(slipstream: false)
+            ctx.log(String(format: "digest (slipstream off) %016llx", d))
             ctx.expect(d == PhysicsSelfTests.expectedDigest, String(format: "trajectory digest %016llx matches reference %016llx", d, PhysicsSelfTests.expectedDigest))
+            let ds = PhysicsSelfTests.trajectoryDigest(slipstream: true)
+            ctx.log(String(format: "digest (slipstream on)  %016llx", ds))
+            #if !DEBUG
+            ctx.expect(ds == PhysicsSelfTests.expectedDigestSlipstream, String(format: "slipstream digest %016llx matches reference %016llx", ds, PhysicsSelfTests.expectedDigestSlipstream))
+            #endif
         }
 }
 }
@@ -315,12 +358,14 @@ extension PhysicsSelfTests {
     #else
     static let expectedDigest: UInt64 = 0x77acda15065ef25b
     #endif
-    static func trajectoryDigest() -> UInt64 {
+    /// Release reference with the rotor slipstream model on (debug builds only log it).
+    static let expectedDigestSlipstream: UInt64 = 0x574c741598910e2d
+    static func trajectoryDigest(slipstream: Bool = CraftSim.slipstreamDefault) -> UInt64 {
         var h: UInt64 = 0xcbf29ce484222325
         func mix(_ x: Double) { var b = x.bitPattern; for _ in 0..<8 { h = (h ^ (b & 0xff)) &* 0x100000001b3; b >>= 8 } }
         func mix(_ v: Vec3d) { mix(v.x); mix(v.y); mix(v.z) }
         func run(_ doc: CraftDocument, air: Bool, mesh: [Vec3d]? = nil, cmd: (CraftOutput) -> Double) {
-            let s = CraftSim()
+            let s = CraftSim(); s.slipstream = slipstream
             guard (try? s.load(doc)) != nil else { h ^= 0xdead; return }
             if let mesh { s.setPartMesh(partID: "cad", soup: mesh) }
             s.turbulence = 0.3

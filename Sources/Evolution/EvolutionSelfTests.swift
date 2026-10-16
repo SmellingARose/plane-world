@@ -15,17 +15,24 @@ private let allocCounter = Atomic<Int>(0)
 private let countedThread = Atomic<UInt>(0)
 private typealias MallocLogger = @convention(c) (UInt32, UInt, UInt, UInt, UInt, UInt32) -> Void
 
+nonisolated(unsafe) let traceBuf = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 32)
+nonisolated(unsafe) let traceAt = Int(ProcessInfo.processInfo.environment["PW_ALLOC_TRACE"] ?? "") ?? 0
+
 enum AllocationCounter {
     nonisolated(unsafe) static var installed = false
     /// Counts heap allocations made by the thread that called install() through libmalloc's `malloc_logger` hook (the one
     /// MallocStackLogging uses). Self-checks; returns false if the hook is unavailable/ineffective.
     static func install() -> Bool {
         if !installed {
-            countedThread.store(UInt(bitPattern: pthread_self()), ordering: .relaxed); _ = allocCounter.load(ordering: .relaxed)   // force lazy globals before hooking
+            countedThread.store(UInt(bitPattern: pthread_self()), ordering: .relaxed); _ = allocCounter.load(ordering: .relaxed); _ = traceBuf; _ = traceAt   // force lazy globals before hooking
             guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "malloc_logger") else { return false }   // RTLD_DEFAULT
             let slot = sym.assumingMemoryBound(to: Optional<MallocLogger>.self)
             slot.pointee = { type, _, _, _, _, _ in   // MALLOC_LOG_TYPE_ALLOCATE, counted on the measuring thread only
-                if type & 2 != 0 && UInt(bitPattern: pthread_self()) == countedThread.load(ordering: .relaxed) { allocCounter.add(1, ordering: .relaxed) }
+                if type & 2 != 0 && UInt(bitPattern: pthread_self()) == countedThread.load(ordering: .relaxed) {
+                    let c = allocCounter.add(1, ordering: .relaxed).newValue
+                    // PW_ALLOC_TRACE=N: dump the stack of allocations N..N+2 (malloc-free: backtrace_symbols_fd)
+                    if traceAt > 0 && c >= traceAt && c < traceAt + 20000 { let n = backtrace(traceBuf, 24); backtrace_symbols_fd(traceBuf, n, 2) }
+                }
             }
             installed = true
         }

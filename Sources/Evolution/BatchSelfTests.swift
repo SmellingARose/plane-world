@@ -84,7 +84,7 @@ public enum BatchSelfTests {
         let dt = 0.02
         func makePair(_ rng: inout EvoRNG) throws -> (CraftSim, CraftSim) {
             let d = vary(sc.doc, &rng)
-            let a = CraftSim(), b = CraftSim()
+            let a = CraftSim(), b = CraftSim(); a.slipstream = false; b.slipstream = false   // batch path implements the isolated-part model
             try a.load(d); try b.load(d)
             if let m = sc.mesh { a.setPartMesh(partID: "cad", soup: m); b.setPartMesh(partID: "cad", soup: m) }
             let turb = rng.uniform(0, 0.8)
@@ -188,7 +188,7 @@ public enum BatchSelfTests {
                 for K in CraftSimBatch.supportedLanes {
                     var sims: [CraftSim] = []
                     for l in 0..<K {
-                        let s = CraftSim(); try s.load(doc); if let mesh { s.setPartMesh(partID: "cad", soup: mesh) }
+                        let s = CraftSim(); s.slipstream = false; try s.load(doc); if let mesh { s.setPartMesh(partID: "cad", soup: mesh) }
                         // CAD: steady flow only. PanelMesh.updateShadows (scalar code, shared by both paths) rebuilds
                         // its occlusion grid with temporary arrays whenever the flow turns by > 3°.
                         s.turbulence = mesh == nil ? 0.5 : 0
@@ -211,7 +211,7 @@ public enum BatchSelfTests {
                         // same lanes on the scalar path: the batch must not allocate more than it does
                         var ref: [CraftSim] = []
                         for l in 0..<K {
-                            let s = CraftSim(); try s.load(doc); s.setPartMesh(partID: "cad", soup: soup); s.turbulence = 0
+                            let s = CraftSim(); s.slipstream = false; try s.load(doc); s.setPartMesh(partID: "cad", soup: soup); s.turbulence = 0
                             s.reset(spawn: Transform(position: [Double(l) * 4, 40, 0])); s.setVelocity(linear: [40, 0, 0], angular: .zero)
                             for i in 0..<s.outputs.count { s.setOutput(index: i, value: 0.6) }
                             ref.append(s)

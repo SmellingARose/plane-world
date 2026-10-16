@@ -50,3 +50,18 @@ Camera-relative rendering: world positions are Double, and GPU positions are Flo
 Passes: sky-view LUT (compute, Hillaire-style single scattering plus an approximate multiple-scattering term, ozone) → 4 stabilised shadow cascades (2048², texel-snapped, PCF) → HDR rgba16f (sky with sun disk, opaque PBR GGX with sky IBL-lite and aerial perspective, debug lines, transparent) → TAA (YCoCg clamp, reprojection from depth) or 4x MSAA → bloom mip chain → ACES fitted tonemap + dither.
 Modules write their own shaders with `ShaderLibrary.shared.library(named:source:device:)`. They get `FrameUniforms`, the atmosphere functions, `shadeSurface` and `applyAerial` from the header. Bind frame data with `FrameContext.bindFrame` (buffer 2, textures 0/1).
 Known TODOs: TAA uses camera-only reprojection (no per-object motion vectors, so moving objects can ghost). IBL is an approximation (no prefiltered cubemap).
+
+## Rotor slipstream (induced flow)
+
+`Sources/Physics/Slipstream.swift`. Each propeller is an actuator disk (momentum theory). Its wake follows the vortex-cylinder axial profile `Δv(s) = v_i(1 + s/√(s²+R²))`, contracts by continuity, drifts with the crossflow, carries swirl in the rotor's rotation sense (prop param `spin` = ±1), and decays by mixing over about 14 radii. Every wing strip, body and *other* propeller adds the wakes to the air it sees. The wake state lags one substep, so the model stays explicit and deterministic.
+
+- **Ducts** are detected automatically: structure covering at least 9 of 12 sectors at 1.0–1.7 R around the disk. Override with prop param `duct` (0 or 1). A ducted rotor gets the σ = 1 duct thrust (same power as an open rotor of √2 times the diameter) and an uncontracted wake.
+- **Rotor ground effect** uses the Cheeseman–Bennett model, limited to z/R ≥ 0.5.
+- **Torque:** the full shaft torque at the operating speed reacts on the airframe. The old model applied a fixed 25 %.
+- **Switching it off:** `PW_SLIPSTREAM=0` or `CraftSim.slipstream = false` gives the isolated-part model, bit-identical to before (trajectory digest 77acda15065ef25b).
+- **Batched lanes** implement only the isolated-part model. Crafts with props and slipstream on use the scalar path (`CraftSimBatch.unsupportedFeatures`).
+- **Not modelled:**
+  - blockage or deflection of the flow by bodies (the wake passes through them; they only feel drag from it)
+  - wakes and downwash from wings
+  - wake reflection off the ground
+  - CAD-panel bodies sampling the wake per panel (they use the craft-level wind)

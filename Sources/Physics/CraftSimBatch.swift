@@ -70,6 +70,7 @@ public final class CraftSimBatch {
     public static func unsupportedFeatures(_ sim: CraftSim) -> [String] {
         var r: [String] = []
         if sim.parts.isEmpty { r.append("empty craft") }
+        if sim.slipstream && sim.aeroEnabled && sim.parts.contains(where: { $0.type == .prop }) { r.append("rotor slipstream (scalar path only)") }
         return r
     }
 

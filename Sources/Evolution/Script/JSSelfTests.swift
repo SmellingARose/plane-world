@@ -279,10 +279,10 @@ public enum JSScriptSelfTests {
             #if DEBUG
             let gens = 3
             #else
-            let gens = 8
+            let gens = 12
             #endif
             for name in ExperimentPresets.names {
-                var e = experiment(name, population: 16, duration: 30)
+                var e = experiment(name, population: 24, duration: 30)
                 let probe = try EvolutionRun(experiment: e, craft: trainer(), world: .flat(), runID: "probe")
                 let kind = usableAlgorithm(e, layoutCount: probe.layout.count)
                 e.algorithm = kind == e.algorithm.kind ? e.algorithm : AlgorithmParams(kind: kind)
