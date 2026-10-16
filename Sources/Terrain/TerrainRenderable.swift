@@ -14,6 +14,7 @@ struct TerrainUniformsGPU {
     var fieldSize: SIMD2<Float>; var baseLevel: Float; var falloff: Float
     var layerScale: SIMD4<Float>
     var misc: SIMD4<Float>
+    var macroOrigin: SIMD4<Float> = .zero
 }
 
 struct TerrainNodeGPU {
@@ -43,6 +44,12 @@ public final class TerrainRenderable: Renderable {
     private let shadowPSO: any MTLRenderPipelineState
     private let normalsPSO: any MTLComputePipelineState
     private let detailPSO: any MTLComputePipelineState
+    private let macroPSO: any MTLComputePipelineState
+    private let hmaxPSO: any MTLComputePipelineState
+    private let hmaxBuf: any MTLBuffer
+    private var macroTex: [any MTLTexture] = []
+    private var macroOrigin = SIMD4<Float>.zero
+    private var macroPending = false
     private let gridFull: any MTLBuffer, gridQuarter: any MTLBuffer
     private let gridFullCount: Int, gridQuarterCount: Int
     private let albedoArr: any MTLTexture, nhArr: any MTLTexture
@@ -68,6 +75,9 @@ public final class TerrainRenderable: Renderable {
         shadowPSO = try device.makeRenderPipelineState(descriptor: sd)
         normalsPSO = try device.makeComputePipelineState(function: F("terrainNormals"))
         detailPSO = try device.makeComputePipelineState(function: F("terrainDetailGen"))
+        macroPSO = try device.makeComputePipelineState(function: F("terrainMacroHash"))
+        hmaxPSO = try device.makeComputePipelineState(function: F("terrainHeightMax"))
+        hmaxBuf = device.makeBuffer(length: 16, options: .storageModePrivate)!; hmaxBuf.label = "terrain.detailHeightMax"
 
         func grid(_ n: Int) -> (any MTLBuffer, Int) {
             var idx: [UInt32] = []; idx.reserveCapacity(n * n * 6)
@@ -114,7 +124,13 @@ public final class TerrainRenderable: Renderable {
         e.setTexture(albedoArr, index: 0); e.setTexture(nhArr, index: 1)
         e.dispatchThreads(MTLSize(width: albedoArr.width, height: albedoArr.height, depth: 4), threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
         e.endEncoding()
-        if let b = cb.makeBlitCommandEncoder() { b.generateMipmaps(for: albedoArr); b.generateMipmaps(for: nhArr); b.endEncoding() }
+        if let b = cb.makeBlitCommandEncoder() { b.generateMipmaps(for: albedoArr); b.generateMipmaps(for: nhArr); b.fill(buffer: hmaxBuf, range: 0..<16, value: 0); b.endEncoding() }
+        if let e = cb.makeComputeCommandEncoder() {
+            e.setComputePipelineState(hmaxPSO)
+            e.setTexture(nhArr, index: 0); e.setBuffer(hmaxBuf, offset: 0, index: 0)
+            e.dispatchThreads(MTLSize(width: nhArr.width, height: nhArr.height, depth: 4), threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+            e.endEncoding()
+        }
         detailReady = true
     }
 
@@ -129,6 +145,25 @@ public final class TerrainRenderable: Renderable {
         normalTex = tex(.rgba16Float, [.shaderRead, .shaderWrite], .private, "terrain.normal")
         boundField = f
         f.markAllDirty()
+        // Macro-variation lattice hashes (/173 m and /41 m) covering the whole quadtree root (+ margin).
+        let (_, levels, ro, _) = layout(f)
+        let rootSize = Double(gridN) * f.spacing * pow(2, Double(levels - 1))
+        let lo = ro - Vec2d(repeating: f.falloff), size = rootSize + 2 * f.falloff
+        macroTex = []
+        var org = SIMD4<Float>.zero
+        for (k, scale) in [173.0, 41.0].enumerated() {
+            let o = (lo / scale).rounded(.down) - 1
+            let n = min(16384, Int((size / scale).rounded(.up)) + 4)
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: n, height: n, mipmapped: false)
+            d.usage = [.shaderRead, .shaderWrite]; d.storageMode = .private
+            let t = device.makeTexture(descriptor: d)!; t.label = "terrain.macroHash\(Int(scale))"
+            macroTex.append(t)
+            if k == 0 { org.x = Float(o.x); org.y = Float(o.y) } else { org.z = Float(o.x); org.w = Float(o.y) }
+        }
+        macroOrigin = org; macroPending = true
+        BenchViews.groundHeight = { [weak f] x, z in f?.sampleHeight(x: x, z: z) ?? 0 }
+        BenchViews.seaLevel = f.splatParams.seaLevel
+        BenchViews.grassWeight = { [weak f] x, z in Double(f?.sampleSplat(x: x, z: z).x ?? 0) }
     }
 
     // MARK: Renderable
@@ -138,6 +173,17 @@ public final class TerrainRenderable: Renderable {
         if boundField !== f { bind(f) }
         guard let heightTex, let splatTex, let normalTex else { return }
         encodeDetailGeneration(frame.commandBuffer)
+        if macroPending, let e = frame.commandBuffer.makeComputeCommandEncoder() {
+            e.label = "terrain.macroHash"
+            e.setComputePipelineState(macroPSO)
+            for (k, t) in macroTex.enumerated() {
+                var o = k == 0 ? SIMD2<Float>(macroOrigin.x, macroOrigin.y) : SIMD2<Float>(macroOrigin.z, macroOrigin.w)
+                e.setTexture(t, index: 0); e.setBytes(&o, length: 8, index: 0)
+                e.dispatchThreads(MTLSize(width: t.width, height: t.height, depth: 1), threadsPerThreadgroup: MTLSize(width: 16, height: 16, depth: 1))
+            }
+            e.endEncoding()
+            macroPending = false
+        }
 
         // 1. stream dirty chunks (height + splat), then rebuild normals for them
         let chunks = f.takeDirtyChunks(max: uploadBudgetChunks)
@@ -169,7 +215,8 @@ public final class TerrainRenderable: Renderable {
         uniforms = TerrainUniformsGPU(camLocal: SIMD2<Float>(Float(camLocal.x), Float(camLocal.y)), camY: Float(cam.y), spacing: Float(f.spacing),
                                       fieldSize: SIMD2<Float>(Float(f.width), Float(f.height)), baseLevel: Float(f.baseLevel), falloff: Float(f.falloff),
                                       layerScale: layerScale,
-                                      misc: SIMD4<Float>(Float(f.splatParams.seaLevel), debugLODColors ? 1 : 0, detailNormalStrength, 0.18))
+                                      misc: SIMD4<Float>(Float(f.splatParams.seaLevel), debugLODColors ? 1 : 0, detailNormalStrength, 0.18),
+                                      macroOrigin: macroOrigin)
 
         // 3. CDLOD selection
         let planes = Self.frustumPlanes(frame.uniforms.viewProjNoJitter)
@@ -207,6 +254,8 @@ public final class TerrainRenderable: Renderable {
         enc.setFragmentTexture(splatTex, index: 3)
         enc.setFragmentTexture(albedoArr, index: 4)
         enc.setFragmentTexture(nhArr, index: 5)
+        enc.setFragmentBuffer(hmaxBuf, offset: 0, index: 5)
+        if macroTex.count == 2 { enc.setFragmentTexture(macroTex[0], index: 6); enc.setFragmentTexture(macroTex[1], index: 7) }
         draw(enc, drawFull, gridFull, gridFullCount)
         draw(enc, drawQuarter, gridQuarter, gridQuarterCount)
     }

@@ -44,13 +44,15 @@ inline float3 groundPattern(constant FrameUniforms &f, float3 rel, float3 base) 
 fragment float4 meshFragment(MeshVOut in [[stage_in]], bool front [[front_facing]],
                              constant FrameUniforms &f [[buffer(2)]],
                              depth2d_array<float> shadowMap [[texture(0)]],
-                             texture2d<float> skyLUT [[texture(1)]]) {
+                             texture2d<float> skyLUT [[texture(1)]],
+                             texture3d<float> apL [[texture(13)]], texture3d<float> apT [[texture(14)]], texture3d<float> apS [[texture(15)]]) {
     float3 N = normalize(in.normal);
     float3 albedo = in.color.rgb;
     if (in.material.z > 0.5 && in.material.z < 1.5) albedo = groundPattern(f, in.rel, albedo);
-    float3 c = shadeSurface(f, skyLUT, shadowMap, in.rel, N, albedo, in.color.a, in.material.x, 1.0);
+    AerialSample ap = aerialLookup(f, apL, apT, apS, in.rel);
+    float3 c = shadeSurfaceT(f, skyLUT, shadowMap, in.rel, N, albedo, in.color.a, in.material.x, 1.0, ap.sunT);
     c += in.color.rgb * in.material.y;                         // emissive
-    c = applyAerial(f, c, in.rel);
+    c = c * ap.T + ap.L;
     return float4(c, 1.0);
 }
 
@@ -86,6 +88,27 @@ kernel void skyViewLUT(texture2d<float, access::write> out [[texture(0)]],
         L += T * transmittanceToSun(p, f.sunDir.xyz) * saturate(dot(n, f.sunDir.xyz)) * 0.12 / PI;
     }
     out.write(float4(L, 1.0), gid);
+}
+
+// ============================================================ aerial-perspective LUT (compute)
+kernel void aerialLUT(texture3d<float, access::write> outL [[texture(0)]],
+                      texture3d<float, access::write> outT [[texture(1)]],
+                      texture3d<float, access::write> outS [[texture(2)]],
+                      constant FrameUniforms &f [[buffer(2)]],
+                      uint3 gid [[thread_position_in_grid]]) {
+    if (gid.x >= uint(kAerialW) || gid.y >= uint(kAerialH) || gid.z >= uint(kAerialD)) return;
+    float u = (float(gid.x) + 0.5) / float(kAerialW);
+    float v = float(gid.y) / float(kAerialH - 1);
+    float w = float(gid.z) / float(kAerialD - 1);
+    float3 rd = aerialDirFromUV(u, v);
+    float d = w * w * kAerialMaxDist;                         // metres (aerial-scaled for L/T, true for sunT)
+    float3 ro = planetPos(f, float3(0.0));
+    float3 T;
+    float3 L = d > 0.0 ? integrateScattering(ro, rd, d * 1e-3, f.sunDir.xyz, 6, T) : float3(0.0);
+    if (d <= 0.0) T = 1.0;
+    outL.write(float4(L * f.sunColor.rgb * f.sunDir.w, 1.0), gid);
+    outT.write(float4(T, 1.0), gid);
+    outS.write(float4(transmittanceToSun(planetPos(f, rd * d), f.sunDir.xyz), 1.0), gid);
 }
 
 // ============================================================ sky (fullscreen)
@@ -182,24 +205,41 @@ kernel void motionFromDepth(depth2d<float> depth [[texture(0)]],
     mv.write(half4(half2(prevUV - curUV), 0.0h, 0.0h), gid);
 }
 
+// Threadgroup-tiled: each 16x16 group loads its 18x18 neighbourhood (colour converted to tonemapped YCoCg once per
+// texel, plus depth) into threadgroup memory, then every pixel reads its 3x3 from there. Same maths as the
+// straightforward 9-tap version, ~1/7 of the texture traffic and colour conversions.
 kernel void taaResolve(texture2d<float> current [[texture(0)]],
                        texture2d<float> history [[texture(1)]],
                        depth2d<float> depth [[texture(2)]],
                        texture2d<float, access::write> out [[texture(3)]],
                        constant FrameUniforms &f [[buffer(2)]],
                        constant uint &resetHistory [[buffer(3)]],
-                       uint2 gid [[thread_position_in_grid]]) {
-    uint w = out.get_width(), h = out.get_height();
-    if (gid.x >= w || gid.y >= h) return;
+                       uint2 gid [[thread_position_in_grid]],
+                       uint2 tid [[thread_position_in_threadgroup]],
+                       uint2 tgid [[threadgroup_position_in_grid]],
+                       uint2 tpg [[threads_per_threadgroup]]) {
+    constexpr int TS = 16, TB = TS + 2;
+    threadgroup float3 tc[TB * TB];
+    threadgroup float td[TB * TB];
+    int w = int(out.get_width()), h = int(out.get_height());
+    int2 base = int2(tgid) * TS - 1;
+    // (edge groups of a non-uniform dispatch have fewer threads: stride by the actual group size)
+    for (int i = int(tid.y * tpg.x + tid.x); i < TB * TB; i += int(tpg.x * tpg.y)) {
+        int2 p = clamp(base + int2(i % TB, i / TB), int2(0), int2(w - 1, h - 1));
+        tc[i] = rgb2ycocg(tmap(current.read(uint2(p)).rgb));
+        td[i] = depth.read(uint2(p));
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (int(gid.x) >= w || int(gid.y) >= h) return;
     constexpr sampler ls(filter::linear, address::clamp_to_edge);
     float3 m1 = 0.0, m2 = 0.0; float3 cur = 0.0;
     float closest = 0.0; int2 cOff = int2(0);
     for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
-        uint2 p = uint2(clamp(int2(gid) + int2(x, y), int2(0), int2(w - 1, h - 1)));
-        float3 c = rgb2ycocg(tmap(current.read(p).rgb));
+        int i = (int(tid.y) + 1 + y) * TB + int(tid.x) + 1 + x;
+        float3 c = tc[i];
         m1 += c; m2 += c * c;
         if (x == 0 && y == 0) cur = c;
-        float d = depth.read(p);
+        float d = td[i];
         if (d > closest) { closest = d; cOff = int2(x, y); }    // reverse-Z: larger = closer
     }
     float3 mean = m1 / 9.0, sd = sqrt(max(m2 / 9.0 - mean * mean, 0.0));

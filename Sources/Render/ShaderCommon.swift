@@ -181,17 +181,32 @@ inline float sampleShadow(constant FrameUniforms &f, depth2d_array<float> sm, fl
     if (any(uv < 0.0) || any(uv > 1.0)) return 1.0;
     float d = uvz.z - 0.0005;
     float2 ts = 1.0 / float2(sm.get_width(), sm.get_height());
-    float sum = 0.0;
-    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++)
-        sum += sm.sample_compare(cmp, uv + float2(x, y) * ts, c, d);
-    float s = sum / 9.0;
+    // 3x3 hardware-PCF taps cover a 4x4 texel footprint; the four corner taps alone cover the same 16 texels,
+    // so when they agree (fully lit or fully shadowed) the remaining five taps cannot change the result.
+    float corners = sm.sample_compare(cmp, uv + float2(-1, -1) * ts, c, d) + sm.sample_compare(cmp, uv + float2(1, -1) * ts, c, d)
+                  + sm.sample_compare(cmp, uv + float2(-1, 1) * ts, c, d) + sm.sample_compare(cmp, uv + float2(1, 1) * ts, c, d);
+    float s;
+    if (corners == 0.0 || corners == 4.0) s = corners * 0.25;
+    else {
+        float sum = corners + sm.sample_compare(cmp, uv, c, d)
+                  + sm.sample_compare(cmp, uv + float2(0, -1) * ts, c, d) + sm.sample_compare(cmp, uv + float2(0, 1) * ts, c, d)
+                  + sm.sample_compare(cmp, uv + float2(-1, 0) * ts, c, d) + sm.sample_compare(cmp, uv + float2(1, 0) * ts, c, d);
+        s = sum / 9.0;
+    }
     float fade = smoothstep(f.cascadeSplits.w * 0.85, f.cascadeSplits.w, viewDepth);
     return mix(s, 1.0, fade);
 }
 
 // Full surface shading used by the standard mesh pipeline and by modules (terrain, vegetation, water).
+inline float3 shadeSurfaceT(constant FrameUniforms &f, texture2d<float> skyLUT, depth2d_array<float> shadowMap,
+                            float3 rel, float3 N, float3 albedo, float roughness, float metallic, float ao, float3 sunT);
 inline float3 shadeSurface(constant FrameUniforms &f, texture2d<float> skyLUT, depth2d_array<float> shadowMap,
                            float3 rel, float3 N, float3 albedo, float roughness, float metallic, float ao) {
+    float3 sunT = f.quality.x > 0.5 ? fastSunTransmittance(f.sunDir.xyz) : transmittanceToSun(planetPos(f, rel), f.sunDir.xyz);
+    return shadeSurfaceT(f, skyLUT, shadowMap, rel, N, albedo, roughness, metallic, ao, sunT);
+}
+inline float3 shadeSurfaceT(constant FrameUniforms &f, texture2d<float> skyLUT, depth2d_array<float> shadowMap,
+                            float3 rel, float3 N, float3 albedo, float roughness, float metallic, float ao, float3 sunT) {
     float3 V = normalize(-rel);
     float3 Ls = f.sunDir.xyz;
     float NoV = max(dot(N, V), 1e-4), NoL = saturate(dot(N, Ls));
@@ -201,7 +216,6 @@ inline float3 shadeSurface(constant FrameUniforms &f, texture2d<float> skyLUT, d
 
     float viewDepth = dot(rel, f.cameraForward.xyz);
     float shadow = NoL > 0.0 ? sampleShadow(f, shadowMap, rel, N, viewDepth) : 0.0;
-    float3 sunT = f.quality.x > 0.5 ? fastSunTransmittance(Ls) : transmittanceToSun(planetPos(f, rel), Ls);
     float3 sunE = f.sunColor.rgb * f.sunDir.w * sunT;
 
     float3 H = normalize(V + Ls);
@@ -221,6 +235,50 @@ inline float3 shadeSurface(constant FrameUniforms &f, texture2d<float> skyLUT, d
     float2 ab = envBRDFApprox(roughness, NoV);
     float3 ambient = (diffuseColor * irradiance / PI + prefiltered * (f0 * ab.x + ab.y)) * ao;
     return direct + ambient;
+}
+
+// ---------------------------------------------------------------- aerial-perspective LUT
+// Per-frame 3D LUT over (view azimuth, view elevation, distance) holding exactly what aerialPerspective() and
+// transmittanceToSun(planetPos(rel)) return, so surfaces pay three trilinear fetches instead of ~56 medium evaluations.
+// Bound by FrameContext.bindFrame at fragment textures 13 (inscatter), 14 (view transmittance), 15 (sun transmittance).
+constant float kAerialMaxDist = 100000.0;      // m; beyond this the exact integration is used
+constant int kAerialW = 64, kAerialH = 64, kAerialD = 48;
+inline float aerialUnit(float x, int n) { return 0.5 / float(n) + x * (1.0 - 1.0 / float(n)); }
+inline float2 aerialUV(float3 dir) {
+    float az = atan2(dir.z, dir.x) * (0.5 / PI);
+    float el = asin(clamp(dir.y, -1.0, 1.0));
+    float v = 0.5 + 0.5 * sign(el) * sqrt(abs(el) / (0.5 * PI));
+    return float2(az, aerialUnit(v, kAerialH));
+}
+inline float aerialW(float dist) { return aerialUnit(sqrt(saturate(dist / kAerialMaxDist)), kAerialD); }
+inline float3 aerialDirFromUV(float u, float v) {
+    float az = u * 2.0 * PI;
+    float l = v * 2.0 - 1.0;
+    float el = sign(l) * l * l * 0.5 * PI;
+    return float3(cos(el) * cos(az), sin(el), cos(el) * sin(az));
+}
+struct AerialSample { float3 L; float3 T; float3 sunT; };
+inline AerialSample aerialLookup(constant FrameUniforms &f, texture3d<float> apL, texture3d<float> apT, texture3d<float> apS, float3 rel) {
+    AerialSample a;
+    float dist = length(rel);
+    if (f.quality.x > 0.5) {
+        float T = exp(-dist * 1e-3 * f.quality.y);
+        a.L = f.fogColor.rgb * f.sunDir.w * (1.0 - T); a.T = float3(T); a.sunT = fastSunTransmittance(f.sunDir.xyz);
+        return a;
+    }
+    float3 dir = rel / max(dist, 1e-3);
+    if (dist * f.atmos.x > kAerialMaxDist) {                     // rare: exact path
+        a.L = aerialPerspective(f, rel, a.T);
+        a.sunT = transmittanceToSun(planetPos(f, rel), f.sunDir.xyz);
+        return a;
+    }
+    constexpr sampler s(filter::linear, s_address::repeat, t_address::clamp_to_edge, r_address::clamp_to_edge);
+    float2 uv = aerialUV(dir);
+    float3 uvw = float3(uv, aerialW(dist * f.atmos.x));
+    a.L = apL.sample(s, uvw).rgb; a.T = apT.sample(s, uvw).rgb;
+    // sun transmittance depends on the true point (not the scaled aerial distance)
+    a.sunT = apS.sample(s, float3(uv, aerialW(dist))).rgb;
+    return a;
 }
 
 inline float3 applyAerial(constant FrameUniforms &f, float3 color, float3 rel) {

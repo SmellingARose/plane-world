@@ -249,6 +249,8 @@ public final class FrameContext {
     public let camera: Camera
     public let shadowMap: any MTLTexture
     public let skyLUT: any MTLTexture
+    /// Aerial-perspective LUTs (inscatter, transmittance, sun transmittance), bound at fragment textures 13-15.
+    public let aerialLUT: [any MTLTexture]
     public let pipelines: StandardPipelines
     public let frameIndex: Int
     public let time: Double
@@ -257,10 +259,10 @@ public final class FrameContext {
     let ring: FrameRing
 
     init(device: any MTLDevice, commandBuffer: any MTLCommandBuffer, uniformBuffer: any MTLBuffer, uniformOffset: Int, uniforms: FrameUniforms,
-         camera: Camera, shadowMap: any MTLTexture, skyLUT: any MTLTexture, pipelines: StandardPipelines, frameIndex: Int, time: Double,
+         camera: Camera, shadowMap: any MTLTexture, skyLUT: any MTLTexture, aerialLUT: [any MTLTexture], pipelines: StandardPipelines, frameIndex: Int, time: Double,
          viewportSize: SIMD2<Int>, sampleCount: Int, ring: FrameRing) {
         self.device = device; self.commandBuffer = commandBuffer; self.uniformBuffer = uniformBuffer; self.uniformOffset = uniformOffset
-        self.uniforms = uniforms; self.camera = camera; self.shadowMap = shadowMap; self.skyLUT = skyLUT; self.pipelines = pipelines
+        self.uniforms = uniforms; self.camera = camera; self.shadowMap = shadowMap; self.skyLUT = skyLUT; self.aerialLUT = aerialLUT; self.pipelines = pipelines
         self.frameIndex = frameIndex; self.time = time; self.viewportSize = viewportSize; self.sampleCount = sampleCount; self.ring = ring
     }
     /// Camera-relative float position of a world point.
@@ -271,6 +273,11 @@ public final class FrameContext {
         enc.setFragmentBuffer(uniformBuffer, offset: uniformOffset, index: 2)
         enc.setFragmentTexture(shadowMap, index: 0)
         enc.setFragmentTexture(skyLUT, index: 1)
+        bindAerial(enc)
+    }
+    /// Bind only the aerial-perspective LUTs (fragment textures 13-15).
+    public func bindAerial(_ enc: any MTLRenderCommandEncoder) {
+        for (i, t) in aerialLUT.enumerated() { enc.setFragmentTexture(t, index: 13 + i) }
     }
     /// Copy per-frame data into a transient GPU buffer (valid for this frame only).
     public func transientBuffer<T>(_ data: [T]) -> (any MTLBuffer, Int)? { ring.allocate(data) }

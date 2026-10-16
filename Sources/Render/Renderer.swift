@@ -62,6 +62,7 @@ public final class StandardPipelines {
     let lines: any MTLRenderPipelineState
     let tonemap: any MTLRenderPipelineState
     let skyLUT: any MTLComputePipelineState
+    let aerialLUT: any MTLComputePipelineState
     let taa: any MTLComputePipelineState
     let motion: any MTLComputePipelineState
     let taau: any MTLComputePipelineState
@@ -94,6 +95,7 @@ public final class StandardPipelines {
         lines = try rp("lineVertex", "lineFragment", color: .rgba16Float, depth: .depth32Float, samples: sampleCount, blend: true)
         tonemap = try rp("fullscreenVertex", "tonemapFragment", color: outputFormat, depth: nil, samples: 1)
         skyLUT = try device.makeComputePipelineState(function: F("skyViewLUT"))
+        aerialLUT = try device.makeComputePipelineState(function: F("aerialLUT"))
         taa = try device.makeComputePipelineState(function: F("taaResolve"))
         motion = try device.makeComputePipelineState(function: F("motionFromDepth"))
         taau = try device.makeComputePipelineState(function: F("taauResolve"))
@@ -142,6 +144,7 @@ public final class Renderer {
     private var bloomViews: [any MTLTexture] = []
     private let shadowMap: any MTLTexture
     private let skyLUT: any MTLTexture
+    private let aerialLUT: [any MTLTexture]
     private var lineBuffer: (any MTLBuffer)?
     // MetalFX path (internal-resolution scene + temporal upscale to output size).
     private var internalSize = SIMD2<Int>.zero
@@ -180,6 +183,10 @@ public final class Renderer {
         let ld = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: 256, height: 128, mipmapped: false)
         ld.usage = [.shaderRead, .shaderWrite]; ld.storageMode = .private
         skyLUT = device.makeTexture(descriptor: ld)!; skyLUT.label = "skyViewLUT"
+        let ad = MTLTextureDescriptor()
+        ad.textureType = .type3D; ad.pixelFormat = .rgba16Float; ad.width = 64; ad.height = 64; ad.depth = 48
+        ad.usage = [.shaderRead, .shaderWrite]; ad.storageMode = .private
+        aerialLUT = ["aerialL", "aerialT", "aerialSunT"].map { let t = device.makeTexture(descriptor: ad)!; t.label = $0; return t }
         if device.supportsCounterSampling(.atStageBoundary),
            let set = device.counterSets?.first(where: { $0.name == MTLCommonCounterSet.timestamp.rawValue }) {
             let d = MTLCounterSampleBufferDescriptor()
@@ -350,6 +357,7 @@ public final class Renderer {
     /// `present` is called with the command buffer before commit (e.g. to present a drawable).
     public func render(to output: any MTLTexture, camera: Camera, time: Double,
                        present: ((any MTLCommandBuffer) -> Void)? = nil, waitUntilCompleted: Bool = false) {
+        let camera = BenchViews.override(camera)
         inFlight.wait()
         let outSize = SIMD2(output.width, output.height)
         ensureTargets(outSize)
@@ -413,9 +421,10 @@ public final class Renderer {
         prevViewProj = u.viewProjNoJitter; prevCameraPos = camera.position
 
         let ctx = FrameContext(device: device, commandBuffer: cb, uniformBuffer: uniformBuffer, uniformOffset: uOff, uniforms: u, camera: camera,
-                               shadowMap: shadowMap, skyLUT: skyLUT, pipelines: pipelines, frameIndex: frameIndex, time: time,
+                               shadowMap: shadowMap, skyLUT: skyLUT, aerialLUT: aerialLUT, pipelines: pipelines, frameIndex: frameIndex, time: time,
                                viewportSize: size, sampleCount: pipelines.sampleCount, ring: ring)
-        let renderables = registry.all
+        var renderables = registry.all
+        if let skip = BenchViews.skip { renderables.removeAll { skip.contains(String(describing: type(of: $0))) } }
         for r in renderables { r.prepare(ctx) }
 
         // ---- 1. sky-view LUT
@@ -427,6 +436,9 @@ public final class Renderer {
             ce.setTexture(skyLUT, index: 0)
             ce.setBuffer(uniformBuffer, offset: uOff, index: 2)
             ce.dispatchThreads(MTLSize(width: skyLUT.width, height: skyLUT.height, depth: 1), threadsPerThreadgroup: MTLSize(width: 16, height: 8, depth: 1))
+            ce.setComputePipelineState(pipelines.aerialLUT)
+            for (i, t) in aerialLUT.enumerated() { ce.setTexture(t, index: i) }
+            ce.dispatchThreads(MTLSize(width: aerialLUT[0].width, height: aerialLUT[0].height, depth: aerialLUT[0].depth), threadsPerThreadgroup: MTLSize(width: 8, height: 8, depth: 2))
             ce.endEncoding()
         }
 
@@ -463,14 +475,17 @@ public final class Renderer {
         attachTiming(rp, slot: slot, pass: 5); used[5] = true
         if let e = cb.makeRenderCommandEncoder(descriptor: rp) {
             e.label = "hdr"
-            // Sky (no depth write, drawn first behind everything).
-            e.setDepthStencilState(pipelines.depthReadOnly)
-            e.setRenderPipelineState(pipelines.sky)
             ctx.bindFrame(e)
-            e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             e.setDepthStencilState(pipelines.depthLessReverseZ)
             e.setFrontFacing(.counterClockwise); e.setCullMode(.back)
             for r in renderables { r.drawOpaque(e, frame: ctx); e.setDepthStencilState(pipelines.depthLessReverseZ) }
+            // Sky after opaque geometry: it sits at the far plane (z = 0, reverse-Z clear value) with a read-only
+            // greater-equal test, so early-z rejects every covered pixel and it only shades what is still empty.
+            e.setDepthStencilState(pipelines.depthReadOnly)
+            e.setCullMode(.none)
+            e.setRenderPipelineState(pipelines.sky)
+            ctx.bindFrame(e)
+            e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             // Debug lines.
             let lv = DebugDraw.shared.take(origin: camera.position)
             if !lv.isEmpty, let (buf, off) = ring.allocate(lv) {
@@ -554,6 +569,23 @@ public final class Renderer {
             e.setFragmentTexture(resolved, index: 0); e.setFragmentTexture(bloomViews.first ?? bloom, index: 1)
             e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             e.endEncoding()
+        }
+        if BenchViews.dumpPath != nil, frameIndex == BenchViews.dumpFrame {
+            // framebufferOnly drawables cannot be read back: tonemap once more into a readable offscreen target.
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: outputFormat, width: output.width, height: output.height, mipmapped: false)
+            d.usage = [.renderTarget, .shaderRead]; d.storageMode = .private
+            if let off = device.makeTexture(descriptor: d) {
+                let dp = MTLRenderPassDescriptor()
+                dp.colorAttachments[0].texture = off; dp.colorAttachments[0].loadAction = .dontCare; dp.colorAttachments[0].storeAction = .store
+                if let e = cb.makeRenderCommandEncoder(descriptor: dp) {
+                    e.setRenderPipelineState(pipelines.tonemap)
+                    e.setFragmentBuffer(uniformBuffer, offset: uOff, index: 2)
+                    e.setFragmentTexture(resolved, index: 0); e.setFragmentTexture(bloomViews.first ?? bloom, index: 1)
+                    e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+                    e.endEncoding()
+                }
+                BenchViews.encodeDump(cb, output: off, device: device)
+            }
         }
         if settings.passTimings, counterBuffer != nil {
             let usedNow = used

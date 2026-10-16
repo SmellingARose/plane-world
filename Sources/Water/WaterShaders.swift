@@ -285,15 +285,26 @@ inline float vnoise(float2 p) {
 }
 
 // Shared physically based water shading. Returns premultiplied colour + coverage.
+inline float4 shadeWaterAP(constant FrameUniforms &f, depth2d_array<float> shadowMap, texture2d<float> skyLUT,
+                         float3 rel, float3 N, float waterDepth, float foamAmount, float crest,
+                         float3 absorb, float scatterCoeff, float3 scatterTint, float roughness, bool underwater, AerialSample ap);
 inline float4 shadeWater(constant FrameUniforms &f, depth2d_array<float> shadowMap, texture2d<float> skyLUT,
                          float3 rel, float3 N, float waterDepth, float foamAmount, float crest,
                          float3 absorb, float scatterCoeff, float3 scatterTint, float roughness, bool underwater) {
+    AerialSample ap;
+    ap.sunT = transmittanceToSun(planetPos(f, rel), f.sunDir.xyz);
+    ap.L = aerialPerspective(f, rel, ap.T);
+    return shadeWaterAP(f, shadowMap, skyLUT, rel, N, waterDepth, foamAmount, crest, absorb, scatterCoeff, scatterTint, roughness, underwater, ap);
+}
+inline float4 shadeWaterAP(constant FrameUniforms &f, depth2d_array<float> shadowMap, texture2d<float> skyLUT,
+                         float3 rel, float3 N, float waterDepth, float foamAmount, float crest,
+                         float3 absorb, float scatterCoeff, float3 scatterTint, float roughness, bool underwater, AerialSample ap) {
     float3 V = normalize(-rel);
     if (underwater) N = -N;
     float NoV = saturate(dot(N, V));
     float3 Ls = f.sunDir.xyz;
     float3 skyScale = f.sunColor.rgb * f.sunDir.w;
-    float3 sunE = skyScale * transmittanceToSun(planetPos(f, rel), Ls);
+    float3 sunE = skyScale * ap.sunT;
     // Fresnel for air→water (n = 1.333); underwater: total internal reflection beyond the critical angle.
     float F = 0.02 + 0.98 * pow(1.0 - NoV, 5.0);
     float sinI = sqrt(saturate(1.0 - NoV * NoV));
@@ -338,8 +349,7 @@ inline float4 shadeWater(constant FrameUniforms &f, depth2d_array<float> shadowM
     color = mix(color, foamLit, fa);
     alpha = mix(alpha, 1.0, fa);
 
-    float3 Ta; float3 La = aerialPerspective(f, rel, Ta);
-    color = color * Ta + La * alpha;
+    color = color * ap.T + ap.L * alpha;
     return float4(color, alpha);
 }
 
@@ -351,7 +361,8 @@ fragment float4 waterFragment(WaterVOut in [[stage_in]],
                               texture2d<float> skyLUT [[texture(1)]],
                               texture2d_array<float> disp [[texture(2)]],
                               texture2d_array<float> deriv [[texture(3)]],
-                              texture2d<float> depthTex [[texture(4)]]) {
+                              texture2d<float> depthTex [[texture(4)]],
+                              texture3d<float> apL [[texture(13)]], texture3d<float> apT [[texture(14)]], texture3d<float> apS [[texture(15)]]) {
     float3 rel = in.rel;
     float dist = length(rel);
     float2 xz = in.baseRel.xz;
@@ -388,8 +399,8 @@ fragment float4 waterFragment(WaterVOut in [[stage_in]],
     float foam = cs.foam * d.misc.x * amp + shoreFoam;
     float roughness = min(d.scatter.w + dist * 2e-5, 0.35);
     float crest = rel.y - in.baseRel.y;
-    float4 c = shadeWater(f, shadowMap, skyLUT, rel, N, waterDepth, foam, crest, d.absorb.rgb, d.absorb.w, d.scatter.rgb,
-                          roughness, !front || d.misc.w > 0.5);
+    float4 c = shadeWaterAP(f, shadowMap, skyLUT, rel, N, waterDepth, foam, crest, d.absorb.rgb, d.absorb.w, d.scatter.rgb,
+                          roughness, !front || d.misc.w > 0.5, aerialLookup(f, apL, apT, apS, rel));
     // Soft edge where the surface meets the shore (depth fade) and river banks.
     float edgeFade = saturate(waterDepth * 4.0) * saturate(in.edge * 4.0 + 0.0001 + (flowLen > 0.01 ? 0.0 : 1.0));
     return c * edgeFade;
