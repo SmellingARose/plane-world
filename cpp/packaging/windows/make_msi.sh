@@ -9,7 +9,7 @@ VERSION=$(grep -E '^CMAKE_PROJECT_VERSION:' "$BUILD/CMakeCache.txt" | cut -d= -f
 cp "$BUILD/src/cli/pwcli.exe" "$BUILD/deploy/"
 mkdir -p "$OUT"
 MSI="$OUT/PlaneWorld-$VERSION-windows-x64.msi"
-wix build -arch x64 -d Version="$VERSION" -bindpath deploy="$(cygpath -w "$BUILD/deploy")" -o "$(cygpath -w "$MSI")" "$(cygpath -w "$HERE/PlaneWorld.wxs")"
+wix build -arch x64 -d Version="$VERSION" -bindpath deploy="$(cygpath -aw "$BUILD/deploy")" -o "$(cygpath -aw "$MSI")" "$(cygpath -aw "$HERE/PlaneWorld.wxs")"
 SIZE=$(stat -c %s "$MSI")
 ls -la "$MSI"
 (( SIZE > 10000000 )) || { echo "error: $MSI is only $SIZE bytes; the deploy folder was not harvested"; exit 1; }
