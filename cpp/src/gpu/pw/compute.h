@@ -46,6 +46,9 @@ public:
     /// Submits; when `wait` blocks until complete and returns the GPU time in ms (or -1 when unavailable).
     virtual double end(bool wait = true) = 0;
     virtual void waitIdle() = 0;
+    /// GPU time (ms) of the most recent submission once it has completed (after end(true), or end(false) followed
+    /// by waitIdle / upload / download); -1 when unknown.
+    virtual double lastGpuMs() const { return -1; }
     virtual const std::string& lastError() const = 0;
 
     /// Convenience: groups needed to cover `n` threads in groups of `t`.

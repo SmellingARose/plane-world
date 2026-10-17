@@ -19,6 +19,7 @@ public:
     id<MTLCommandBuffer> cb = nil, last = nil;
     id<MTLComputeCommandEncoder> enc = nil;
     std::string err;
+    double lastMs = -1;
 
     bool init(const CreateInfo& ci, std::string* e) {
         dev = ci.externalDevice ? (__bridge id<MTLDevice>)ci.externalDevice : MTLCreateSystemDefaultDevice();
@@ -73,7 +74,7 @@ public:
             NSString* src = [[NSString alloc] initWithBytes:code length:size encoding:NSUTF8StringEncoding];
             NSError* e = nil;
             MTLCompileOptions* opt = [MTLCompileOptions new];
-            if (@available(macOS 15.0, *)) opt.mathMode = MTLMathModeSafe;   // no fast-math: CPU-comparable results
+            if (@available(macOS 15.0, *)) opt.mathMode = getenv("PW_METAL_FAST") ? MTLMathModeFast : MTLMathModeSafe;   // no fast-math: CPU-comparable results
             else opt.fastMathEnabled = NO;
             lib = [dev newLibraryWithSource:src options:opt error:&e];
             if (!lib) { err = std::string("MSL compile: ") + (e ? [[e localizedDescription] UTF8String] : "?"); return 0; }
@@ -114,10 +115,18 @@ public:
         if (!wait) return -1;
         [done waitUntilCompleted];
         last = nil;
-        if (done.status != MTLCommandBufferStatusCompleted) { err = done.error ? [[done.error localizedDescription] UTF8String] : "command buffer failed"; return -1; }
-        return (done.GPUEndTime - done.GPUStartTime) * 1000.0;
+        if (done.status != MTLCommandBufferStatusCompleted) { err = done.error ? [[done.error localizedDescription] UTF8String] : "command buffer failed"; lastMs = -1; return -1; }
+        lastMs = (done.GPUEndTime - done.GPUStartTime) * 1000.0;
+        return lastMs;
     }
-    void waitIdle() override { if (last) { [last waitUntilCompleted]; last = nil; } }
+    void waitIdle() override {
+        if (!last) return;
+        [last waitUntilCompleted];
+        lastMs = last.status == MTLCommandBufferStatusCompleted ? (last.GPUEndTime - last.GPUStartTime) * 1000.0 : -1;
+        if (last.status == MTLCommandBufferStatusError) err = last.error ? [[last.error localizedDescription] UTF8String] : "command buffer failed";
+        last = nil;
+    }
+    double lastGpuMs() const override { return lastMs; }
 };
 }
 

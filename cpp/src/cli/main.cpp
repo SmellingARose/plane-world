@@ -5,6 +5,7 @@
 //   pwcli --bench <name|all|list> [--reps N] [--json file]
 //   pwcli --train <experiment.json> [--generations N] [--out dir] [--resume] [--current-as-flat] [--aero m] [--cfd-preset p]
 //   pwcli --make-experiment "<preset>" <out.json> [--craft name]
+//   pwcli --aero-compare <craft|craft.json> [--speed V] [--alpha deg] [--cfd-preset p] ...   fast vs CFD per-part forces
 //   pwcli --info | --version
 #include <cstdio>
 #include <cstdlib>
@@ -17,12 +18,15 @@
 #include "pw/parity.h"
 #include "pw/evo/train.h"
 #include "pw/selftest.h"
+#include "pw/flow/lbm.h"
+#include "pw/flow/overlay.h"
 #include "pw/env/env.h"
 #include "pw/env/render.h"
 
 int runBench(const std::vector<std::string>& args);
 int runTrain(const std::vector<std::string>& args);
 int runMakeExperiment(const std::vector<std::string>& args);
+int runAeroCompare(const std::vector<std::string>& args);
 
 static const char* value(const std::vector<std::string>& a, const char* flag) {
     for (std::size_t i = 0; i + 1 < a.size(); ++i) if (a[i] == flag) return a[i + 1].c_str();
@@ -36,6 +40,7 @@ static bool has(const std::vector<std::string>& a, const char* flag) {
 int main(int argc, char** argv) {
     std::vector<std::string> args(argv, argv + argc);
     pw::env::install();   // full terrain builder for headless world bakes (erosion, PNG heightmaps, edits)
+    pw::flow::registerBackend();   // AeroModel::Full (GPU lattice-Boltzmann) for --train / --aero-compare
     if (has(args, "--version")) { std::printf("Plane World (C++) %s\n", PW_VERSION); return 0; }
     if (has(args, "--info")) {
         std::printf("Plane World (C++) %s\ncpu: %s\ngpu backend: %s\nparity data: %s\n", PW_VERSION, pw::cpu::describe().c_str(),
@@ -46,6 +51,8 @@ int main(int argc, char** argv) {
         pw::selftest::registerCoreTests();
         pw::env::registerSelfTests();   // terrain.*, water.*, vegetation.*, env.*
         pw::envrender::registerSelfTests();   // envrender.* (terrain / water / vegetation through the renderer)
+        pw::flow::registerSelfTests();        // flow.* (lattice-Boltzmann CFD)
+        pw::flow::registerRenderSelfTests();  // flowrender.* (flow overlay through the renderer)
         // GPU smoke as a self-test (skipped with a note when the machine has no usable GPU device).
         pw::selftest::add("gpu.smoke", [](pw::selftest::Context& c) {
             auto r = pw::gpu::smokeTest(false);
@@ -87,6 +94,7 @@ int main(int argc, char** argv) {
     if (has(args, "--bench")) return runBench(args);
     if (has(args, "--train")) { pw::evo::installTrainHandler(); return runTrain(args); }
     if (has(args, "--make-experiment")) return runMakeExperiment(args);
-    std::printf("usage: pwcli --selftest <name|all|list> | --gpu-smoke [--warp] | --bench <name|all|list> | --train <exp.json> | --make-experiment \"<preset>\" <out.json> | --info | --version\n");
+    if (has(args, "--aero-compare")) return runAeroCompare(args);
+    std::printf("usage: pwcli --selftest <name|all|list> | --gpu-smoke [--warp] | --bench <name|all|list> | --train <exp.json> | --make-experiment \"<preset>\" <out.json> | --aero-compare <craft> | --info | --version\n");
     return 2;
 }

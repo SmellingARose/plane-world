@@ -1,6 +1,6 @@
 #pragma once
 // Fast-model effect toggles, aero profiles and the allocation-free equation capture behind the EQUATIONS panel
-// (Sources/Core/Fidelity.swift). The full-CFD model (AeroModel::Full) is phase 4; CraftSim currently runs fast only.
+// (Sources/Core/Fidelity.swift). The full-CFD model (AeroModel::Full) lives in pw/sim/cfd.h + full_aero.h (backend: pwflow).
 #include <cstdint>
 #include <string>
 #include <vector>

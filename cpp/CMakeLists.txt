@@ -33,6 +33,7 @@ add_subdirectory(shaders)
 add_subdirectory(src/gpu)
 add_subdirectory(src/render)
 add_subdirectory(src/env)   # P3b: terrain / water / vegetation
+add_subdirectory(src/flow)  # P4: lattice-Boltzmann CFD
 add_subdirectory(src/cli)
 if(PW_BUILD_APP)
   add_subdirectory(src/app)

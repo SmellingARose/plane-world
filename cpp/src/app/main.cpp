@@ -9,6 +9,7 @@
 #include <QTimer>
 #include "pw/cpu.h"
 #include "pw/gpu.h"
+#include "pw/flow/lbm.h"
 
 int main(int argc, char** argv) {
 #if PW_GPU_METAL
@@ -17,6 +18,7 @@ int main(int argc, char** argv) {
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D12);
 #endif
     QGuiApplication app(argc, argv);
+    pw::flow::registerBackend();   // AeroModel::Full (GPU lattice-Boltzmann) for FLY / training (UI: P5)
     QGuiApplication::setApplicationName("Plane World");
     QGuiApplication::setOrganizationName("Plane World");
     QGuiApplication::setApplicationVersion(PW_VERSION);

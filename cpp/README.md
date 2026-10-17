@@ -106,3 +106,52 @@ placement / brushes / breaking) plus GPU-vs-CPU erosion (max deviation 1e-4 m), 
 written by the Swift app's codec, CDLOD tiling, and an offscreen coast scene through the renderer
 (`PW_SELFTEST_OUT=dir` keeps the PNGs). On Apple M4, 1920x1080 terrain + ocean + 57k trees + 77k grass blades render in
 about 12.5 ms of GPU time (`envrender.perf-1080p`).
+
+## CFD: lattice-Boltzmann on the GPU (phase 4)
+
+| Target / header | What |
+|---|---|
+| `pwcore` `pw/sim/cfd.h`, `pw/sim/full_aero.h` | the fidelity contract of Sources/Core/Fidelity.swift: `CFDSettings` (presets, tolerant JSON with the Swift keys), `CFDDiagnostics`, the per-substep `AeroBackend` / batched `AeroDomainPool` interfaces and their registry; `CraftSim` runs `AeroModel::Full` exactly like FullAero.swift (forces lag one update, props stay momentum-theory and become actuator disks, equation-capture comparison rows); the evaluator trains with `aero.model = "full"` |
+| `pwflow` `pw/flow/lbm.h` | port of Sources/Flow: craft-following D3Q19 / D3Q27 domain, BGK / TRT ("mrt") / regularized collision (cumulant runs regularized, as in Swift), Smagorinsky (van Driest damped) or WALE LES, moving Galilean frame, per-update re-voxelisation from part SDF grids, interpolated (Bouzidi) bounce-back with moving walls, Galilean-invariant momentum exchange, actuator disks (thrust + swirl, Guo forcing), ground as a moving wall, far-field shell + sponge, lattice-Mach control with population rescaling, divergence reset, 2x-coarser shadow grid (Richardson estimate), slice + tracer products, `LBMDomainPool` (several domains in one GPU submission). Kernels: `shaders/flow/lbm_common.slang` (one Slang source, MSL + DXIL) on the `pw/compute.h` layer |
+| `pwflow_render` `pw/flow/overlay.h` | `FlowOverlay` Renderable: the slice as a world-space turbo quad + tracer dots (`shaders/flow_overlay.slang`) |
+
+Port notes: all reductions (per-part force / torque, mass, fluid cells) are 64-bit fixed point accumulated with 32-bit
+integer atomics after a wave reduction: D3D12 SM 6.0 has no float atomics and Metal only a weak compare-exchange, and
+integer sums are order independent, so pooled lanes equal a single domain bit for bit. Velocity sampling at the part
+centres runs on the GPU, so a collect reads back a few hundred bytes. Kernels compile without fast math (as the rest
+of `pw/compute.h`); with `PW_METAL_FAST=1` the actuator disk reproduces Swift's fast-math number exactly.
+`submit` / `collect` allocate nothing after the first update (`pwtests -tc="flow*"`; on Metal the driver itself
+allocates once per kernel per command buffer, never per step).
+
+Parity with the Swift solver (`PlaneWorld --selftest flow`, same grids, Apple M4):
+
+| Case | Swift | C++ (Metal) |
+|---|---|---|
+| sphere C_D, Re 1.3e5, 16 cells/D | 0.761 | 0.761 |
+| cube C_D, 16 cells/side | 1.408 | 1.408 |
+| NACA 0012 AR 2, lift slope (C_L at +-6 deg) | 0.92 /rad (+0.055 / -0.138) | 0.92 /rad (+0.055 / -0.138) |
+| actuator disk, v at the disk | 9.21 m/s | 8.87 m/s (9.21 with `PW_METAL_FAST=1`) |
+| rotating bar torque | -0.0331 N m | -0.0331 N m |
+| fine vs coarse shadow delta | 40.8 % | 40.8 % |
+| voxel volume sphere / NACA / box | 0.00444 / 0.00148 / 0.00400 m3 | identical |
+| whole Trainer, `--aero-compare Trainer --speed 25 --alpha 4 --cfd-preset medium`, total CFD force | (-2288.6, 3042.8, -15.9) N | (-2288.2, 3042.6, -15.7) N |
+
+`pwcli --aero-compare` is the Swift CLI's port (same flags and table). On software adapters (WARP on the Windows CI) or
+with `PW_FLOW_SMALL=1` the flow tests run on coarser grids and compare with the same cases measured on Metal (sphere
+0.947, cube 1.369, wing slope 1.68, disk 6.24 m/s).
+
+Accuracy at equal cost (`PW_FLOW_VALIDATE=1 pwcli --selftest flow.accuracy`, same grids and step counts, Apple M4):
+
+| Variant | sphere C_D (exp 0.47) | cube C_D (exp 1.05) | wing slope (Helmbold 2.60) | ms / LBM step |
+|---|---|---|---|---|
+| Swift numerics (default) | 0.761 | 1.408 | 0.92 | 0.571 |
+| `accuracy.thinOnlyInflation` (depth rule) | **0.715** | **1.340** | 0.92 | 0.575 |
+| wall-damping length 4 cells | **0.681** | 1.405 | 0.90 | 0.567 |
+| both | 0.728 | 1.358 | 0.90 | 0.574 |
+
+Swift inflates every part by 0.3 of its SDF cell so zero-thickness sheets cannot leak; that also fattens closed bodies
+(sphere voxel volume +6 %). The depth rule inflates only sheets and parts whose interior is shallower than 1.5 lattice
+cells (wings keep their sharp-edge seal: inflating nothing drops the wing slope to 0.41), which cuts the bluff-body drag
+error by 6-9 points at no cost; it is opt-in (`LBMSolver::accuracy`, `pwcli --aero-compare --accurate`) so the default
+stays Swift-identical. Refining the Bouzidi wall fraction with secant steps changed nothing measurable (kept as an
+option). Coarse-grid lift is dominated by the unresolved boundary layer; no equal-cost fix for it was found.

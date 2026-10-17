@@ -21,6 +21,7 @@
 #include "pw/sim/craft_spec.h"
 #include "pw/sim/environment.h"
 #include "pw/sim/fidelity.h"
+#include "pw/sim/full_aero.h"
 #include "pw/sim/panel_aero.h"
 #include "pw/sim/slipstream.h"
 
@@ -124,6 +125,18 @@ public:
     double crashSpeed = 8;
     uint64_t sensorNoiseSeed = 0x9E3779B97F4A7C15ull;
     jobs::JobSystem* jobSystem = nullptr;         // nullptr = JobSystem::shared() when going parallel
+
+    // fidelity contract: AeroModel::Full + a configured backend replace wing-strip / body / panel aero (full_aero.h)
+    AeroModel aeroModel = AeroModel::Fast;
+    AeroBackend* aeroBackend = nullptr;           // not owned; one backend per sim (sim thread only)
+    /// Configures `backend` for `craft` (the document this sim was loaded from) and switches to Full. On failure
+    /// (backend unavailable, configure error) the sim stays on Fast and *err says why.
+    bool enableFull(AeroBackend& backend, const craft::CraftDocument& craft, const CFDSettings& settings, std::string* err = nullptr);
+    /// CFD updates collected since Full was enabled / reset.
+    int fullAeroUpdates() const { return full_ ? full_->collected : 0; }
+    /// Last collected CFD force / torque on part i (world, torque about the CoM); nullopt when not running Full.
+    std::optional<ForceTorque> cfdForce(int i) const;
+    bool isRunningFull() const { return aeroModel == AeroModel::Full && aeroBackend && full_; }
 
     /// Applies a fast aero profile (toggles + slipstream).
     void setProfile(const AeroProfile& p) { fastToggles = p.toggles; slipstream = p.toggles.slipstream; }
@@ -258,6 +271,15 @@ private:
     void captureBodyDrag(int i, double rho, double sp, double cd, double A, const Vec3d& v, const Vec3d& pw, EquationCapture& cap);
     void capturePanels(int i, const ForceTorque& ft, double rho, double nu, double sos, EquationCapture& cap);
     double noiseSample(double sigma);
+    // Full (full_aero.cpp)
+    bool prepareFull();
+    void resetFull();
+    void fullCollect();
+    void fullSubmit(double h, const SimEnvironment& env);
+    void fullFastBreakdown(int np, int ns);
+    void fullCaptureRecords(int np, EquationCapture& cap);
+    std::unique_ptr<FullAeroBuffers> full_;
+    bool fullActive_ = false;
     jobs::JobSystem& pool() const { return jobSystem ? *jobSystem : jobs::JobSystem::shared(); }
 
     CraftSpec craft_;

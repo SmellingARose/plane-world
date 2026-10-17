@@ -80,10 +80,10 @@ struct EpisodeSettings {
 struct ScriptBundle { std::string language = "javascript", source; double callBudgetMs = 5; };
 
 struct AeroRunSettings {
-    std::string model = "fast";       // "fast" | "full" (CFD; not available in the C++ core yet)
+    std::string model = "fast";       // "fast" | "full" (GPU CFD through sim::AeroBackendRegistry, pwflow)
     sim::FastAeroToggles toggles;
     std::string profile = sim::kDefaultAeroProfile;
-    std::optional<Value> cfd;         // CFD settings, preserved verbatim (phase 4)
+    std::optional<Value> cfd;         // CFD settings JSON (sim::CFDSettings::fromJSON), preserved verbatim
 };
 
 struct ExperimentDocument {

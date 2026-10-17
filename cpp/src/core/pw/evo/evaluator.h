@@ -108,7 +108,7 @@ public:
     sim::CraftSim& sim() { return *sim_; }
     ScriptRuntime& runtime() { return *runtime_; }
 private:
-    void loadSim(sim::CraftSim& s, const sim::CraftSpec& spec);
+    void loadSim(sim::CraftSim& s, const sim::CraftSpec& spec, const craft::CraftDocument& doc);
     void remap();
     void applyNativePolicy();
     void fillState(const sim::SimEnvironment& env, double sx, double sz);
@@ -117,6 +117,7 @@ private:
     std::unique_ptr<ScriptRuntime> runtime_;
     ControlFrame frame_;
     std::unique_ptr<sim::CraftSim> baseSim_, designSim_;
+    std::unique_ptr<sim::AeroBackend> fullBackend_;   // worker-private CFD domain (aero model 'full'), reconfigured per design
     sim::CraftSim* sim_ = nullptr;
     std::vector<int> inMap_, outMap_;
     std::vector<double> simInputs_;

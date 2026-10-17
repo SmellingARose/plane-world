@@ -1,16 +1,16 @@
 // pwgpu compute on Direct3D 12. See pw/compute.h for the binding model: one root signature for every kernel,
 // [0] = 32 root constants (b0), [1..8] = root UAVs (u1..u8). Buffers live in the DEFAULT heap (implicit state
-// promotion/decay between submissions); upload/download go through UPLOAD/READBACK staging buffers.
+// promotion/decay between submissions); upload/download go through persistent (grow-only) UPLOAD/READBACK staging buffers.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <wrl/client.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <string>
 #include <vector>
 #include "pw/compute.h"
@@ -43,7 +43,8 @@ public:
     HANDLE event = nullptr;
     UINT64 fenceValue = 0, pending = 0;
     std::string adapter, err;
-    bool software = false, recording = false;
+    bool software = false, recording = false, tsPending = false;
+    double lastMs = -1;
     struct Buf { ComPtr<ID3D12Resource> res; std::size_t size = 0; };
     std::vector<Buf> buffers{Buf{}};
     std::vector<ComPtr<ID3D12PipelineState>> kernels{nullptr};
@@ -126,11 +127,29 @@ public:
         if (fence->GetCompletedValue() < fenceValue) { fence->SetEventOnCompletion(fenceValue, event); WaitForSingleObject(event, INFINITE); }
         pending = 0;
     }
-    void waitIdle() override { if (pending) signalAndWait(); }
+    void waitIdle() override {
+        if (!pending) return;
+        signalAndWait();
+        if (tsPending) { tsPending = false; lastMs = readTimestamps(); }
+    }
+    double lastGpuMs() const override { return lastMs; }
+    double readTimestamps() {
+        double ms = -1;
+        if (timestamps && tsReadback) {
+            UINT64 freq = 0, *t = nullptr; queue->GetTimestampFrequency(&freq);
+            D3D12_RANGE rr = {0, 16};
+            if (freq && SUCCEEDED(tsReadback->Map(0, &rr, reinterpret_cast<void**>(&t)))) {
+                ms = double(t[1] - t[0]) * 1000.0 / double(freq);
+                D3D12_RANGE none = {0, 0}; tsReadback->Unmap(0, &none);
+            }
+        }
+        return ms;
+    }
 
     ID3D12Resource* res(int h) const { return h > 0 && std::size_t(h) < buffers.size() ? buffers[std::size_t(h)].res.Get() : nullptr; }
 
-    bool oneShot(const std::function<void(ID3D12GraphicsCommandList*)>& rec) {
+    template <typename Rec>
+    bool oneShot(const Rec& rec) {
         waitIdle();
         alloc->Reset();
         list->Reset(alloc.Get(), nullptr);
@@ -139,6 +158,27 @@ public:
         ID3D12CommandList* l[] = {list.Get()};
         queue->ExecuteCommandLists(1, l);
         signalAndWait();
+        return true;
+    }
+
+    // Persistent staging buffers (grow-only), so per-update uploads / readbacks create no resources.
+    static constexpr std::size_t kStageChunk = 8u << 20;
+    ComPtr<ID3D12Resource> upStage, downStage;
+    std::size_t upSize = 0, downSize = 0;
+    void* upPtr = nullptr;
+    bool stage(bool upload, std::size_t bytes) {
+        ComPtr<ID3D12Resource>& r = upload ? upStage : downStage;
+        std::size_t& have = upload ? upSize : downSize;
+        if (r && have >= bytes) return true;
+        std::size_t want = std::max<std::size_t>(bytes, std::max<std::size_t>(have * 2, 64 * 1024));
+        if (upload && upStage) { upStage->Unmap(0, nullptr); upPtr = nullptr; }
+        r.Reset(); have = 0;
+        auto hp = heap(upload ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_READBACK);
+        auto bd = bufferDesc(want, D3D12_RESOURCE_FLAG_NONE);
+        if (FAILED(dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, upload ? D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_COPY_DEST,
+                                                nullptr, IID_PPV_ARGS(&r)))) { err = upload ? "staging alloc" : "readback alloc"; return false; }
+        if (upload) { D3D12_RANGE none = {0, 0}; if (FAILED(r->Map(0, &none, &upPtr))) { err = "staging map"; r.Reset(); return false; } }
+        have = want;
         return true;
     }
 
@@ -160,29 +200,39 @@ public:
     bool upload(int h, const void* data, std::size_t bytes, std::size_t offset) override {
         ID3D12Resource* r = res(h);
         if (!r || offset + bytes > buffers[std::size_t(h)].size) { err = "upload out of range"; return false; }
-        ComPtr<ID3D12Resource> staging;
-        auto hp = heap(D3D12_HEAP_TYPE_UPLOAD); auto bd = bufferDesc(std::max<std::size_t>(bytes, 16), D3D12_RESOURCE_FLAG_NONE);
-        if (FAILED(dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&staging)))) { err = "staging alloc"; return false; }
-        void* p = nullptr; D3D12_RANGE none = {0, 0};
-        staging->Map(0, &none, &p); std::memcpy(p, data, bytes); staging->Unmap(0, nullptr);
-        return oneShot([&](ID3D12GraphicsCommandList* l) { l->CopyBufferRegion(r, offset, staging.Get(), 0, bytes); });
+        if (bytes == 0) return true;
+        waitIdle();   // the staging buffer may still be read by an earlier copy
+        const std::size_t chunk = std::min<std::size_t>(bytes, kStageChunk);   // bounded staging memory
+        if (!stage(true, chunk)) return false;
+        ID3D12Resource* src = upStage.Get();
+        for (std::size_t done = 0; done < bytes; done += chunk) {
+            const std::size_t n = std::min(chunk, bytes - done);
+            std::memcpy(upPtr, static_cast<const uint8_t*>(data) + done, n);
+            if (!oneShot([&](ID3D12GraphicsCommandList* l) { l->CopyBufferRegion(r, offset + done, src, 0, n); })) return false;
+        }
+        return true;
     }
     bool download(int h, void* out, std::size_t bytes, std::size_t offset) override {
         ID3D12Resource* r = res(h);
         if (!r || offset + bytes > buffers[std::size_t(h)].size) { err = "download out of range"; return false; }
-        ComPtr<ID3D12Resource> staging;
-        auto hp = heap(D3D12_HEAP_TYPE_READBACK); auto bd = bufferDesc(std::max<std::size_t>(bytes, 16), D3D12_RESOURCE_FLAG_NONE);
-        if (FAILED(dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&staging)))) { err = "readback alloc"; return false; }
-        if (!oneShot([&](ID3D12GraphicsCommandList* l) { l->CopyBufferRegion(staging.Get(), 0, r, offset, bytes); })) return false;
+        if (bytes == 0) return true;
+        waitIdle();
+        if (!stage(false, bytes)) return false;
+        ID3D12Resource* dst = downStage.Get();
+        if (!oneShot([&](ID3D12GraphicsCommandList* l) { l->CopyBufferRegion(dst, 0, r, offset, bytes); })) return false;
         void* p = nullptr; D3D12_RANGE rr = {0, bytes};
-        staging->Map(0, &rr, &p); std::memcpy(out, p, bytes); D3D12_RANGE none = {0, 0}; staging->Unmap(0, &none);
+        if (FAILED(dst->Map(0, &rr, &p))) { err = "readback map"; return false; }
+        std::memcpy(out, p, bytes); D3D12_RANGE none = {0, 0}; dst->Unmap(0, &none);
         return true;
     }
     bool fill(int h, uint32_t v) override {
         ID3D12Resource* r = res(h);
         if (!r) return false;
-        std::vector<uint32_t> data(buffers[std::size_t(h)].size / 4, v);
-        return upload(h, data.data(), data.size() * 4, 0);
+        const std::size_t size = buffers[std::size_t(h)].size;
+        std::vector<uint32_t> data(std::min(size, kStageChunk) / 4, v);
+        for (std::size_t off = 0; off < size; off += data.size() * 4)
+            if (!upload(h, data.data(), std::min(data.size() * 4, size - off), off)) return false;
+        return true;
     }
 
     int loadKernel(const char* entry, const void* code, std::size_t size, int, int, int) override {
@@ -235,19 +285,13 @@ public:
         if (FAILED(list->Close())) { err = "command list close failed"; return -1; }
         ID3D12CommandList* l[] = {list.Get()};
         queue->ExecuteCommandLists(1, l);
-        pending = 1;
+        pending = 1; tsPending = true;
         if (!wait) return -1;
         signalAndWait();
-        if (dev->GetDeviceRemovedReason() != S_OK) { err = "device removed " + hrs(dev->GetDeviceRemovedReason()); return -1; }
-        double ms = -1;
-        if (timestamps && tsReadback) {
-            UINT64 freq = 0, *t = nullptr; queue->GetTimestampFrequency(&freq);
-            D3D12_RANGE rr = {0, 16};
-            if (freq && SUCCEEDED(tsReadback->Map(0, &rr, reinterpret_cast<void**>(&t)))) {
-                ms = double(t[1] - t[0]) * 1000.0 / double(freq);
-                D3D12_RANGE none = {0, 0}; tsReadback->Unmap(0, &none);
-            }
-        }
+        tsPending = false;
+        if (dev->GetDeviceRemovedReason() != S_OK) { err = "device removed " + hrs(dev->GetDeviceRemovedReason()); lastMs = -1; return -1; }
+        double ms = readTimestamps();
+        lastMs = ms;
         return ms;
     }
 };

@@ -13,6 +13,8 @@ add_library(pwcore STATIC
   src/sim/craft_spec.cpp
   src/sim/craft_spec_doc.cpp
   src/sim/fidelity.cpp
+  src/sim/cfd.cpp
+  src/sim/full_aero.cpp
   src/sim/panel_aero.cpp
   src/sim/craft_sim.cpp
   src/sim/fast_gaps.cpp

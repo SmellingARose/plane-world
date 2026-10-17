@@ -1,12 +1,12 @@
 # Named Slang shader libraries (P3b: terrain / water / vegetation). Unlike pw_add_slang_shaders (vs/ps only),
 # any entry point and stage is supported, and blobs land in their own namespace so libraries do not collide:
 #   pw_add_slang_library(<target> NAMESPACE <ns> HEADER <pw/x.h>
-#                        SHADERS <file.slang>... ENTRIES <file>:<entry>:<stage>...)
+#                        SHADERS <file.slang>... ENTRIES <file>:<entry>:<stage>... [DEPENDS <included files>...])
 #   Apple:   slangc -target metal per file          -> key "<file>.metal" (MSL source, compiled at runtime)
 #   Windows: slangc -target hlsl -entry per entry   -> dxc (cs_6_0 / vs_6_0 / ps_6_0) -> key "<file>.<entry>" (DXIL)
 # Lookup: <ns>::find("<key>") returns a pw::shaders::Blob (same struct as pw/shaders.h).
 function(pw_add_slang_library target)
-  cmake_parse_arguments(A "" "NAMESPACE;HEADER" "SHADERS;ENTRIES;INCLUDES" ${ARGN})
+  cmake_parse_arguments(A "" "NAMESPACE;HEADER" "SHADERS;ENTRIES;INCLUDES;DEPENDS" ${ARGN})
   set(outdir ${CMAKE_CURRENT_BINARY_DIR}/${target})
   file(MAKE_DIRECTORY ${outdir})
   set(blobs "")
@@ -22,7 +22,7 @@ function(pw_add_slang_library target)
       set(out ${outdir}/${name}.metal)
       add_custom_command(OUTPUT ${out}
         COMMAND ${PW_SLANGC} ${abs} ${incflags} -target metal -o ${out}
-        DEPENDS ${abs} COMMENT "Slang -> MSL ${name}" VERBATIM)
+        DEPENDS ${abs} ${A_DEPENDS} COMMENT "Slang -> MSL ${name}" VERBATIM)
       list(APPEND blobs "${name}.metal=${out}")
       list(APPEND deps ${out})
     endif()
@@ -52,7 +52,7 @@ function(pw_add_slang_library target)
       add_custom_command(OUTPUT ${out}
         COMMAND ${PW_SLANGC} ${abs} ${incflags} -target hlsl -entry ${entry} -stage ${stage} -o ${hlsl}
         COMMAND ${PW_DXC} -nologo -T ${profile} -E ${entry} -Fo ${out} ${hlsl}
-        DEPENDS ${abs} COMMENT "Slang -> HLSL -> DXIL ${name}.${entry}" VERBATIM)
+        DEPENDS ${abs} ${A_DEPENDS} COMMENT "Slang -> HLSL -> DXIL ${name}.${entry}" VERBATIM)
       list(APPEND blobs "${name}.${entry}=${out}")
       list(APPEND deps ${out})
     endforeach()

@@ -415,6 +415,7 @@ void CraftSim::reset(const Vec3d& spawnPosition, const Quatd& spawnRotation) {
     horseshoeCount_ = 0;
     telemetry_ = CraftTelemetry{};
     updateEffective();
+    resetFull();
 }
 
 int CraftSim::cornerCount() const { int n = 0; for (auto& p : parts_) n += int(p.corners.size()); return n; }
@@ -509,7 +510,10 @@ void CraftSim::updateEffective() {
 }
 
 void CraftSim::substep(double h, const SimEnvironment& env) {
+    fullActive_ = aeroModel == AeroModel::Full && aeroBackend && prepareFull();
+    if (fullActive_) fullCollect();
     SubstepOut o = substepCore(h, env);
+    if (fullActive_) fullSubmit(h, env);
     if (o.massDirty && stepCounter_ % 10 == 0) updateMassProperties(true);
     updateTelemetry(o.atm, o.windHere, o.stalled, o.thrust, o.fuel);
 }
@@ -610,7 +614,10 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
     auto apply = [&](const Vec3d& f, const Vec3d& pw) { F += f; T += cross(pw - position, f); };
     auto pointVel = [&](const Vec3d& pw) { return velocity + cross(wW, pw - position); };
     const bool air = rho > 1e-6 && aeroEnabled;
-    const bool fastAero = air;   // AeroModel::Full (CFD) is phase 4
+    // Full: the fast wing / body / panel aero runs only on an equation-capture substep (comparison rows) and its force
+    // is discarded; the CFD per-part forces are added instead (full_aero.cpp).
+    const bool fullOn = air && fullActive_, fastAero = air && (!fullOn || capOn);
+    const Vec3d F0 = F, T0 = T;
 
     // --- rotor wakes from the previous substep's disk state
     wakeCount_ = 0;
@@ -702,9 +709,19 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
                 double A = std::fabs(vl.x) * s.y * s.z + std::fabs(vl.y) * s.x * s.z + std::fabs(vl.z) * s.x * s.y;
                 double cd = P[i].kCd * (sp / atm.speedOfSound > 0.8 ? 1 + 6 * std::pow(sp / atm.speedOfSound - 0.8, 2) : 1);
                 apply(v * (-0.5 * rho * sp * cd * A), pw);
+                if (fullOn) { Vec3d fb = v * (-0.5 * rho * sp * cd * A); full_->fast[std::size_t(i)] = ForceTorque{fb, cross(pw - position, fb)}; }
                 if (capOn) captureBodyDrag(i, rho, sp, cd, A, v, pw, *cap);
             }
         }
+    }
+
+    if (fullOn) {
+        if (capOn) fullFastBreakdown(np, ns);
+        F = F0; T = T0; stalledCount = 0;
+        for (int i = 0; i < np; ++i) if (P[i].is(PartType::Servo)) P[i].load = 0;
+        const FullAeroBuffers& fb = *full_;
+        for (int i = 0; i < np; ++i) { F += fb.forces[std::size_t(i)].force; T += fb.forces[std::size_t(i)].torque; }
+        if (capOn) fullCaptureRecords(np, *cap);
     }
 
     // --- propulsion
