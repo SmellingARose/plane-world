@@ -16,8 +16,32 @@
 //   simd_inverse(3x3)    cofactors with fnmsub/fnmadd, det fused, then * (1/det)
 // Craft frame: +X forward, +Y up, +Z right. World: right-handed, +Y up.
 #include <cmath>
+#if defined(_MSC_VER) && defined(_M_X64)
+#include <immintrin.h>
+#endif
 
 namespace pw {
+
+namespace detail {
+#if defined(_MSC_VER) && defined(_M_X64) && !defined(__AVX2__)
+/// MSVC lowers std::fma to a CRT call; when the CPU has FMA3 we use the instruction directly (same correctly rounded
+/// result, ~5x faster in quaternion code). Detected once at start-up (before that, std::fma: identical results).
+bool detectFma3();
+inline const bool kHasFma3 = detectFma3();
+#endif
+}
+
+/// a*b+c with a single rounding, identical on every platform.
+inline double fma(double a, double b, double c) {
+#if defined(_MSC_VER) && defined(_M_X64) && defined(__AVX2__)
+    return _mm_cvtsd_f64(_mm_fmadd_sd(_mm_set_sd(a), _mm_set_sd(b), _mm_set_sd(c)));
+#elif defined(_MSC_VER) && defined(_M_X64)
+    if (detail::kHasFma3) return _mm_cvtsd_f64(_mm_fmadd_sd(_mm_set_sd(a), _mm_set_sd(b), _mm_set_sd(c)));
+    return std::fma(a, b, c);
+#else
+    return std::fma(a, b, c);
+#endif
+}
 
 constexpr double kPi = 3.141592653589793238462643383279502884;
 constexpr double kDeg = kPi / 180.0;   // same value as Swift `Double.pi / 180`
@@ -53,7 +77,7 @@ constexpr double lengthSquared(const Vec3d& a) { return dot(a, a); }
 inline double length(const Vec3d& a) { return std::sqrt(dot(a, a)); }
 inline Vec3d normalize(const Vec3d& a) { return a * (1.0 / std::sqrt(dot(a, a))); }
 inline Vec3d cross(const Vec3d& a, const Vec3d& b) {
-    return {std::fma(a.y, b.z, -(a.z * b.y)), std::fma(a.z, b.x, -(a.x * b.z)), std::fma(a.x, b.y, -(a.y * b.x))};
+    return {pw::fma(a.y, b.z, -(a.z * b.y)), pw::fma(a.z, b.x, -(a.x * b.z)), pw::fma(a.x, b.y, -(a.y * b.x))};
 }
 inline Vec3d vmin3(const Vec3d& a, const Vec3d& b) { return {a.x < b.x ? a.x : b.x, a.y < b.y ? a.y : b.y, a.z < b.z ? a.z : b.z}; }
 inline Vec3d vmax3(const Vec3d& a, const Vec3d& b) { return {a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y, a.z > b.z ? a.z : b.z}; }
@@ -77,7 +101,7 @@ struct Quatd {
         const double A[4] = {q.w, -q.z, q.y, -q.x}, B[4] = {q.z, q.w, -q.x, -q.y}, C[4] = {-q.y, q.x, q.w, -q.z};
         const double D[4] = {q.x, q.y, q.z, q.w};
         double r[4];
-        for (int i = 0; i < 4; ++i) r[i] = std::fma(x, A[i], y * B[i]) + std::fma(z, C[i], w * D[i]);
+        for (int i = 0; i < 4; ++i) r[i] = pw::fma(x, A[i], y * B[i]) + pw::fma(z, C[i], w * D[i]);
         return {r[0], r[1], r[2], r[3]};
     }
     Quatd conjugate() const { return {-x, -y, -z, w}; }
@@ -95,7 +119,7 @@ struct Quatd {
         Quatd c = conjugate();
         const double A[4] = {c.w, -c.z, c.y, -c.x}, B[4] = {c.z, c.w, -c.x, -c.y}, C[4] = {-c.y, c.x, c.w, -c.z};
         double t[4];
-        for (int i = 0; i < 4; ++i) t[i] = std::fma(v.z, C[i], std::fma(v.x, A[i], v.y * B[i]));
+        for (int i = 0; i < 4; ++i) t[i] = pw::fma(v.z, C[i], pw::fma(v.x, A[i], v.y * B[i]));
         Quatd r = *this * Quatd{t[0], t[1], t[2], t[3]};
         return {r.x, r.y, r.z};
     }
@@ -111,14 +135,14 @@ struct Mat3d {
     /// simd_matrix3x3(quatd)
     static Mat3d fromQuat(const Quatd& q) {
         double x = q.x, y = q.y, z = q.z, w = q.w;
-        return columns({std::fma(w, w, std::fma(-z, z, std::fma(x, x, -(y * y)))), 2 * std::fma(x, y, z * w), 2 * std::fma(x, z, -(y * w))},
-                       {2 * std::fma(x, y, -(z * w)), std::fma(-x, x, std::fma(w, w, std::fma(y, y, -(z * z)))), 2 * std::fma(y, z, x * w)},
-                       {2 * std::fma(z, x, y * w), 2 * std::fma(y, z, -(x * w)), std::fma(-y, y, std::fma(-x, x, std::fma(z, z, w * w)))});
+        return columns({pw::fma(w, w, pw::fma(-z, z, pw::fma(x, x, -(y * y)))), 2 * pw::fma(x, y, z * w), 2 * pw::fma(x, z, -(y * w))},
+                       {2 * pw::fma(x, y, -(z * w)), pw::fma(-x, x, pw::fma(w, w, pw::fma(y, y, -(z * z)))), 2 * pw::fma(y, z, x * w)},
+                       {2 * pw::fma(z, x, y * w), 2 * pw::fma(y, z, -(x * w)), pw::fma(-y, y, pw::fma(-x, x, pw::fma(z, z, w * w)))});
     }
     Vec3d operator*(const Vec3d& v) const {
         Vec3d r = c[0] * v.x;
-        r = {std::fma(c[1].x, v.y, r.x), std::fma(c[1].y, v.y, r.y), std::fma(c[1].z, v.y, r.z)};
-        r = {std::fma(c[2].x, v.z, r.x), std::fma(c[2].y, v.z, r.y), std::fma(c[2].z, v.z, r.z)};
+        r = {pw::fma(c[1].x, v.y, r.x), pw::fma(c[1].y, v.y, r.y), pw::fma(c[1].z, v.y, r.z)};
+        r = {pw::fma(c[2].x, v.z, r.x), pw::fma(c[2].y, v.z, r.y), pw::fma(c[2].z, v.z, r.z)};
         return r;
     }
     Mat3d operator*(const Mat3d& b) const { return columns(*this * b.c[0], *this * b.c[1], *this * b.c[2]); }
@@ -130,11 +154,11 @@ struct Mat3d {
     /// simd_inverse (libsystem_m __invert_d3, arm64)
     Mat3d inverse() const {
         const Vec3d &a = c[0], &b = c[1], &d = c[2];
-        double r00 = std::fma(b.y, d.z, -(b.z * d.y)), t = std::fma(a.y, d.z, -(a.z * d.y));
-        double r01 = std::fma(-a.y, d.z, a.z * d.y), r02 = std::fma(a.y, b.z, -(a.z * b.y));
-        double r10 = std::fma(-b.x, d.z, b.z * d.x), r11 = std::fma(a.x, d.z, -(a.z * d.x)), r12 = std::fma(-a.x, b.z, a.z * b.x);
-        double r20 = std::fma(b.x, d.y, -(b.y * d.x)), r21 = std::fma(-a.x, d.y, a.y * d.x), r22 = std::fma(a.x, b.y, -(a.y * b.x));
-        double det = std::fma(d.x, r02, std::fma(a.x, r00, -(b.x * t)));
+        double r00 = pw::fma(b.y, d.z, -(b.z * d.y)), t = pw::fma(a.y, d.z, -(a.z * d.y));
+        double r01 = pw::fma(-a.y, d.z, a.z * d.y), r02 = pw::fma(a.y, b.z, -(a.z * b.y));
+        double r10 = pw::fma(-b.x, d.z, b.z * d.x), r11 = pw::fma(a.x, d.z, -(a.z * d.x)), r12 = pw::fma(-a.x, b.z, a.z * b.x);
+        double r20 = pw::fma(b.x, d.y, -(b.y * d.x)), r21 = pw::fma(-a.x, d.y, a.y * d.x), r22 = pw::fma(a.x, b.y, -(a.y * b.x));
+        double det = pw::fma(d.x, r02, pw::fma(a.x, r00, -(b.x * t)));
         double s = 1 / det;
         return columns({r00 * s, r01 * s, r02 * s}, {r10 * s, r11 * s, r12 * s}, {r20 * s, r21 * s, r22 * s});
     }

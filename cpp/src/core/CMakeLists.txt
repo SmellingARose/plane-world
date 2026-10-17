@@ -7,6 +7,7 @@ add_library(pwcore STATIC
   src/selftest.cpp
   src/core_selftests.cpp
   # P1a: math / jobs / atmosphere / craft simulation
+  src/math.cpp
   src/atmosphere.cpp
   src/jobs.cpp
   src/sim/craft_spec.cpp
