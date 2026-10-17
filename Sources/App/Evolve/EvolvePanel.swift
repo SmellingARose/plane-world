@@ -163,15 +163,41 @@ struct EvolvePanelContent: View {
 
     private var genomeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            SectionHeader(title: "Genome")
-            Picker("Preset", selection: bind(\.genome.preset)) {
-                Text("Neural controller").tag("neural"); Text("Craft design").tag("design"); Text("Co-evolve").tag("coevolve"); Text("Script only").tag("script")
+            SectionHeader(title: "What evolves")
+            Picker("What evolves", selection: bind(\.genome.preset)) {
+                Text("Controller — neural network weights").tag("neural")
+                Text("Craft — its parts and parameters").tag("design")
+                Text("Both — craft + controller together").tag("coevolve")
+                Text("Custom — genes defined in script").tag("script")
             }
+            .labelsHidden()
+            .help("What the genetic algorithm mutates. Controller: the neural network's weights and biases (craft fixed). Craft: part sizes, positions, masses, thrust… (controller fixed). Both: one genome holding both.")
+            EvolveModeDiagram(mode: evo.experiment.genome.preset,
+                              weightCount: mlpGeneCount, designCount: evo.experiment.genome.design.count,
+                              inputs: mlp.wrappedValue.inputs.count, outputs: mlp.wrappedValue.outputs.count)
+            ControllerIOTable(inputs: evo.ioDetail.inputs, outputs: evo.ioDetail.outputs,
+                              used: evo.experiment.genome.preset == "design" ? nil : Set(mlp.wrappedValue.inputs))
+                .task(id: evo.experiment.crafts.first.map { $0.name ?? $0.path ?? "inline" } ?? "") {
+                    // The craft library may still be loading when the tab first appears: retry briefly.
+                    for _ in 0..<20 {
+                        evo.io = evo.craftIO()
+                        if !evo.ioDetail.outputs.isEmpty { break }
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                    }
+                }
             Picker("Controller", selection: bind(\.controller.mode)) { Text("MLP").tag("mlp"); Text("Script").tag("script"); Text("NEAT").tag("neat") }
             NumField(label: "Control rate (Hz)", value: bind(\.controller.hz))
             if evo.experiment.genome.preset == "neural" || evo.experiment.genome.preset == "coevolve" { mlpEditor }
             if evo.experiment.genome.preset == "design" || evo.experiment.genome.preset == "coevolve" { designGenes }
         }.font(.callout)
+    }
+
+    /// Number of weights + biases in the MLP (what "Controller" mode mutates).
+    private var mlpGeneCount: Int {
+        let m = mlp.wrappedValue
+        let sizes = [m.inputs.count] + m.hidden + [m.outputs.count]
+        guard sizes.count >= 2 else { return 0 }
+        return zip(sizes, sizes.dropFirst()).reduce(0) { $0 + $1.0 * $1.1 + $1.1 }
     }
 
     private var mlp: Binding<MLPSpec> {

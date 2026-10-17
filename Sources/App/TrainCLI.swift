@@ -50,8 +50,9 @@ enum TrainCLI {
             if let p = value(args, "--population").flatMap(Int.init) { e.population = p }
             if let s = value(args, "--seed").flatMap(UInt64.init) { e.seed = s }
             if let a = value(args, "--aero") {
-                guard let m = AeroModel(rawValue: a) else { print("error: --aero must be fast or full"); return 2 }
-                e.aero.model = m
+                if let p = AeroProfiles.profile(a) { e.aero = p.settings(from: e.aero) }
+                else if let m = AeroModel(rawValue: a) { e.aero.model = m }
+                else { print("error: --aero must be fast, full or a model id: \(AeroProfiles.all.map(\.id).joined(separator: ", "))"); return 2 }
             }
             if let pr = value(args, "--cfd-preset") {
                 guard let p = CFDQualityPreset(rawValue: pr) else { print("error: --cfd-preset must be one of \(CFDQualityPreset.allCases.map(\.rawValue))"); return 2 }

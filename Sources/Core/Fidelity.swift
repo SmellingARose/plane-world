@@ -27,6 +27,8 @@ public struct FastAeroToggles: Codable, Sendable, Equatable {
     public var blockage = true
     /// CAD panels sample the slipstream/downwash per panel instead of the free stream.
     public var cadWash = true
+    /// Rotor slipstream / induced-flow coupling (actuator-disk wakes). Off = isolated-part model.
+    public var slipstream = true
     public init() {}
     public init(from d: any Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self); let z = FastAeroToggles()
@@ -35,6 +37,7 @@ public struct FastAeroToggles: Codable, Sendable, Equatable {
         downwash = (try? c.decodeIfPresent(Bool.self, forKey: .downwash)) .flatMap { $0 } ?? z.downwash
         blockage = (try? c.decodeIfPresent(Bool.self, forKey: .blockage)) .flatMap { $0 } ?? z.blockage
         cadWash = (try? c.decodeIfPresent(Bool.self, forKey: .cadWash)) .flatMap { $0 } ?? z.cadWash
+        slipstream = (try? c.decodeIfPresent(Bool.self, forKey: .slipstream)) .flatMap { $0 } ?? z.slipstream
     }
 }
 
@@ -117,12 +120,15 @@ public struct AeroRunSettings: Codable, Sendable, Equatable {
     public var model = AeroModel.fast
     public var cfd = CFDSettings()
     public var toggles = FastAeroToggles()
+    /// Id of the AeroProfile these settings came from ("custom" after manual edits). Informational / UI.
+    public var profile = AeroProfiles.defaultID
     public init() {}
     public init(from d: any Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self); let z = AeroRunSettings()
         model = (try? c.decodeIfPresent(AeroModel.self, forKey: .model)) .flatMap { $0 } ?? z.model
         cfd = (try? c.decodeIfPresent(CFDSettings.self, forKey: .cfd)) .flatMap { $0 } ?? z.cfd
         toggles = (try? c.decodeIfPresent(FastAeroToggles.self, forKey: .toggles)) .flatMap { $0 } ?? z.toggles
+        profile = (try? c.decodeIfPresent(String.self, forKey: .profile)) .flatMap { $0 } ?? AeroProfiles.match(self)
     }
 }
 
@@ -372,4 +378,58 @@ public final class EquationCapture {
         records[count] = r; count += 1
     }
     @inline(__always) public func finish() { requested = false; ready = true }
+}
+
+
+// MARK: - Aero model registry
+
+/// A named aerodynamics model choice shown in FLY and EVOLVE. Add new models with `AeroProfiles.register`;
+/// they appear in both pickers automatically and are recorded (by id) in experiments and flights.
+public struct AeroProfile: Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let summary: String
+    public let apply: @Sendable (inout AeroRunSettings) -> Void
+    public init(id: String, name: String, summary: String, apply: @escaping @Sendable (inout AeroRunSettings) -> Void) {
+        self.id = id; self.name = name; self.summary = summary; self.apply = apply
+    }
+    public func settings(from base: AeroRunSettings = AeroRunSettings()) -> AeroRunSettings { var s = base; apply(&s); s.profile = id; return s }
+}
+
+public enum AeroProfiles {
+    public static let defaultID = "fast.plus"
+    nonisolated(unsafe) private static var registry: [AeroProfile] = builtIns
+    public static var all: [AeroProfile] { registry }
+    public static func register(_ p: AeroProfile) { registry.removeAll { $0.id == p.id }; registry.append(p) }
+    public static func profile(_ id: String) -> AeroProfile? { registry.first { $0.id == id } }
+
+    /// Id of the first profile whose settings equal `s` (ignoring visualization), else "custom".
+    public static func match(_ s: AeroRunSettings) -> String {
+        for p in registry {
+            var a = s; a.profile = p.id; var b = p.settings(from: s)
+            b.cfd.visualization = a.cfd.visualization
+            if a == b { return p.id }
+        }
+        return "custom"
+    }
+
+    static let builtIns: [AeroProfile] = {
+        func fast(_ id: String, _ name: String, _ summary: String, _ t: @escaping @Sendable (inout FastAeroToggles) -> Void) -> AeroProfile {
+            AeroProfile(id: id, name: name, summary: summary) { s in s.model = .fast; var x = FastAeroToggles(); t(&x); s.toggles = x }
+        }
+        var list = [
+            fast("fast.classic", "Fast · classic", "Isolated parts: strip-theory wings, momentum props, Newtonian bodies. No part-to-part air interaction.") {
+                $0.slipstream = false; $0.gyro = false; $0.pFactor = false; $0.downwash = false; $0.blockage = false; $0.cadWash = false },
+            fast("fast.slipstream", "Fast · slipstream", "Classic + actuator-disk prop wakes feeding downstream parts, ducts, rotor ground effect.") {
+                $0.slipstream = true; $0.gyro = false; $0.pFactor = false; $0.downwash = false; $0.blockage = false; $0.cadWash = false },
+            fast("fast.plus", "Fast+ (all effects)", "Slipstream + gyroscopic rotors, P-factor, wing downwash, body blockage, CAD prop wash. Default.") { _ in },
+        ]
+        for p in CFDQualityPreset.allCases where p.rawValue != "custom" {
+            list.append(AeroProfile(id: "cfd.\(p.rawValue)", name: "Full CFD · \(p.rawValue.capitalized)",
+                                    summary: "GPU lattice-Boltzmann flow around the craft (\(p.rawValue) grid). Much slower; check the quality readout.") { s in
+                s.model = .full; let vis = s.cfd.visualization; s.cfd = CFDSettings.preset(p); s.cfd.visualization = vis
+            })
+        }
+        return list
+    }()
 }

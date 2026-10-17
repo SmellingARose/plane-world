@@ -61,19 +61,22 @@ struct AeroModelSwitch: View {
     @Binding var settings: AeroRunSettings
     var error: String? = nil
     var body: some View {
+        let current = AeroProfiles.profile(settings.profile)
         VStack(alignment: .leading, spacing: 4) {
-            Picker("Aero model", selection: $settings.model) {
-                Text("Fast · analytic").tag(AeroModel.fast)
-                Text("Full · GPU CFD").tag(AeroModel.full)
+            Picker("Aero model", selection: Binding(get: { settings.profile }, set: { id in
+                if let p = AeroProfiles.profile(id) { settings = p.settings(from: settings) }
+            })) {
+                ForEach(AeroProfiles.all) { p in Text(p.name).tag(p.id) }
+                if current == nil { Text("Custom").tag(settings.profile) }
             }
-            .pickerStyle(.segmented).labelsHidden()
-            .help("Fast: strip theory, momentum props, actuator-disk slipstream, Newtonian panels (≈1 kHz, cheap).\nFull: lattice-Boltzmann CFD on the GPU in a craft-following box; per-part forces from momentum exchange.")
-            Text(settings.model == .fast
-                 ? "Analytic models — see EQUATIONS for every formula."
-                 : "Lattice-Boltzmann flow around the craft; props stay actuator disks.")
-                .font(.caption2).foregroundStyle(.secondary)
+            .labelsHidden()
+            .help("Which aerodynamics model to use. Fast models are formulas (see EQUATIONS); Full CFD simulates the air on the GPU.")
+            Text(current?.summary ?? "Custom combination of settings below.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let e = error { Label(e, systemImage: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(.orange) }
         }
+        .onChange(of: settings.toggles) { _ in settings.profile = AeroProfiles.match(settings) }
+        .onChange(of: settings.cfd) { _ in settings.profile = AeroProfiles.match(settings) }
     }
 }
 
@@ -81,6 +84,7 @@ struct FastTogglesView: View {
     @Binding var toggles: FastAeroToggles
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            Toggle("Prop slipstream (wakes, ducts)", isOn: $toggles.slipstream).help("Actuator-disk prop wakes feed downstream parts; duct and rotor ground effect.")
             Toggle("Gyroscopic rotors", isOn: $toggles.gyro).help("Prop/wheel angular momentum couples into body rotation (ω × H).")
             Toggle("Prop P-factor", isOn: $toggles.pFactor).help("Asymmetric disk loading at incidence: normal force + yaw/pitch moment.")
             Toggle("Wing downwash", isOn: $toggles.downwash).help("Horseshoe-vortex induced velocity from upstream wings onto the tail.")

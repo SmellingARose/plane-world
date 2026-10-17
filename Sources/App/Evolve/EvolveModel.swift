@@ -110,6 +110,8 @@ final class EvolveModel: ObservableObject {
 
     @Published var showTermsMean = false
     @Published var io: (inputs: [String], outputs: [String]) = ([], [])
+    /// Full descriptors (kind, unit, range) for the "what the controller sees / drives" table.
+    @Published var ioDetail: (inputs: [CraftInput], outputs: [CraftOutput]) = ([], [])
 
     // MARK: script check
     @Published var scriptError: ScriptError?
@@ -239,9 +241,10 @@ final class EvolveModel: ObservableObject {
 
     /// Input / output names of the selected craft (for the MLP input/output pickers).
     func craftIO() -> (inputs: [String], outputs: [String]) {
-        guard let c = resolvedCraft() else { return ([], []) }
+        guard let c = resolvedCraft() else { ioDetail = ([], []); return ([], []) }
         let s = CraftSim()
-        guard (try? s.load(c)) != nil else { return ([], []) }
+        guard (try? s.load(c)) != nil else { ioDetail = ([], []); return ([], []) }
+        ioDetail = (s.inputs, s.outputs)
         return (s.inputs.map(\.name), s.outputs.map(\.name))
     }
 

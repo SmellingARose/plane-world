@@ -169,7 +169,7 @@ public final class EvalWorker {
     var fullBackend: AeroBackend?
     /// experiment.aero → sim: fast-model toggles, and for `.full` a configured CFD domain (docs/CFD.md).
     func applyAero(_ s: CraftSim) throws {
-        s.fastToggles = ctx.experiment.aero.toggles
+        s.fastToggles = ctx.experiment.aero.toggles; s.slipstream = ctx.experiment.aero.toggles.slipstream
         guard ctx.experiment.aero.model == .full else { return }
         do { try AeroGeometry.enableFull(on: s, settings: ctx.experiment.aero.cfd, backend: fullBackend) }
         catch { throw EvolutionError.invalidExperiment("aero model 'full': \(error)") }

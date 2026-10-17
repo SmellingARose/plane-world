@@ -31,7 +31,7 @@ extension AppModel {
     /// Push `aero` into the sim. Switching to `.full` builds part geometry and configures a CFD backend; if the
     /// backend is unavailable or throws, the sim stays on `.fast` and `aeroError` explains why.
     func applyAero(old: AeroRunSettings) {
-        sim.fastToggles = aero.toggles
+        sim.fastToggles = aero.toggles; sim.slipstream = aero.toggles.slipstream
         sim.equationCapture = equationCapture
         guard aero.model == .full else {
             sim.aeroModel = .fast; aeroError = nil; return
@@ -86,7 +86,7 @@ extension AppModel {
 
     /// Called every frame from `tick`: equation capture handoff at ~10 Hz, diagnostics + status bar at ~4 Hz.
     func tickFidelity(dt: Double) {
-        if sim.equationCapture !== equationCapture { sim.equationCapture = equationCapture; sim.fastToggles = aero.toggles }
+        if sim.equationCapture !== equationCapture { sim.equationCapture = equationCapture; sim.fastToggles = aero.toggles; sim.slipstream = aero.toggles.slipstream }
         updateFlowOverlay()
         fidelityAccum += dt
         rateWall += dt
