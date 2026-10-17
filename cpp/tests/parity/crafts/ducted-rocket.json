@@ -1,0 +1,595 @@
+{
+  "name" : "Ducted rocket",
+  "parts" : [
+    {
+      "color" : "#5a6270",
+      "id" : "p1",
+      "invert" : false,
+      "keys" : {
+        "mode" : "ramp",
+        "neg" : "down",
+        "pos" : "up",
+        "rate" : 0.8
+      },
+      "mass" : 1.25,
+      "motor" : null,
+      "name" : "Lift upper",
+      "p" : {
+        "reversible" : 0,
+        "torque" : 10,
+        "vmax" : 20
+      },
+      "pos" : [
+        0,
+        1.3,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        90
+      ],
+      "servo" : null,
+      "type" : "motor"
+    },
+    {
+      "color" : "#5a6270",
+      "id" : "p2",
+      "invert" : false,
+      "keys" : {
+        "mode" : "ramp",
+        "neg" : "down",
+        "pos" : "up",
+        "rate" : 0.8
+      },
+      "mass" : 1.25,
+      "motor" : null,
+      "name" : "Lift lower",
+      "p" : {
+        "reversible" : 0,
+        "torque" : 10,
+        "vmax" : 20
+      },
+      "pos" : [
+        0,
+        1,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        90
+      ],
+      "servo" : null,
+      "type" : "motor"
+    },
+    {
+      "color" : "#ffb020",
+      "id" : "p3",
+      "invert" : false,
+      "keys" : {
+        "mode" : "spring",
+        "neg" : "a",
+        "pos" : "d",
+        "rate" : 3
+      },
+      "mass" : 0.1,
+      "motor" : null,
+      "name" : "Vane X",
+      "p" : {
+        "axis" : "x",
+        "range" : 25,
+        "speed" : 300,
+        "torque" : 8
+      },
+      "pos" : [
+        0,
+        0.55,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "servo"
+    },
+    {
+      "color" : "#ffb020",
+      "id" : "p4",
+      "invert" : false,
+      "keys" : {
+        "mode" : "spring",
+        "neg" : "s",
+        "pos" : "w",
+        "rate" : 3
+      },
+      "mass" : 0.1,
+      "motor" : null,
+      "name" : "Vane Z",
+      "p" : {
+        "axis" : "z",
+        "range" : 25,
+        "speed" : 300,
+        "torque" : 8
+      },
+      "pos" : [
+        0,
+        0.55,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "servo"
+    },
+    {
+      "color" : "#e6e8ec",
+      "id" : "p5",
+      "invert" : false,
+      "mass" : 1.2,
+      "motor" : null,
+      "name" : "Shell 1",
+      "p" : {
+        "cd" : 0.15,
+        "sx" : 0.261,
+        "sy" : 2,
+        "sz" : 0.02
+      },
+      "pos" : [
+        0.32,
+        1.3,
+        0
+      ],
+      "rot" : [
+        0,
+        90,
+        0
+      ],
+      "servo" : null,
+      "type" : "box"
+    },
+    {
+      "color" : "#e6e8ec",
+      "id" : "p6",
+      "invert" : false,
+      "mass" : 1.2,
+      "motor" : null,
+      "name" : "Shell 2",
+      "p" : {
+        "cd" : 0.15,
+        "sx" : 0.261,
+        "sy" : 2,
+        "sz" : 0.02
+      },
+      "pos" : [
+        0.2263,
+        1.3,
+        0.2263
+      ],
+      "rot" : [
+        0,
+        45,
+        0
+      ],
+      "servo" : null,
+      "type" : "box"
+    },
+    {
+      "color" : "#e6e8ec",
+      "id" : "p7",
+      "invert" : false,
+      "mass" : 1.2,
+      "motor" : null,
+      "name" : "Shell 3",
+      "p" : {
+        "cd" : 0.15,
+        "sx" : 0.261,
+        "sy" : 2,
+        "sz" : 0.02
+      },
+      "pos" : [
+        0,
+        1.3,
+        0.32
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "box"
+    },
+    {
+      "color" : "#e6e8ec",
+      "id" : "p8",
+      "invert" : false,
+      "mass" : 1.2,
+      "motor" : null,
+      "name" : "Shell 4",
+      "p" : {
+        "cd" : 0.15,
+        "sx" : 0.261,
+        "sy" : 2,
+        "sz" : 0.02
+      },
+      "pos" : [
+        -0.2263,
+        1.3,
+        0.2263
+      ],
+      "rot" : [
+        0,
+        -45,
+        0
+      ],
+      "servo" : null,
+      "type" : "box"
+    },
+    {
+      "color" : "#e6e8ec",
+      "id" : "p9",
+      "invert" : false,
+      "mass" : 1.2,
+      "motor" : null,
+      "name" : "Shell 5",
+      "p" : {
+        "cd" : 0.15,
+        "sx" : 0.261,
+        "sy" : 2,
+        "sz" : 0.02
+      },
+      "pos" : [
+        -0.32,
+        1.3,
+        0
+      ],
+      "rot" : [
+        0,
+        -90,
+        0
+      ],
+      "servo" : null,
+      "type" : "box"
+    },
+    {
+      "color" : "#e6e8ec",
+      "id" : "p10",
+      "invert" : false,
+      "mass" : 1.2,
+      "motor" : null,
+      "name" : "Shell 6",
+      "p" : {
+        "cd" : 0.15,
+        "sx" : 0.261,
+        "sy" : 2,
+        "sz" : 0.02
+      },
+      "pos" : [
+        -0.2263,
+        1.3,
+        -0.2263
+      ],
+      "rot" : [
+        0,
+        -135,
+        0
+      ],
+      "servo" : null,
+      "type" : "box"
+    },
+    {
+      "color" : "#e6e8ec",
+      "id" : "p11",
+      "invert" : false,
+      "mass" : 1.2,
+      "motor" : null,
+      "name" : "Shell 7",
+      "p" : {
+        "cd" : 0.15,
+        "sx" : 0.261,
+        "sy" : 2,
+        "sz" : 0.02
+      },
+      "pos" : [
+        -0,
+        1.3,
+        -0.32
+      ],
+      "rot" : [
+        0,
+        -180,
+        0
+      ],
+      "servo" : null,
+      "type" : "box"
+    },
+    {
+      "color" : "#e6e8ec",
+      "id" : "p12",
+      "invert" : false,
+      "mass" : 1.2,
+      "motor" : null,
+      "name" : "Shell 8",
+      "p" : {
+        "cd" : 0.15,
+        "sx" : 0.261,
+        "sy" : 2,
+        "sz" : 0.02
+      },
+      "pos" : [
+        0.2263,
+        1.3,
+        -0.2263
+      ],
+      "rot" : [
+        0,
+        -225,
+        0
+      ],
+      "servo" : null,
+      "type" : "box"
+    },
+    {
+      "color" : "#333",
+      "id" : "p13",
+      "invert" : false,
+      "mass" : 0.4,
+      "motor" : "p2",
+      "name" : "Prop lower (CW)",
+      "p" : {
+        "d" : 0.55,
+        "spin" : 1,
+        "thrust" : 230,
+        "vmax" : 60
+      },
+      "pos" : [
+        0,
+        1,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        90
+      ],
+      "servo" : null,
+      "type" : "prop"
+    },
+    {
+      "color" : "#333",
+      "id" : "p14",
+      "invert" : false,
+      "mass" : 0.4,
+      "motor" : "p1",
+      "name" : "Prop upper (CCW)",
+      "p" : {
+        "d" : 0.55,
+        "spin" : -1,
+        "thrust" : 230,
+        "vmax" : 60
+      },
+      "pos" : [
+        0,
+        1.3,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        90
+      ],
+      "servo" : null,
+      "type" : "prop"
+    },
+    {
+      "color" : "#c0302a",
+      "id" : "p15",
+      "invert" : false,
+      "mass" : 0.2,
+      "motor" : null,
+      "name" : "Fin X (vane)",
+      "p" : {
+        "ar" : 2,
+        "camber" : 0,
+        "chord" : 0.25,
+        "span" : 0.5,
+        "thick" : 0.02
+      },
+      "pos" : [
+        0,
+        0.55,
+        0
+      ],
+      "rot" : [
+        90,
+        90,
+        0
+      ],
+      "servo" : "p3",
+      "type" : "wing"
+    },
+    {
+      "color" : "#c0302a",
+      "id" : "p16",
+      "invert" : false,
+      "mass" : 0.2,
+      "motor" : null,
+      "name" : "Fin Z (vane)",
+      "p" : {
+        "ar" : 2,
+        "camber" : 0,
+        "chord" : 0.25,
+        "span" : 0.5,
+        "thick" : 0.02
+      },
+      "pos" : [
+        0,
+        0.55,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        90
+      ],
+      "servo" : "p4",
+      "type" : "wing"
+    },
+    {
+      "color" : "#4da3ff",
+      "id" : "p17",
+      "invert" : false,
+      "mass" : 0.05,
+      "motor" : null,
+      "name" : "att",
+      "p" : {
+        "dir" : "down",
+        "kind" : "attitude",
+        "noise" : 0,
+        "range" : 200,
+        "ref" : "",
+        "tx" : 0,
+        "ty" : 100,
+        "tz" : 0
+      },
+      "pos" : [
+        0,
+        1.3,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "sensor"
+    },
+    {
+      "color" : "#4da3ff",
+      "id" : "p18",
+      "invert" : false,
+      "mass" : 0.05,
+      "motor" : null,
+      "name" : "rate",
+      "p" : {
+        "dir" : "down",
+        "kind" : "angularRate",
+        "noise" : 0,
+        "range" : 200,
+        "ref" : "",
+        "tx" : 0,
+        "ty" : 100,
+        "tz" : 0
+      },
+      "pos" : [
+        0,
+        1.3,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "sensor"
+    },
+    {
+      "color" : "#4da3ff",
+      "id" : "p19",
+      "invert" : false,
+      "mass" : 0.05,
+      "motor" : null,
+      "name" : "alt",
+      "p" : {
+        "dir" : "down",
+        "kind" : "altitudeAGL",
+        "noise" : 0,
+        "range" : 200,
+        "ref" : "",
+        "tx" : 0,
+        "ty" : 100,
+        "tz" : 0
+      },
+      "pos" : [
+        0,
+        1.3,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "sensor"
+    },
+    {
+      "color" : "#4da3ff",
+      "id" : "p20",
+      "invert" : false,
+      "mass" : 0.05,
+      "motor" : null,
+      "name" : "vs",
+      "p" : {
+        "dir" : "down",
+        "kind" : "verticalSpeed",
+        "noise" : 0,
+        "range" : 200,
+        "ref" : "",
+        "tx" : 0,
+        "ty" : 100,
+        "tz" : 0
+      },
+      "pos" : [
+        0,
+        1.3,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "sensor"
+    },
+    {
+      "color" : "#4da3ff",
+      "id" : "p21",
+      "invert" : false,
+      "mass" : 0.05,
+      "motor" : null,
+      "name" : "target",
+      "p" : {
+        "dir" : "down",
+        "kind" : "target",
+        "noise" : 0,
+        "range" : 200,
+        "ref" : "",
+        "tx" : 0,
+        "ty" : 10,
+        "tz" : 0
+      },
+      "pos" : [
+        0,
+        1.3,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "sensor"
+    }
+  ]
+}

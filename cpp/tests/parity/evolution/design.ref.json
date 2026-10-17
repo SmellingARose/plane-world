@@ -1,0 +1,127 @@
+{
+ "experiment": "parity-design.json",
+ "layoutGenes": 4,
+ "termNames": [
+  "climb",
+  "efficiency",
+  "crash"
+ ],
+ "history": [
+  {
+   "generation": 0,
+   "best": 0.23429743890080157,
+   "mean": 0.23429743890080162,
+   "median": 0.23429743890080157,
+   "worst": 0.23429743890080157,
+   "std": 5.551115123125783e-17,
+   "bestGenomeID": 1,
+   "failures": 0,
+   "termsBest": {
+    "climb": 0.031238847999984706,
+    "crash": 0,
+    "efficiency": 0.20305859090081688
+   },
+   "termsMean": {
+    "climb": 0.031238847999984713,
+    "crash": 0,
+    "efficiency": 0.20305859090081685
+   },
+   "speciesCount": 0
+  },
+  {
+   "generation": 1,
+   "best": 0.2351998889452549,
+   "mean": 0.23431463975355116,
+   "median": 0.23429743890080157,
+   "worst": 0.23279897982966455,
+   "std": 0.0006064737599647476,
+   "bestGenomeID": 15,
+   "failures": 0,
+   "termsBest": {
+    "climb": 0.03196195661820987,
+    "crash": 0,
+    "efficiency": 0.20323793232704504
+   },
+   "termsMean": {
+    "climb": 0.03126510918290972,
+    "crash": 0,
+    "efficiency": 0.2030495305706414
+   },
+   "speciesCount": 0
+  },
+  {
+   "generation": 2,
+   "best": 0.2359489894792984,
+   "mean": 0.23507699878387628,
+   "median": 0.23508543948467786,
+   "worst": 0.23429743890080157,
+   "std": 0.0005896127959153252,
+   "bestGenomeID": 23,
+   "failures": 0,
+   "termsBest": {
+    "climb": 0.03270962387558932,
+    "crash": 0,
+    "efficiency": 0.2032393656037091
+   },
+   "termsMean": {
+    "climb": 0.031957360448063736,
+    "crash": 0,
+    "efficiency": 0.20311963833581256
+   },
+   "speciesCount": 0
+  }
+ ],
+ "hallOfFame": [
+  {
+   "generation": 0,
+   "genomeID": 1,
+   "values": [
+    4.2,
+    1.5,
+    0.4,
+    3.4
+   ],
+   "total": 0.23429743890080157,
+   "terms": {
+    "climb": 0.031238847999984706,
+    "crash": 0,
+    "efficiency": 0.20305859090081688
+   },
+   "descriptor": null
+  },
+  {
+   "generation": 1,
+   "genomeID": 15,
+   "values": [
+    4.2,
+    1.596148111354664,
+    0.32814542914210054,
+    3.2926129163339604
+   ],
+   "total": 0.2351998889452549,
+   "terms": {
+    "climb": 0.03196195661820987,
+    "crash": 0,
+    "efficiency": 0.20323793232704504
+   },
+   "descriptor": null
+  },
+  {
+   "generation": 2,
+   "genomeID": 23,
+   "values": [
+    4.2,
+    1.596148111354664,
+    0.47557031541447004,
+    3.2926129163339604
+   ],
+   "total": 0.2359489894792984,
+   "terms": {
+    "climb": 0.03270962387558932,
+    "crash": 0,
+    "efficiency": 0.2032393656037091
+   },
+   "descriptor": null
+  }
+ ]
+}

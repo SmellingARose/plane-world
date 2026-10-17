@@ -1,0 +1,198 @@
+{
+  "name" : "Rover",
+  "parts" : [
+    {
+      "color" : "#5a6270",
+      "id" : "p1",
+      "invert" : false,
+      "keys" : {
+        "mode" : "spring",
+        "neg" : "s",
+        "pos" : "w",
+        "rate" : 2
+      },
+      "mass" : 30,
+      "motor" : null,
+      "name" : "Drive",
+      "p" : {
+        "reversible" : 1,
+        "torque" : 180,
+        "vmax" : 20
+      },
+      "pos" : [
+        0,
+        0,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "motor"
+    },
+    {
+      "color" : "#ffb020",
+      "id" : "p2",
+      "invert" : false,
+      "keys" : {
+        "mode" : "spring",
+        "neg" : "a",
+        "pos" : "d",
+        "rate" : 2
+      },
+      "mass" : 0.5,
+      "motor" : null,
+      "name" : "Steering",
+      "p" : {
+        "axis" : "y",
+        "range" : 30,
+        "speed" : 60,
+        "torque" : 200
+      },
+      "pos" : [
+        0.9,
+        0,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "servo"
+    },
+    {
+      "color" : "#d8dce2",
+      "id" : "p3",
+      "invert" : false,
+      "mass" : 150,
+      "motor" : null,
+      "name" : "Chassis",
+      "p" : {
+        "cd" : 0.6,
+        "sx" : 2.4,
+        "sy" : 0.4,
+        "sz" : 1.3
+      },
+      "pos" : [
+        0,
+        0.1,
+        0
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "box"
+    },
+    {
+      "color" : "#222428",
+      "id" : "p4",
+      "invert" : true,
+      "mass" : 8,
+      "motor" : "p1",
+      "name" : "Front L",
+      "p" : {
+        "grip" : 1,
+        "r" : 0.35,
+        "roll" : 0.02,
+        "width" : 0.2
+      },
+      "pos" : [
+        0.9,
+        -0.15,
+        -0.85
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : "p2",
+      "type" : "wheel"
+    },
+    {
+      "color" : "#222428",
+      "id" : "p5",
+      "invert" : true,
+      "mass" : 8,
+      "motor" : "p1",
+      "name" : "Front R",
+      "p" : {
+        "grip" : 1,
+        "r" : 0.35,
+        "roll" : 0.02,
+        "width" : 0.2
+      },
+      "pos" : [
+        0.9,
+        -0.15,
+        0.85
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : "p2",
+      "type" : "wheel"
+    },
+    {
+      "color" : "#222428",
+      "id" : "p6",
+      "invert" : true,
+      "mass" : 8,
+      "motor" : "p1",
+      "name" : "Rear L",
+      "p" : {
+        "grip" : 1,
+        "r" : 0.35,
+        "roll" : 0.02,
+        "width" : 0.2
+      },
+      "pos" : [
+        -0.9,
+        -0.15,
+        -0.85
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "wheel"
+    },
+    {
+      "color" : "#222428",
+      "id" : "p7",
+      "invert" : true,
+      "mass" : 8,
+      "motor" : "p1",
+      "name" : "Rear R",
+      "p" : {
+        "grip" : 1,
+        "r" : 0.35,
+        "roll" : 0.02,
+        "width" : 0.2
+      },
+      "pos" : [
+        -0.9,
+        -0.15,
+        0.85
+      ],
+      "rot" : [
+        0,
+        0,
+        0
+      ],
+      "servo" : null,
+      "type" : "wheel"
+    }
+  ]
+}

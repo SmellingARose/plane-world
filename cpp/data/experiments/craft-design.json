@@ -1,0 +1,168 @@
+{
+  "aero" : {
+    "cfd" : {
+      "cellsPerMeter" : 16,
+      "collision" : "cumulant",
+      "convergenceEvery" : 200,
+      "ground" : true,
+      "lattice" : "d3q19",
+      "latticeMach" : 0.1,
+      "maxCellsPerAxis" : 192,
+      "maxMach" : 0.3,
+      "padDownstream" : 2.5,
+      "padLateral" : 1,
+      "padUpstream" : 1,
+      "preset" : "medium",
+      "smagorinskyCs" : 0.17,
+      "substeps" : 0,
+      "turbulence" : "smagorinsky",
+      "updateEvery" : 4,
+      "visualization" : {
+        "enabled" : false,
+        "field" : "speed",
+        "particleCount" : 4096,
+        "particles" : false,
+        "sliceAxis" : 2,
+        "sliceOffset" : 0
+      },
+      "wall" : "interpolatedBounceBack"
+    },
+    "model" : "fast",
+    "profile" : "fast.plus",
+    "toggles" : {
+      "blockage" : true,
+      "cadWash" : true,
+      "downwash" : true,
+      "gyro" : true,
+      "pFactor" : true,
+      "slipstream" : true
+    }
+  },
+  "algorithm" : {
+    "kind" : "ga",
+    "values" : {
+      "crossover" : "sbx",
+      "elitism" : 2,
+      "mutation" : "polynomial",
+      "selection" : "tournament"
+    }
+  },
+  "batchLanes" : 1,
+  "checkpointEvery" : 5,
+  "controller" : {
+    "hz" : 50,
+    "mode" : "script"
+  },
+  "crafts" : [
+    {
+      "name" : "Trainer"
+    }
+  ],
+  "descriptorAxes" : [
+
+  ],
+  "episode" : {
+    "aggregate" : "mean",
+    "commonRandomNumbers" : true,
+    "crashSpeed" : 8,
+    "duration" : 45,
+    "episodesPerCandidate" : 1,
+    "physicsHz" : 1000,
+    "spawn" : {
+      "altitudeAGL" : 0,
+      "headingDeg" : 0,
+      "jitterAttitudeDeg" : 0,
+      "jitterHeadingDeg" : 0,
+      "jitterPosition" : 0,
+      "jitterSpeed" : 0,
+      "mode" : "runway",
+      "speed" : 0
+    },
+    "stopOnCrash" : true,
+    "wind" : {
+      "directionMaxDeg" : 360,
+      "directionMinDeg" : 0,
+      "speedMax" : 0,
+      "speedMin" : 0,
+      "turbulence" : 0
+    }
+  },
+  "generations" : 60,
+  "genome" : {
+    "design" : [
+      {
+        "field" : "p.span",
+        "initial" : 4.2,
+        "kind" : "real",
+        "max" : 6,
+        "min" : 2.5,
+        "mirror" : [
+          "Wing R"
+        ],
+        "part" : "Wing L"
+      },
+      {
+        "field" : "p.chord",
+        "initial" : 1.5,
+        "kind" : "real",
+        "max" : 2.2,
+        "min" : 0.8,
+        "mirror" : [
+          "Wing R"
+        ],
+        "part" : "Wing L"
+      },
+      {
+        "field" : "pos.0",
+        "initial" : 0.4,
+        "kind" : "real",
+        "max" : 1.4,
+        "min" : -0.6,
+        "mirror" : [
+          "Wing R",
+          "Aileron L",
+          "Aileron R"
+        ],
+        "part" : "Wing L"
+      },
+      {
+        "field" : "p.span",
+        "initial" : 3.4,
+        "kind" : "real",
+        "max" : 4.5,
+        "min" : 2,
+        "mirror" : [
+
+        ],
+        "part" : "Stabilator"
+      }
+    ],
+    "preset" : "design"
+  },
+  "headless" : {
+    "breakables" : false,
+    "oceanWaves" : false,
+    "terrain" : true,
+    "vegetation" : false,
+    "water" : true
+  },
+  "name" : "Craft design — Trainer",
+  "notes" : "Evolve wing span\/chord, wing position and stabilator size; a scripted PID autopilot flies every design.",
+  "population" : 48,
+  "rewardTerms" : [
+    "climb",
+    "efficiency",
+    "crash"
+  ],
+  "scripts" : {
+    "callBudgetMs" : 5,
+    "language" : "javascript",
+    "source" : "\/\/ Craft design preset. Genes are applied natively (genome.design); this script flies every design with\n\/\/ a PID autopilot and scores climb per kilogram.\nfunction terms() { return [\"climb\", \"efficiency\", \"crash\"]; }\n\nfunction init(ctx) {\n  ctx.memory.pitch = pid(0.08, 0.01, 0.5);\n  ctx.memory.roll = pid(0.03, 0.0, 0.2);\n}\n\nfunction control(ctx) {\n  const s = ctx.state, m = ctx.memory;\n  const targetPitch = s.airspeed > 30 ? 8 : 0;\n  ctx.out.Engine = 1;\n  ctx.out.Elevator = clamp(m.pitch.update(targetPitch - s.pitch, ctx.dt), -1, 1);\n  ctx.out.Ailerons = clamp(m.roll.update(-s.roll, ctx.dt), -1, 1);\n  ctx.out.Rudder = 0;\n}\n\nfunction reward(ctx) { return { climb: Math.max(0, ctx.state.vy) * ctx.dt }; }\n\nfunction terminate(ctx) { return ctx.state.crashed; }\n\nfunction fitness(ctx) {\n  const crash = ctx.state.crashed ? -100 : 0;\n  const eff = ctx.state.agl \/ Math.max(ctx.state.mass, 1) * 100;\n  return { fitness: ctx.sum.climb + eff + crash, terms: { efficiency: eff, crash: crash } };\n}"
+  },
+  "seed" : 1,
+  "version" : 1,
+  "workers" : 0,
+  "world" : {
+    "source" : "current"
+  }
+}

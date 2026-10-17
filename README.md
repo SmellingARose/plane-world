@@ -34,6 +34,34 @@ swift test --scratch-path /tmp/pw-build
 ```
 Use release builds when you judge performance. The physics, collision and terrain generation are 10–200x slower in debug.
 
+## C++ / Qt 6 app (macOS + Windows)
+
+A cross-platform port lives in [`cpp/`](cpp/README.md) (C++20 core, Qt 6 Quick UI with native styles, Metal on macOS,
+Direct3D 12 on Windows, Slang shaders). Plan and status: [docs/PORT_PLAN.md](docs/PORT_PLAN.md); installers:
+[docs/PACKAGING.md](docs/PACKAGING.md).
+
+macOS (Apple silicon, Command Line Tools are enough):
+
+    brew install cmake ninja qt
+    # Slang: official release from github.com/shader-slang/slang, unpacked to ~/.local/slang-<ver> (or set SLANG_DIR)
+    cmake -S cpp -B cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$(brew --prefix qt)
+    cmake --build cpp/build
+    cpp/build/tests/pwtests && cpp/build/src/cli/pwcli --selftest all
+    open "cpp/build/src/app/Plane World.app"
+    cpp/packaging/macos/make_dmg.sh cpp/build            # -> cpp/build/dist/PlaneWorld-<ver>-macos-arm64.dmg
+
+Windows x64 (Visual Studio 2022 with the C++ workload, Qt 6.8 MSVC 2022 64-bit, Slang release, Ninja), from a
+"x64 Native Tools" prompt:
+
+    cmake -S cpp -B cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64 -DSLANG_DIR=C:/slang
+    cmake --build cpp/build
+    cpp\build\tests\pwtests.exe && cpp\build\src\cli\pwcli.exe --selftest all
+    cmake --build cpp/build --target pwapp_deploy       # self-contained folder in cpp/build/deploy
+    bash cpp/packaging/windows/make_msi.sh cpp/build     # needs: dotnet tool install --global wix --version 5.0.2
+
+CI (`.github/workflows/cpp.yml`) builds, tests and packages both platforms on every push to `cpp-port`; pushing a `v*`
+tag also drafts a GitHub release with the .dmg, .msi and zips.
+
 ## Tabs
 - **BUILD**: craft library (presets, plus user crafts in `~/Library/Application Support/PlaneWorld/crafts`), JSON import and export (prototype format), add primitives, and CAD import (STL/OBJ/glTF/GLB/USD/USDZ) with auto-rig on import. You also get an auto-rig button, a mesh-cut tool (plane plus offset), and a properties inspector (transform, params, servo/motor links, invert). Duplicate and mirror are there too, plus mass and CoM, and renamable auto outputs.
   - Viewport: click to select a part, ⇧-drag to move it, ⌘-drag to rotate it, ⌫ to delete it.
