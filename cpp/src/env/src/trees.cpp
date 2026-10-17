@@ -1,5 +1,6 @@
 // Procedural trees (Sources/Vegetation/TreeGenerator.swift) and octahedral impostor helpers.
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include "pw/env/vegetation.h"
 

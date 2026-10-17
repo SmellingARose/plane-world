@@ -113,3 +113,32 @@ struct WaterVOut {
     color = color * ap.T + ap.L * alpha;
     return float4(color, alpha);
 }
+
+// ---- splash spray: camera-facing soft discs (t9: 2 float4 per particle: camera-relative pos + size, alpha)
+StructuredBuffer<float4> gSplash : register(t9);
+struct SplashVOut { float4 position : SV_Position; float2 uv : TEXCOORD0; float alpha : TEXCOORD1; float3 rel : TEXCOORD2; };
+[shader("vertex")] SplashVOut splashVertex(uint vid : SV_VertexID, uint iid : SV_InstanceID)
+{
+    float4 ps = gSplash[iid * 2], misc = gSplash[iid * 2 + 1];
+    const float2 corners[6] = { float2(-1, -1), float2(1, -1), float2(1, 1), float2(-1, -1), float2(1, 1), float2(-1, 1) };
+    float2 c = corners[vid % 6];
+    float3 right = float3(gFrame.view.c0.x, gFrame.view.c1.x, gFrame.view.c2.x);
+    float3 up = float3(gFrame.view.c0.y, gFrame.view.c1.y, gFrame.view.c2.y);
+    SplashVOut o;
+    o.rel = ps.xyz + (right * c.x + up * c.y) * ps.w;
+    o.position = mulM(gFrame.viewProj, float4(o.rel, 1.0));
+    o.uv = c; o.alpha = misc.x;
+    return o;
+}
+[shader("fragment")] float4 splashFragment(SplashVOut i) : SV_Target
+{
+    float r2 = dot(i.uv, i.uv);
+    if (r2 > 1.0) discard;
+    float a = i.alpha * (1.0 - r2) * (1.0 - r2);
+    float3 skyScale = gFrame.sunColor.rgb * gFrame.sunDir.w;
+    AerialSample ap = aerialLookup(gAerialL, gAerialT, gAerialS, i.rel);
+    float3 amb = sampleSky(gSkyLUT, float3(0.0, 1.0, 0.0)) * skyScale * PI * 0.5;
+    float3 c = 0.8 * (skyScale * ap.sunT * 0.6 + amb) / PI;
+    c = c * ap.T + ap.L;
+    return float4(c, a);
+}

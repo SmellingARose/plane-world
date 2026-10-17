@@ -1,6 +1,6 @@
 // Grass blades for pwenv_render's VegetationRenderable: 9 vertices (3 triangles) per blade generated from the vertex
 // id over a density map (pw::veg::ProceduralVegetation::grassDensityMap), planted on the terrain, bent by wind.
-// Bindings: b0 frame, b2 GrassDraw; t0..t4 frame textures; t5 density (R32F 0..1), t6 ground height (R32F, world heights).
+// Bindings: b0 frame, b2 GrassDraw; t0..t4 frame textures; t5 density (R32F 0..1), t6 ground height (R32F, world heights), t7 interaction (RGBA16F).
 #include "../common.slang"
 
 DepthTexture2DArray gShadowMap : register(t0);
@@ -24,6 +24,7 @@ struct GrassDraw {
 ConstantBuffer<GrassDraw> gGrass : register(b2);
 Texture2D<float> gGrassDensity : register(t5);
 Texture2D<float> gGrassGround : register(t6);
+Texture2D<float4> gGrassPush : register(t7);    // interaction: xy push (m), z flatten 0..1 (decays back)
 
 struct GrassVOut {
     float4 position : SV_Position;
@@ -55,8 +56,9 @@ struct GrassVOut {
     float yaw = hashVeg(cell + 9.1) * 6.2831853;
     float2 dirB = float2(cos(yaw), sin(yaw));
     float tt = gFrame.params.x;
-    float2 bend = gFrame.wind.xz * 0.03 * (0.6 + 0.4 * sin(tt * 2.1 + xz.x * 0.3 + xz.y * 0.2));
-    float hgt = gGrass.blade.x * (0.6 + 0.8 * hashVeg(cell * 1.3));
+    float4 push = gGrassPush.SampleLevel(gLinearClamp, uv, 0.0);
+    float2 bend = gFrame.wind.xz * 0.03 * (0.6 + 0.4 * sin(tt * 2.1 + xz.x * 0.3 + xz.y * 0.2)) + push.xy;
+    float hgt = gGrass.blade.x * (0.6 + 0.8 * hashVeg(cell * 1.3)) * (1.0 - 0.8 * saturate(push.z));
     float3 p = float3(xz.x, ground, xz.y);
     p.xz += float2(-dirB.y, dirB.x) * (side * gGrass.blade.y * (1.0 - t));
     p.y += hgt * t;

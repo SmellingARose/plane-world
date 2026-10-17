@@ -1,6 +1,7 @@
 // Real-world elevation (AWS terrarium tiles) and heightmap import/export: port of Sources/Terrain/TerrainDEM.swift
 // and HeightmapImport.swift.
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <condition_variable>
 #include <deque>

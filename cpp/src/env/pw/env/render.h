@@ -77,7 +77,13 @@ private:
     gpu::Device& dev_;
     water::WaterSystem& water_;
     UploadRing ring_;
-    std::unique_ptr<gpu::Pipeline> pipe_;
+    std::unique_ptr<gpu::Pipeline> pipe_, splash_, fluid_;
+    gpu::Buffer* splashBuf_ = nullptr;
+    std::size_t splashOff_ = 0;
+    int splashCount_ = 0;
+    std::vector<float> splashScratch_, densityScratch_;
+    struct Zone { const water::FluidZone* zone = nullptr; std::unique_ptr<gpu::Texture> density; };
+    std::vector<Zone> zones_;
     std::unique_ptr<gpu::Texture> disp_, deriv_, ground_;
     Mesh ocean_;
     std::vector<Mesh> lakes_, rivers_;
@@ -118,6 +124,7 @@ private:
     void rebuildTemplates();
     void bakeImpostors();
     void updateGrass(const render::FrameContext& f);
+    void updateInteractions(const render::FrameContext& f);
     gpu::Device& dev_;
     veg::ProceduralVegetation& veg_;
     UploadRing ring_;
@@ -125,7 +132,11 @@ private:
     std::vector<Template> templates_;
     uint64_t templatesVersion_ = ~0ull;
     bool baked_ = false;
-    std::unique_ptr<gpu::Texture> grassDensity_, grassGround_;
+    std::unique_ptr<gpu::Texture> grassDensity_, grassGround_, grassPush_;
+    std::vector<float> push_;            // interaction map (xy push, z flatten) over the grass maps' texels
+    std::vector<uint16_t> pushHalf_;
+    bool pushActive_ = true;
+    double lastTime_ = -1;
     Vec3d grassCenter_{1e30, 0, 1e30};
     uint64_t grassVersion_ = ~0ull;
     double grassMinX_ = 0, grassMinZ_ = 0, grassTexel_ = 1;

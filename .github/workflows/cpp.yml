@@ -71,6 +71,8 @@ jobs:
         run: mkdir -p shots && cpp/build/tests/pwtests
 
       - name: Self-tests (pwcli --selftest all)
+        env:
+          PW_SELFTEST_OUT: shots   # env scene screenshots (envrender.scene) land in the uploaded artefacts
         run: cpp/build/src/cli/pwcli --selftest all --verbose
 
       - name: Training parity vs Swift CLI (examples/experiments, 1 and 4 workers)

@@ -169,6 +169,12 @@ WaterRenderable::WaterRenderable(Device& dev, water::WaterSystem& w) : dev_(dev)
     auto g = hdrPipeline("water", "waterVertex", "waterFragment", "water");
     g.depthWrite = false; g.blend = BlendMode::Alpha;
     if (!(pipe_ = dev.createPipeline(g, &err_))) return;
+    auto sp = hdrPipeline("water", "splashVertex", "splashFragment", "splash");
+    sp.depthWrite = false; sp.blend = BlendMode::Alpha;
+    if (!(splash_ = dev.createPipeline(sp, &err_))) return;
+    auto fl = hdrPipeline("fluidsurface", "fluidBoxVertex", "fluidBoxFragment", "fluid zone");
+    fl.blend = BlendMode::Alpha; fl.cull = CullMode::Front;   // back faces: the march starts at the camera or the box entry
+    if (!(fluid_ = dev.createPipeline(fl, &err_))) return;
     ocean_ = makeMesh(water::oceanGridMesh(), "ocean grid");
     ok_ = ocean_.count > 0;
     if (!ok_) err_ = "ocean grid upload failed";
@@ -212,9 +218,32 @@ void WaterRenderable::prepare(render::FrameContext& f) {
         ground_ = tex2D(dev_, Format::R32F, res, res, "water ground");
         groundData_.assign(std::size_t(res) * res, -1e4f);
         ring_.texture(ground_.get(), 0, groundData_.data(), std::size_t(res) * 4, res);
+        water_.markDepthDirty();   // a new texture needs the heights even if the camera has not moved
     }
     if (water_.updateDepthTexture(f.camera.position, groundData_, minX, minZ, res, 2048))
         ring_.texture(ground_.get(), 0, groundData_.data(), std::size_t(res) * 4, res);
+    // splash spray (CPU particles, integrated by WaterSystem::frame)
+    water_.splashes().instances(f.camera.position, splashScratch_);
+    splashCount_ = int(splashScratch_.size() / 8);
+    splashBuf_ = nullptr;
+    if (splashCount_ > 0) f.transient(splashScratch_.data(), splashScratch_.size() * 4, &splashBuf_, &splashOff_);
+    // FLIP zones: particle density -> 3D texture every frame
+    std::vector<Zone> keep;
+    for (const auto& zp : water_.fluidZones()) {
+        water::FluidZone* z = zp.get();
+        Zone zr;
+        for (auto& old : zones_) if (old.zone == z) { zr.zone = z; zr.density = std::move(old.density); }
+        zr.zone = z;
+        if (!zr.density) {
+            TextureDesc td; td.type = TextureType::Tex3D; td.format = Format::R32F; td.width = z->nx; td.height = z->ny; td.depthOrLayers = z->nz;
+            td.usage = TexSampled; td.label = "fluid density";
+            zr.density = dev_.createTexture(td);
+        }
+        if (zr.density && z->densityField(densityScratch_))
+            ring_.texture(zr.density.get(), 0, densityScratch_.data(), std::size_t(z->nx) * 4, z->ny * z->nz);
+        keep.push_back(std::move(zr));
+    }
+    zones_ = std::move(keep);
     if (lakes_.size() != water_.lakes().size()) {
         lakes_.clear();
         for (auto& l : water_.lakes()) lakes_.push_back(makeMesh(water::lakeMesh(l.radius), "lake"));
@@ -245,6 +274,26 @@ void WaterRenderable::drawTransparent(CommandList& cmd, render::FrameContext& f)
     }
     for (std::size_t i = 0; i < rivers_.size() && i < water_.rivers().size(); ++i)
         if (!water_.rivers()[i].samples.empty()) draw(rivers_[i], water_.rivers()[i].samples[0], 0.08f);
+    if (!zones_.empty()) {
+        cmd.setPipeline(fluid_.get());
+        f.bindFrame(cmd);
+        for (auto& z : zones_) {
+            if (!z.density) continue;
+            Vec3d o = z.zone->origin - cam, sz = z.zone->size();
+            float d[16] = {float(o.x), float(o.y), float(o.z), 0, float(sz.x), float(sz.y), float(sz.z), 0,
+                           water_.absorption[0], water_.absorption[1], water_.absorption[2], water_.scattering,
+                           float(z.zone->cellSize), 0.5f, 0, 0};
+            cmd.setConstants(2, d, sizeof d);
+            cmd.setTexture(5, z.density.get());
+            cmd.draw(36);
+        }
+    }
+    if (splashBuf_ && splashCount_ > 0) {
+        cmd.setPipeline(splash_.get());
+        f.bindFrame(cmd);
+        cmd.setBuffer(9, splashBuf_, splashOff_);
+        cmd.draw(6, splashCount_);
+    }
 }
 
 // ---------------------------------------------------------------- vegetation
@@ -355,6 +404,12 @@ void VegetationRenderable::updateGrass(const render::FrameContext& f) {
     }
     ring_.texture(grassDensity_.get(), 0, d.data(), std::size_t(res) * 4, res);
     ring_.texture(grassGround_.get(), 0, g.data(), std::size_t(res) * 4, res);
+    if (!grassPush_ || grassPush_->width() != res) {
+        TextureDesc pd; pd.format = Format::RGBA16F; pd.width = pd.height = res; pd.usage = TexSampled; pd.label = "grass interaction";
+        grassPush_ = dev_.createTexture(pd);
+    }
+    push_.assign(std::size_t(res) * std::size_t(res) * 4, 0.0f);   // the map moved: start from upright grass
+    pushActive_ = true;
     grassCenter_ = cam;
     grassVersion_ = veg_.grassVersion;
 }
@@ -403,7 +458,42 @@ void VegetationRenderable::prepare(render::FrameContext& f) {
             (b == 0 ? stats_.lod0 : b == 1 ? stats_.lod1 : b == 2 ? stats_.impostors : stats_.shadow) += tp.b[b].count;
         }
     }
-    if (settings.grass && veg_.enabled && veg_.grassDensity > 0 && veg_.terrain) updateGrass(f);
+    if (settings.grass && veg_.enabled && veg_.grassDensity > 0 && veg_.terrain) { updateGrass(f); updateInteractions(f); }
+}
+
+void VegetationRenderable::updateInteractions(const render::FrameContext& f) {
+    if (!grassPush_) return;
+    const int res = settings.grassResolution;
+    double dt = lastTime_ < 0 ? 0 : std::min(std::max(f.time - lastTime_, 0.0), 0.25);
+    lastTime_ = f.time;
+    auto hits = veg_.takeInteractors();
+    if (!pushActive_ && hits.empty()) return;
+    // grass springs back over ~2 s
+    float decay = float(std::exp(-dt / 2.0));
+    bool any = false;
+    for (float& v : push_) { v *= decay; if (std::fabs(v) > 1e-3f) any = true; else v = 0; }
+    for (const auto& h : hits) {
+        int x0 = int(std::floor((h.position.x - h.radius - grassMinX_) / grassTexel_)), x1 = int(std::ceil((h.position.x + h.radius - grassMinX_) / grassTexel_));
+        int z0 = int(std::floor((h.position.z - h.radius - grassMinZ_) / grassTexel_)), z1 = int(std::ceil((h.position.z + h.radius - grassMinZ_) / grassTexel_));
+        for (int z = std::max(z0, 0); z <= std::min(z1, res - 1); ++z)
+            for (int x = std::max(x0, 0); x <= std::min(x1, res - 1); ++x) {
+                double wx = grassMinX_ + (x + 0.5) * grassTexel_ - h.position.x, wz = grassMinZ_ + (z + 0.5) * grassTexel_ - h.position.z;
+                double d = std::hypot(wx, wz);
+                if (d >= h.radius) continue;
+                double k = h.strength * (1 - d / h.radius);
+                double dx = h.direction.x, dz = h.direction.y;
+                if (dx == 0 && dz == 0 && d > 1e-6) { dx = wx / d; dz = wz / d; }   // radial push
+                float* p = &push_[(std::size_t(z) * std::size_t(res) + std::size_t(x)) * 4];
+                p[0] = float(std::max(-1.0, std::min(1.0, p[0] + dx * k * 0.8)));
+                p[1] = float(std::max(-1.0, std::min(1.0, p[1] + dz * k * 0.8)));
+                p[2] = float(std::max(double(p[2]), k));
+                any = true;
+            }
+    }
+    pushHalf_.resize(push_.size());
+    for (std::size_t i = 0; i < push_.size(); ++i) pushHalf_[i] = env::floatToHalf(push_[i]);
+    ring_.texture(grassPush_.get(), 0, pushHalf_.data(), std::size_t(res) * 8, res);
+    pushActive_ = any;
 }
 
 static bool vegDebug(const char* what) { const char* e = std::getenv("PW_VEG_DEBUG"); return e && std::strstr(e, what); }
@@ -454,7 +544,7 @@ void VegetationRenderable::drawOpaque(CommandList& cmd, render::FrameContext& f)
         cmd.setPipeline(grass_.get());
         f.bindFrame(cmd);
         cmd.setConstants(2, g, sizeof g);
-        cmd.setTexture(5, grassDensity_.get()); cmd.setTexture(6, grassGround_.get());
+        cmd.setTexture(5, grassDensity_.get()); cmd.setTexture(6, grassGround_.get()); cmd.setTexture(7, grassPush_.get());
         stats_.grassBlades = res * res * settings.bladesPerTexel;
         cmd.draw(stats_.grassBlades * 9);
     }

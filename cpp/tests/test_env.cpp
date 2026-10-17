@@ -52,3 +52,4 @@ TEST_CASE("vegetation: breakable trees") { CHECK(runEnv("vegetation.breakable"))
 TEST_CASE("vegetation: octahedral impostors") { CHECK(runEnv("vegetation.impostor")); }
 TEST_CASE("vegetation: on procedural terrain") { CHECK(runEnv("vegetation.on-terrain")); }
 TEST_CASE("envrender: terrain + ocean + trees through the renderer") { CHECK(runEnv("envrender.scene")); }
+TEST_CASE("envrender: FLIP surface, splashes, grass interaction") { CHECK(runEnv("envrender.effects")); }

@@ -124,6 +124,76 @@ void registerSelfTests() {
             return ok;
         });
 
+        selftest::add("envrender.effects", [](selftest::Context& ctx) {
+            // FLIP zone surface, splash spray and grass interaction must each change the image where expected.
+            std::string err;
+            gpu::CreateInfo ci; ci.preferSoftware = preferSoftware();
+            auto dev = gpu::createDevice(ci, &err);
+            if (!dev) { ctx.note("SKIP: no GPU device (" + err + ")"); return true; }
+            gpu::CreateInfo cc; cc.preferSoftware = ci.preferSoftware;
+            const bool soft = dev->caps().software;
+            const int W = soft ? 256 : 480, H = soft ? 144 : 270;
+            terrain::TerrainSystem terr;
+            terr.setFlat(20);   // grassland (low flat ground is beach sand)
+            water::WaterSystem wat(water::OceanDevice::CPU);
+            world::Lake lake; lake.center = {30, 0}; lake.radius = 25; lake.level = 20.5;
+            wat.addLake(lake);
+            wat.terrainHeight = [&](double x, double z) { return terr.height(x, z); };
+            veg::ProceduralVegetation vg;
+            world::JsonObject vp; vp.set("treeDensityPerHa", json::Value::number(0)); vp.set("grassHeight", json::Value::number(0.8));
+            vp.set("grassRadius", json::Value::number(40));
+            vg.generate(&terr, vp, 3);
+            render::Camera cam;
+            cam.lookAt({0, 20.5, 0}, {-12, 23, -12});
+            auto shoot = [&](bool zone, bool spray) {
+                std::vector<uint8_t> px;
+                auto rr = render::Renderer::create(*dev, &err);
+                if (!rr || !rr->resize(W, H)) return px;
+                TerrainRenderable tr(*dev, terr); WaterRenderable wr(*dev, wat); VegetationRenderable vr(*dev, vg);
+                rr->add(&tr); rr->add(&wr); rr->add(&vr);
+                if (spray) for (int k = 0; k < 40; ++k) wat.splashes().emit({-2, 21.5, 0}, {0, 4, 0}, 50, 0.6, 1.5);
+                for (int i = 0; i < 3; ++i) { if (spray) wat.frame(i / 60.0, 1.0 / 60); rr->render(cam, 1 + i / 60.0); }
+                dev->waitIdle();
+                dev->readTexture(rr->output(), px);
+                (void)zone;
+                return px;
+            };
+            auto diff = [&](const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+                long n = 0;
+                for (std::size_t i = 0; i + 3 < a.size() && i + 3 < b.size(); i += 4)
+                    if (std::abs(int(a[i]) - b[i]) + std::abs(int(a[i + 1]) - b[i + 1]) + std::abs(int(a[i + 2]) - b[i + 2]) > 20) ++n;
+                return n;
+            };
+            bool ok = true;
+            auto base = shoot(false, false);
+            if (base.empty()) { ctx.note("FAIL: render " + err); return false; }
+            long noise = diff(base, shoot(false, false));
+            ctx.note(fmt("re-render noise %.0f px", double(noise)));
+            if (noise > 0) { ctx.note("FAIL: identical frames differ"); ok = false; }
+            gpu::writePNG(outPath("pw-env-grass.png"), base.data(), W, H);
+            // grass interaction: flatten a disc in front of the camera
+            vg.interact({0, 20, 0}, 3, {0, 0, 0});
+            vg.interact({0, 20, 0}, 3, {300, 0, 0});
+            auto pushed = shoot(false, false);
+            gpu::writePNG(outPath("pw-env-grass-pushed.png"), pushed.data(), W, H);
+            long dg = diff(base, pushed);
+            ctx.note(fmt("grass interaction changed %.0f px", double(dg)));
+            if (dg < 20) { ctx.note("FAIL: grass interaction not visible"); ok = false; }
+            auto spr = shoot(false, true);
+            long ds = diff(base, spr);
+            ctx.note(fmt("splash spray changed %.0f px", double(ds)));
+            if (ds < 20) { ctx.note("FAIL: splash spray not visible"); ok = false; }
+            water::FluidZone* z = wat.spawnLocalFluidZone({0, 20.5, 2}, 3, soft ? 16 : 32, 1);
+            if (!z) { ctx.note("SKIP fluid surface: no compute device for FLIP"); return ok; }
+            z->stepSync(0.2);
+            auto fl = shoot(true, false);
+            long df = diff(base, fl);
+            ctx.note(fmt("FLIP zone surface changed %.0f px", double(df)));
+            if (df < 50) { ctx.note("FAIL: fluid zone surface not visible"); ok = false; }
+            gpu::writePNG(outPath("pw-env-effects.png"), fl.data(), W, H);
+            return ok;
+        });
+
         selftest::add("envrender.perf-1080p", [](selftest::Context& ctx) {
             std::string err;
             gpu::CreateInfo ci; ci.preferSoftware = preferSoftware();
