@@ -172,8 +172,8 @@ void registerSelfTests() {
             if (noise > 0) { ctx.note("FAIL: identical frames differ"); ok = false; }
             gpu::writePNG(outPath("pw-env-grass.png"), base.data(), W, H);
             // grass interaction: flatten a disc in front of the camera
-            vg.interact({0, 20, 0}, 3, {0, 0, 0});
-            vg.interact({0, 20, 0}, 3, {300, 0, 0});
+            vg.interact({0, 20, 0}, 6, {0, 0, 0});
+            vg.interact({0, 20, 0}, 6, {300, 0, 0});
             auto pushed = shoot(false, false);
             gpu::writePNG(outPath("pw-env-grass-pushed.png"), pushed.data(), W, H);
             long dg = diff(base, pushed);
