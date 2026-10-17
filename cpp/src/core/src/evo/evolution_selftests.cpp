@@ -5,6 +5,7 @@
 //    ulp and these chaotic optimisers diverge, so only the Swift pass criteria are checked there.
 //  * evolution.parity-*: training runs recorded with the Swift app (`PlaneWorld --train`, tests/parity/evolution)
 //    are replayed: the same seeds give the same populations, fitness histories and hall of fame.
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -407,6 +408,7 @@ bool parityRun(Context& c, const std::string& name, int workers, ScriptRuntimeFa
     const Value& ref = rr.value;
     ExperimentDocument e = ExperimentDocument::load(dir + "/" + ref["experiment"].str());
     e.workers = workers;
+    e.scripts.callBudgetMs = 2000;   // JS watchdog: generous on shared CI runners (not under test here; no effect on results)
     std::string err;
     auto craft = resolveCraft(e.crafts.empty() ? nullptr : &e.crafts[0], dir + "/x.json", err);
     if (!craft) { c.note(err); return false; }
@@ -643,7 +645,8 @@ void registerRunTests() {
             for (const char* n : {"neural", "design"}) {
                 ScriptBundle b;
                 std::string dir = c.parityDir + "/evolution";
-                b.source = ExperimentDocument::load(dir + "/parity-" + std::string(n) + ".json").scripts.source;
+                b = ExperimentDocument::load(dir + "/parity-" + std::string(n) + ".json").scripts;
+                b.callBudgetMs = 2000;   // shared CI runners: the per-tick watchdog is not under test here
                 ok &= parityRun(c, n, 0, [b, eng] { return scripts::make(b, scripts::Mode::JavaScript, eng); }, std::string(" on ") + script::engineName(eng));
             }
         }

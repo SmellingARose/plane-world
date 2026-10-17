@@ -1,6 +1,7 @@
 // Headless training (port of the run part of Swift App/TrainCLI.swift): pwcli parses the flags and applies the
 // overrides (cpp/src/cli/train_cli.cpp, P2b); this handler resolves craft + world, runs the generations with the
 // same console output, and writes history.csv, a checkpoint and best-craft.json into --out.
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
