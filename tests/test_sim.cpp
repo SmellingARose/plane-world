@@ -36,6 +36,7 @@ RunResult replay(const parity::Trajectory& t, const std::string& dir, bool& ok, 
     const AeroProfile* prof = fastAeroProfile(t.profile);
     if (!prof) { ok = false; err = "unknown profile " + t.profile; return rr; }
     sim.setProfile(*prof);
+    sim.fastToggles.hingeAtAC = false;   // Swift references used the legacy hinge-load model
     sim.turbulence = 0;
     sim.load(spec);
     Vec3d spawn = sim.restingSpawn();

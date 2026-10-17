@@ -139,7 +139,7 @@ uint64_t PhysicsPresets::trajectoryDigest(bool slipstream, const FastAeroToggles
     auto mixd = [&](double x) { uint64_t b; std::memcpy(&b, &x, 8); for (int i = 0; i < 8; ++i) { h = (h ^ (b & 0xff)) * 0x100000001b3ull; b >>= 8; } };
     auto mixv = [&](const Vec3d& v) { mixd(v.x); mixd(v.y); mixd(v.z); };
     auto run = [&](const CraftSpec& doc, bool air, const std::vector<Vec3d>* mesh, const std::function<double(const CraftOutput&)>& cmd) {
-        CraftSim s; s.slipstream = slipstream; s.fastToggles = toggles;
+        CraftSim s; s.slipstream = slipstream; s.fastToggles = toggles; s.fastToggles.hingeAtAC = false;   // Swift digests: legacy hinge model
         s.load(doc);
         if (mesh) s.setPartMesh("cad", *mesh);
         s.turbulence = 0.3;
@@ -289,6 +289,25 @@ void registerPhysicsTests() {
                        sim.orientation().act({0, 1, 0}).y));
             ex(sim.position().y - y0 > 1, "ducted rocket should lift off at full throttle");
         } else c.note("ducted-rocket craft not found in the parity dir; skipped");
+        return ex.ok;
+    });
+
+    selftest::add("physics.servo-hinge-at-ac", [](Context& c) {
+        // Trainer cruising at 40 m/s with full aileron: with the all-moving panels pivoting near their aerodynamic
+        // centre, the 400 N·m aileron servo must hold full deflection (the legacy 12 %-chord model stalled it and
+        // then pinned it at centre while the panels kept carrying lift).
+        Expect ex{c};
+        auto run = [&](bool atAC) {
+            CraftSim sim; sim.fastToggles.hingeAtAC = atAC; sim.load(PhysicsPresets::trainer());
+            sim.reset(sim.restingSpawn() + Vec3d{0, 150, 0}); sim.setVelocity({40, 0, 0}, {});
+            SimEnvironment env; sim.setOutput("eng", 0.7); sim.setOutput("ail", 1);
+            bool stalled = false;
+            for (int k = 0; k < 60; ++k) { sim.step(1.0 / 60, env); if (!sim.overloadedServos().empty()) stalled = true; }
+            return stalled;
+        };
+        const bool legacy = run(false), now = run(true);
+        c.note(fmt("full aileron at 40 m/s: legacy model servo stall=%s, AC-pivot model servo stall=%s", legacy ? "yes" : "no", now ? "yes" : "no"));
+        ex(!now, "aileron servo holds full deflection at 40 m/s with the AC-pivot hinge model");
         return ex.ok;
     });
 

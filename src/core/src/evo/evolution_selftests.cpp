@@ -407,6 +407,7 @@ bool parityRun(Context& c, const std::string& name, int workers, ScriptRuntimeFa
     if (!rr.ok) { c.note("missing reference " + dir + "/" + name + ".ref.json: " + rr.error); return false; }
     const Value& ref = rr.value;
     ExperimentDocument e = ExperimentDocument::load(dir + "/" + ref["experiment"].str());
+    e.aero.toggles.hingeAtAC = false;   // Swift references used the legacy hinge-load model
     e.workers = workers;
     e.scripts.callBudgetMs = 2000;   // JS watchdog: generous on shared CI runners (not under test here; no effect on results)
     std::string err;

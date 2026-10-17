@@ -11,6 +11,10 @@ namespace pw::sim {
 /// New fast-model effects. Each is only consulted when `CraftSim::slipstream` is on.
 struct FastAeroToggles {
     bool gyro = true, pFactor = true, downwash = true, blockage = true, cadWash = true, slipstream = true;
+    /// All-moving surfaces pivot near their aerodynamic centre (~25 % chord), so the servo carries only the
+    /// centre-of-pressure offset (small attached, large after stall). Off = legacy model (12 % chord × total force),
+    /// kept for the Swift parity references.
+    bool hingeAtAC = true;
     bool operator==(const FastAeroToggles&) const = default;
 };
 

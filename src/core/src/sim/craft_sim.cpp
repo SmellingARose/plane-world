@@ -571,7 +571,8 @@ void CraftSim::runStrips(int lo, int hi, const Quatd& q, const Vec3d& origin, co
         double hinge = 0;
         if (hasServo) {
             if (flapChord > 0) { double cf = flapChord * chord; hinge = std::fabs(co.hingeCh) * 0.5 * rho * sp * sp * st.area * flapChord * cf; }
-            else hinge = length(f) * 0.12 * chord + std::fabs(co.cl) * qS * 0.02;
+            else if (fastToggles.hingeAtAC) hinge = length(f) * chord * (std::fabs(co.centerOfPressure - 0.25) + 0.02);   // pivot ≈ AC
+            else hinge = length(f) * 0.12 * chord + std::fabs(co.cl) * qS * 0.02;                                        // legacy
         }
         StripResult& r = stripBuf_[std::size_t(si)];
         r.ft = {f, cross(pcp - pos, f)}; r.hinge = hinge;
