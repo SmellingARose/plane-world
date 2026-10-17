@@ -276,7 +276,7 @@ QVariantList EvolveModel::algorithmSchema(const QString& kind) const {
 void EvolveModel::setPreset(const QString& p) {
     evo::ExperimentDocument d = m_doc;
     d.genome.preset = p.toStdString();
-    if (p == "neural" || p == "coevolve") { if (!d.genome.mlp) d.genome.mlp = evo::MLPSpec(); if (d.controller.mode == "none") d.controller.mode = "mlp"; }
+    if (p == "neural" || p == "coevolve") { if (!d.genome.mlp) d.genome.mlp = evo::MLPSpec(); if (d.controller.mode == "none" || d.controller.mode == "script") d.controller.mode = "mlp"; }
     if (p == "design") d.controller.mode = d.controller.mode == "mlp" ? "script" : d.controller.mode;
     if (p == "script") d.controller.mode = "script";
     if ((p == "design" || p == "coevolve") && d.genome.design.empty() && m_craft && !m_craft->parts.empty()) {

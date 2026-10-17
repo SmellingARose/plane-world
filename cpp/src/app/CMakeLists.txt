@@ -49,3 +49,13 @@ elseif(APPLE)
       DEPENDS pwapp VERBATIM)
   endif()
 endif()
+
+# P5b: WORLD / EVOLVE view-model tests (no window; QT_QPA_PLATFORM=offscreen).
+if(PW_BUILD_TESTS)
+  qt_add_executable(pwuitests ${PROJECT_SOURCE_DIR}/tests/test_ui.cpp
+    worldmodel.cpp worldmodel.h evolvemodel.cpp evolvemodel.h jshighlighter.cpp jshighlighter.h replayprovider.h)
+  set_target_properties(pwuitests PROPERTIES MACOSX_BUNDLE OFF WIN32_EXECUTABLE OFF)
+  target_include_directories(pwuitests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(pwuitests PRIVATE Qt6::Quick pwcore pwgpu pwenv)
+  add_test(NAME pwuitests COMMAND pwuitests)
+endif()

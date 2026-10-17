@@ -91,6 +91,11 @@ jobs:
         if: runner.os == 'macOS'
         run: cpp/build/src/cli/pwcli --gpu-smoke || echo "::warning::no Metal device on this runner"
 
+      - name: WORLD / EVOLVE view models (pwuitests)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: cpp/build/src/app/pwuitests
+
       - name: Benchmarks
         run: cpp/build/src/cli/pwcli --bench all --reps 1 --json cpp/build/bench.json
 
@@ -108,6 +113,19 @@ jobs:
           fi
           ls -la app-${{ matrix.name }}.png
 
+      - name: App launch smoke, WORLD and EVOLVE tabs
+        env:
+          QSG_RHI_PREFER_SOFTWARE_RENDERER: "1"
+        run: |
+          for t in world evolve; do
+            if [[ "$RUNNER_OS" == "macOS" ]]; then
+              "cpp/build/src/app/Plane World.app/Contents/MacOS/Plane World" --quit-after 6 --screenshot app-${{ matrix.name }}-$t.png --tab $t
+            else
+              pwsh -Command "\$p = Start-Process -FilePath 'cpp/build/deploy/Plane World.exe' -ArgumentList '--quit-after','6','--screenshot','app-${{ matrix.name }}-$t.png','--tab','$t' -PassThru -Wait; exit \$p.ExitCode"
+            fi
+            ls -la app-${{ matrix.name }}-$t.png
+          done
+
       - name: Package artefacts
         run: |
           mkdir -p dist
@@ -119,7 +137,7 @@ jobs:
             pwsh -Command 'Compress-Archive -Path "cpp/build/deploy/*" -DestinationPath "dist/PlaneWorld-${{ matrix.name }}.zip"'
           fi
           cp cpp/build/bench.json dist/bench-${{ matrix.name }}.json
-          cp app-${{ matrix.name }}.png dist/ 2>/dev/null || true
+          cp app-${{ matrix.name }}*.png dist/ 2>/dev/null || true
           cp shots/*.png dist/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4

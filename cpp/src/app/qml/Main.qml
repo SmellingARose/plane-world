@@ -17,8 +17,8 @@ ApplicationWindow {
     property int currentTab: Math.max(0, tabs.indexOf((pwInitialTab || "").toUpperCase()))
     property bool inspectorVisible: true
     // read by main.cpp for the CI smoke test
-    property string viewportError: work.viewport.error
-    property string viewportBackend: work.viewport.backendName
+    property string viewportError: activeViewport.error
+    property string viewportBackend: activeViewport.backendName
 
     readonly property var sectionsByTab: ({
         "BUILD": [ { title: "Craft", rows: [["New craft", "Ctrl+N"], ["Open craft…", "Ctrl+O"], ["Save", "Ctrl+S"]] },
@@ -45,6 +45,14 @@ ApplicationWindow {
         { name: "Toggle inspector", shortcut: "Ctrl+I", run: () => inspectorVisible = !inspectorVisible },
         { name: "Toggle full screen", shortcut: "Ctrl+Shift+F", run: () => win.visibility = (win.visibility === Window.FullScreen ? Window.Windowed : Window.FullScreen) },
         { name: "About Plane World", shortcut: "", run: () => about.open() },
+        { name: "Settings…", shortcut: "Ctrl+,", run: () => settingsDlg.open() },
+        { name: "Show the welcome tour", shortcut: "", run: () => tour.start() },
+        { name: "WORLD: generate terrain", shortcut: "Ctrl+G", run: () => { selectTab(2); WorldModel.generate() } },
+        { name: "WORLD: save world", shortcut: "", run: () => WorldModel.save() },
+        { name: "WORLD: new mountains world", shortcut: "", run: () => { selectTab(2); WorldModel.newWorld("mountains") } },
+        { name: "EVOLVE: start / pause training", shortcut: "Ctrl+Return", run: () => { selectTab(3); EvolveModel.running ? EvolveModel.pause() : EvolveModel.start() } },
+        { name: "EVOLVE: check script", shortcut: "", run: () => { selectTab(3); EvolveModel.checkScript() } },
+        { name: "EVOLVE: replay best", shortcut: "", run: () => { selectTab(3); EvolveModel.replay("best") } },
         { name: "Quit", shortcut: "Ctrl+Q", run: () => Qt.quit() }
     ]
 
@@ -109,10 +117,34 @@ ApplicationWindow {
     TabPage {
         id: work
         anchors.fill: parent
+        visible: win.currentTab < 2
         tab: win.tabs[win.currentTab]
         sections: win.sectionsByTab[tab]
         inspectorVisible: win.inspectorVisible
     }
+    // P5b: WORLD and EVOLVE pages (own world viewport; created on first visit, kept afterwards)
+    Loader {
+        id: worldLoader
+        anchors.fill: parent
+        active: win.currentTab === 2 || item !== null
+        visible: win.currentTab === 2
+        sourceComponent: WorldPage { inspectorVisible: win.inspectorVisible }
+    }
+    Loader {
+        id: evolveLoader
+        anchors.fill: parent
+        active: win.currentTab === 3 || item !== null
+        visible: win.currentTab === 3
+        sourceComponent: EvolvePage {
+            inspectorVisible: win.inspectorVisible
+            onFlyRequested: (path) => { App.openFile("file://" + path); win.selectTab(1) }
+        }
+    }
+    readonly property var activeViewport: win.currentTab === 2 && worldLoader.item ? worldLoader.item.viewport
+                                        : win.currentTab === 3 && evolveLoader.item ? evolveLoader.item.viewport : work.viewport
+    AppTour { id: tour; parent: Overlay.overlay }
+    AppSettings { id: settingsDlg; parent: Overlay.overlay; onTourRequested: tour.start() }
+    Shortcut { sequences: [StandardKey.Preferences, "Ctrl+,"]; onActivated: settingsDlg.open() }
 
     footer: StatusBar { tab: win.tabs[win.currentTab]; viewport: work.viewport }
 
