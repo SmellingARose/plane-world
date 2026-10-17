@@ -1,4 +1,4 @@
-.build/
+build/
+build-*/
+.cache/
 .DS_Store
-cpp/build/
-cpp/build-*/
