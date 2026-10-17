@@ -1071,7 +1071,7 @@ void AppController::updateTelemetry() {
     const double rho = Atmosphere::isa(alt).density;
     QVariantMap m;
     m["ias"] = t.airspeed * std::sqrt(rho / 1.225); m["tas"] = t.airspeed; m["gs"] = t.groundSpeed; m["mach"] = t.mach;
-    m["alt"] = alt; m["agl"] = t.altitude; m["vs"] = t.verticalSpeed;
+    m["alt"] = alt; m["agl"] = m_env.terrain && m_env.terrain != m_ground.get() ? alt - groundHeight(m_sim->position().x, m_sim->position().z) : t.altitude; m["vs"] = t.verticalSpeed;   // agl over WORLD terrain: height above the ground below
     m["aoa"] = t.angleOfAttackDeg; m["beta"] = t.sideslipDeg; m["g"] = t.gLoad;
     m["pitch"] = m_sim->pitchDeg();
     m["roll"] = std::atan2(-right.y, up.y) * 180 / kPi;
