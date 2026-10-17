@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cctype>
 #include "pw/evo/script.h"
 #include <cmath>
