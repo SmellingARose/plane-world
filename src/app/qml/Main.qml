@@ -58,7 +58,8 @@ ApplicationWindow {
         { name: "FLY: fly in the WORLD tab's world", shortcut: "", run: () => { App.flyInWorld = true; selectTab(1) } },
         { name: "FLY: fly over flat ground", shortcut: "", run: () => { App.flyInWorld = false; selectTab(1) } },
         { name: "WORLD: new mountains world", shortcut: "", run: () => { selectTab(2); WorldModel.newWorld("mountains") } },
-        { name: "EVOLVE: start / pause training", shortcut: "Ctrl+Return", run: () => { selectTab(3); EvolveModel.running ? EvolveModel.pause() : EvolveModel.start() } },
+        { name: "EVOLVE: start / pause training", shortcut: "Ctrl+Return", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.train() } },
+        { name: "EVOLVE: quick start (learns to hold altitude in ~10 s)", shortcut: "", run: () => { selectTab(3); EvolveModel.quickStart() } },
         { name: "EVOLVE: check script", shortcut: "", run: () => { selectTab(3); EvolveModel.checkScript() } },
         { name: "EVOLVE: replay best", shortcut: "", run: () => { selectTab(3); EvolveModel.replay("best") } },
         { name: "Quit", shortcut: "Ctrl+Q", run: () => Qt.quit() }
@@ -85,7 +86,9 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 model: win.tabs
                 tints: Theme.tabTint
-                tips: win.tabs.map((t, i) => t + "  " + Theme.shortcutText("Ctrl+" + (i + 1)))
+                readonly property var blurbs: ["Design the craft (FLY and EVOLVE use it)", "Fly the craft in the WORLD tab's world",
+                                               "Shape the world FLY and EVOLVE use", "Evolve a controller or design, then fly it"]
+                tips: win.tabs.map((t, i) => t + " — " + blurbs[i] + "   " + Theme.shortcutText("Ctrl+" + (i + 1)))
                 currentIndex: win.currentTab
                 onCurrentIndexChanged: win.currentTab = currentIndex
             }

@@ -29,7 +29,7 @@ Dialog {
         category: "evolve"
         property int replaySpeedIndex: 2
     }
-    Settings { id: tourStore; category: "tour"; property bool done: false }
+    Settings { id: tourStore; category: "tour2"; property bool done: false }
 
     // apply on start-up and on change
     Binding { target: Theme; property: "motion"; value: ui.reduceMotion ? 0 : 1 }

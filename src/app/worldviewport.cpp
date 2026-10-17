@@ -366,7 +366,12 @@ QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
         geo::Transform origin;
         if (EvolveModel::instance()->replayPoses(n->poses, origin)) {
             n->replay->setPartPoses(n->poses);
-            if (m_dragButton == Qt::NoButton) { m_goal.tx += (origin.position.x - m_goal.tx) * 0.25; m_goal.tz += (origin.position.z - m_goal.tz) * 0.25; }
+            if (m_dragButton == Qt::NoButton) {
+                m_goal.tx += (origin.position.x - m_goal.tx) * 0.25; m_goal.tz += (origin.position.z - m_goal.tz) * 0.25;
+                // follow the height too (air starts fly far above the ground the camera target sits on)
+                const double h = origin.position.y - wm->heightAt(origin.position.x, origin.position.z);
+                m_goal.height += (h - m_goal.height) * 0.25;
+            }
         }
     } else if (n->craft) n->craft->setCraftPose(wm->document().spawn);
 
