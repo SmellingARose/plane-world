@@ -15,6 +15,7 @@ add_library(pwcore STATIC
   src/sim/craft_sim.cpp
   src/sim/fast_gaps.cpp
   src/sim/sensors.cpp
+  src/sim/physics_selftests.cpp
   src/simd_scalar.cpp
   src/simd_neon.cpp
   src/simd_avx2.cpp

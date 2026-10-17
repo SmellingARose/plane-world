@@ -200,6 +200,18 @@ public:
 
     static constexpr double autoWheelTorque = 120.0;
 
+    // Introspection for tests, the EQUATIONS panel and debugging views (not for the hot path).
+    SimPart& partMutable(int i) { return parts_[std::size_t(i)]; }
+    int partIndex(const std::string& id) const;
+    const std::vector<WingStrip>& strips() const { return strips_; }
+    const std::vector<StripResult>& stripResults() const { return stripBuf_; }
+    const WingGroup& wingGroup(int g) const { return wingGroups_[std::size_t(g)]; }
+    const WingGroupState& wingGroupState(int g) const { return groupState_[std::size_t(g)]; }
+    /// This substep's rotor wakes (valid until the next step).
+    WakeView wakes() const { return WakeView{wakeCount_ > 0 ? wakeBuf_.data() : nullptr, wakeCount_}; }
+    /// Last panel force of a CAD part (sum of its work items), world frame.
+    ForceTorque panelForce(int part) const;
+
 private:
     struct SubstepOut { bool massDirty = false; int stalled = 0; double thrust = 0, fuel = 0; Vec3d windHere; double ground = 0; Atmosphere atm; };
     struct SensorSlot { int part; SensorKind kind; int first; int ref; Vec3d localDir, target; double range, noise; int nCh; uint8_t boolMask; };

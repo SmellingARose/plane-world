@@ -1066,6 +1066,19 @@ void CraftSim::buildWingGroups() {
     horseshoeCount_ = 0;
 }
 
+int CraftSim::partIndex(const std::string& id) const {
+    for (int i = 0; i < int(parts_.size()); ++i) if (docOf(parts_[std::size_t(i)]).id == id) return i;
+    return -1;
+}
+
+ForceTorque CraftSim::panelForce(int part) const {
+    if (part < 0 || part >= int(parts_.size()) || parts_[std::size_t(part)].meshSlot < 0) return {};
+    const SimPart& p = parts_[std::size_t(part)];
+    ForceTorque ft = itemOut_[std::size_t(p.itemStart)];
+    if (p.itemCount > 1) { ft = ForceTorque{}; for (int k = p.itemStart; k < p.itemStart + p.itemCount; ++k) ft = ft + itemOut_[std::size_t(k)]; }
+    return ft;
+}
+
 int CraftSim::wingGroupIndex(const std::string& partID) const {
     for (auto& p : parts_) if (docOf(p).id == partID) return p.wingGroup;
     return -1;
