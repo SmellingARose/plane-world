@@ -73,7 +73,7 @@ jobs:
         run: cpp/build/src/cli/pwcli --selftest all --verbose
 
       - name: Training parity vs Swift CLI (examples/experiments, 1 and 4 workers)
-        run: bash cpp/tools/train_parity.sh cpp/build/src/cli/pwcli ${{ runner.os == 'Windows' && '1e-6' || '0' }}
+        run: bash cpp/tools/train_parity.sh cpp/build/src/cli/pwcli ${{ runner.os == 'Windows' && 'loose' || 'exact' }}
 
       - name: Direct3D 12 WARP smoke test
         if: runner.os == 'Windows'

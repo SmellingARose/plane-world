@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Compare two history.csv files (Swift vs C++ or N vs M workers), ignoring timing columns.
-usage: compare_history.py a.csv b.csv [--rtol 1e-9]   exit 0 when every non-timing cell matches."""
+usage: compare_history.py a.csv b.csv [--rtol 1e-9] [--rows N] [--cols a,b]   exit 0 when every non-timing cell matches."""
 import csv, sys
 TIMING = {"wall_s", "sims_per_s", "simsec_per_wall_s"}
 a, b = sys.argv[1], sys.argv[2]
-rtol = float(sys.argv[sys.argv.index("--rtol") + 1]) if "--rtol" in sys.argv else 1e-9
+arg = lambda n, d: sys.argv[sys.argv.index(n) + 1] if n in sys.argv else d
+rtol = float(arg("--rtol", "1e-9"))
+cols = set(arg("--cols", "").split(",")) - {""}          # restrict to these columns
 ra, rb = list(csv.DictReader(open(a))), list(csv.DictReader(open(b)))
+nrows = int(arg("--rows", "0"))                             # compare only the first N rows
+if nrows: ra, rb = ra[:nrows], rb[:nrows]
 if len(ra) != len(rb): print(f"row count {len(ra)} vs {len(rb)}"); sys.exit(1)
 worst, exact, bad = 0.0, True, 0
 for i, (x, y) in enumerate(zip(ra, rb)):
     for k in x:
-        if k in TIMING: continue
+        if k in TIMING or (cols and k not in cols): continue
         if x[k] == y.get(k): continue
         exact = False
         try: fx, fy = float(x[k]), float(y[k])
