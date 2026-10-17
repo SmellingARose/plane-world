@@ -15,6 +15,23 @@ struct FastAeroToggles {
     /// centre-of-pressure offset (small attached, large after stall). Off = legacy model (12 % chord × total force),
     /// kept for the Swift parity references.
     bool hingeAtAC = true;
+    /// Ground corners hold with a tangential spring anchored at the touch-down point (Coulomb static friction) and
+    /// parked wheels hold sideways the same way, so a craft at rest on a slope below its friction angle stays put.
+    /// Off = legacy viscous-only friction (creeps downhill at ~g·sinθ/60 m/s), kept for the Swift parity references.
+    bool staticFriction = true;
+    /// Spinning wheels / rotors exchange angular momentum with the airframe: the body receives −dh/dt of each
+    /// rotor's spin (motor reaction during spin-up / braking), so a wheel motor spun up in the air counter-rotates
+    /// the craft and total angular momentum is conserved. Off = legacy (spin changes had no reaction).
+    bool spinReaction = true;
+    /// A finite wing stalls when its sections reach the 2-D stall lift: the stall angle is scaled by 0.9·a₀/a (a₀ the
+    /// section slope, a the finite-wing slope; DATCOM CLmax ≈ 0.9 c_lmax, capped at 35°). Off = legacy (2-D stall
+    /// angle applied to the 3-D lift slope, CLmax ~20 % low at AR 8 and far too low for fins).
+    bool finiteWingStall = true;
+    /// Mass / CoM / inertia follow fuel use every substep, including the burnout step. Off = legacy (every 10th
+    /// substep while burning, so up to 9 substeps of propellant stayed in the mass after burnout).
+    bool exactMass = true;
+    /// Sets every correctness fix that changes trajectories back to the Swift-era behaviour (parity tests only).
+    FastAeroToggles& setSwiftLegacy() { hingeAtAC = false; staticFriction = false; spinReaction = false; finiteWingStall = false; exactMass = false; return *this; }
     bool operator==(const FastAeroToggles&) const = default;
 };
 

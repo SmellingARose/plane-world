@@ -26,8 +26,11 @@ struct WingConst {
     double flapCf = 0, flapTau = 0, flapCd = 0;
     explicit WingConst(const WingParams& p);
 };
+/// stallScale != 1 scales the stall angle (finite-wing stall, capped at 35°); 1 = the Swift-parity model.
 WingCoefficients wing(double alpha, double mach, double reynolds, const WingConst& k, double flapDeflection,
-                      double groundEffectInduced = 1, double groundLiftGain = 1);
+                      double groundEffectInduced = 1, double groundLiftGain = 1, double stallScale = 1);
+/// Finite-wing stall-angle scale 0.9·a₀/a(A) with a₀ = 2π·0.95 (DATCOM: CLmax ≈ 0.9 c_lmax for a straight wing).
+double finiteWingStallScale(double aspectRatio);
 
 struct GroundEffect { double phi, liftGain; };
 GroundEffect groundEffect(double height, double span);

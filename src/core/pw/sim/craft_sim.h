@@ -78,6 +78,7 @@ struct SimPart {
     double flapChord = 0;
     bool autoMotor = false;
     double compression = 0; bool contact = false;
+    Vec3d latAnchor; bool latStick = false;   // parked-wheel lateral static friction (FastAeroToggles::staticFriction)
     // baked
     bool isBody = false, isWing = false, invert = false; double docMass = 0;
     double kRange = 0, kTorque = 0, kSpeed = 0, kCd = 0.3;
@@ -85,7 +86,7 @@ struct SimPart {
     double kFlow = 0, kBurn = 0, kR = 0, kGrip = 0.9, kRoll = 0.02, kReversible = 0, kMotorVmax = 20, kChord = 0, kSpan = 0;
     aero::WingConst wing{aero::WingParams(1, 0, 0)};
     Quatd baseQN; Vec3d servoAxis{0, 0, 1}, servoAxisBase{0, 0, 1};
-    double kPropPower = 0;
+    double kPropPower = 0, kStallScale = 1;
     int cornerStart = 0, cornerCount = 0;
     int meshSlot = -1, itemStart = 0, itemCount = 0;
     int wingGroup = -1;
@@ -226,7 +227,7 @@ public:
     ForceTorque panelForce(int part) const;
 
 private:
-    struct SubstepOut { bool massDirty = false; int stalled = 0; double thrust = 0, fuel = 0; Vec3d windHere; double ground = 0; Atmosphere atm; };
+    struct SubstepOut { bool massDirty = false, fuelChanged = false; int stalled = 0; double thrust = 0, fuel = 0; Vec3d windHere; double ground = 0; Atmosphere atm; };
     struct SensorSlot { int part; SensorKind kind; int first; int ref; Vec3d localDir, target; double range, noise; int nCh; uint8_t boolMask; };
     struct PanelItem { int slot, lo, hi; };
 
@@ -291,6 +292,9 @@ private:
     std::vector<StripResult> stripBuf_;
     std::vector<Vec3d> cornerFlat_;
     std::vector<double> cornerTmp_;     // per-substep corner world pos + ground height (4 per corner)
+    std::vector<Vec3d> cornerAnchor_;   // static-friction anchor per corner (world), valid while cornerStick_
+    std::vector<uint8_t> cornerStick_;
+    bool anyStick_ = false;
     double contactRadius_ = 0;
     int wheelCount_ = 0;
     // CAD panels

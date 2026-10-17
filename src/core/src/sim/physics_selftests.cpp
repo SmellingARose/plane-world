@@ -139,7 +139,7 @@ uint64_t PhysicsPresets::trajectoryDigest(bool slipstream, const FastAeroToggles
     auto mixd = [&](double x) { uint64_t b; std::memcpy(&b, &x, 8); for (int i = 0; i < 8; ++i) { h = (h ^ (b & 0xff)) * 0x100000001b3ull; b >>= 8; } };
     auto mixv = [&](const Vec3d& v) { mixd(v.x); mixd(v.y); mixd(v.z); };
     auto run = [&](const CraftSpec& doc, bool air, const std::vector<Vec3d>* mesh, const std::function<double(const CraftOutput&)>& cmd) {
-        CraftSim s; s.slipstream = slipstream; s.fastToggles = toggles; s.fastToggles.hingeAtAC = false;   // Swift digests: legacy hinge model
+        CraftSim s; s.slipstream = slipstream; s.fastToggles = toggles; s.fastToggles.setSwiftLegacy();   // Swift digests: legacy hinge / friction / spin models
         s.load(doc);
         if (mesh) s.setPartMesh("cad", *mesh);
         s.turbulence = 0.3;

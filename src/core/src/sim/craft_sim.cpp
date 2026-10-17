@@ -143,6 +143,7 @@ void CraftSim::bake(SimPart& sp) {
     sp.servoAxis = axisName == "x" ? Vec3d{1, 0, 0} : axisName == "y" ? Vec3d{0, 1, 0} : Vec3d{0, 0, 1};
     sp.servoAxisBase = sp.baseQ.act(sp.servoAxis);
     sp.kPropPower = aero::propPower(sp.kThrust, smax(0.1, sp.kD));
+    sp.kStallScale = t == PartType::Wing ? aero::finiteWingStallScale(sp.wing.params.aspectRatio) : 1;
     if (t == PartType::Prop) { double R = smax(0.05, sp.kD / 2); sp.kIrot = sp.docMass * R * R / 3; }
     else if (t == PartType::Wheel) sp.kIrot = 0.5 * sp.docMass * sp.kR * sp.kR;
     else sp.kIrot = 0;
@@ -163,6 +164,9 @@ void CraftSim::bakeParts() {
     }
     contactRadius_ = r;
     cornerTmp_.assign(std::max<std::size_t>(1, cornerFlat_.size()) * 4, 0.0);
+    cornerAnchor_.assign(std::max<std::size_t>(1, cornerFlat_.size()), Vec3d{});
+    cornerStick_.assign(std::max<std::size_t>(1, cornerFlat_.size()), 0);
+    anyStick_ = false;
 }
 
 void CraftSim::rebuildPanelBatch() {
@@ -410,7 +414,8 @@ void CraftSim::reset(const Vec3d& spawnPosition, const Quatd& spawnRotation) {
     position_ = spawnPosition + orientation_.act(comLocal_);
     velocity_ = {}; angularMomentum_ = {}; time_ = 0; stepCounter_ = 0;
     crashed_ = false; groundContact_ = false; maxImpactSpeed_ = 0; lastForce_ = {}; noiseState_ = sensorNoiseSeed | 1;
-    for (auto& p : parts_) { p.contact = false; p.compression = 0; }
+    for (auto& p : parts_) { p.contact = false; p.compression = 0; p.latStick = false; }
+    std::fill(cornerStick_.begin(), cornerStick_.end(), uint8_t(0)); anyStick_ = false;
     for (auto& g : groupState_) g = WingGroupState{};
     horseshoeCount_ = 0;
     telemetry_ = CraftTelemetry{};
@@ -514,7 +519,7 @@ void CraftSim::substep(double h, const SimEnvironment& env) {
     if (fullActive_) fullCollect();
     SubstepOut o = substepCore(h, env);
     if (fullActive_) fullSubmit(h, env);
-    if (o.massDirty && stepCounter_ % 10 == 0) updateMassProperties(true);
+    if (fastToggles.exactMass ? o.fuelChanged : (o.massDirty && stepCounter_ % 10 == 0)) updateMassProperties(true);
     updateTelemetry(o.atm, o.windHere, o.stalled, o.thrust, o.fuel);
 }
 
@@ -531,8 +536,9 @@ void CraftSim::runStrips(int lo, int hi, const Quatd& q, const Vec3d& origin, co
     Vec3d nrm, c, s, pacBase;
     double chord = 0, span = 0, flapChord = 0, flapDelta = 0; bool hasServo = false;
     const aero::WingConst* wing = nullptr;
-    double geSpan = 0;
+    double geSpan = 0, stallScale = 1;
     int group = -1;
+    const bool finiteStall = fastToggles.finiteWingStall;
     const Vec3d pos = position_, vel = velocity_;
     for (int si = lo; si < hi; ++si) {
         const WingStrip& st = strips_[std::size_t(si)];
@@ -550,6 +556,7 @@ void CraftSim::runStrips(int lo, int hi, const Quatd& q, const Vec3d& origin, co
             wing = &p.wing;
             geSpan = smax(2 * span, chord);
             group = p.wingGroup;
+            stallScale = finiteStall ? p.kStallScale : 1;
         }
         Vec3d pac = pacBase + s * st.spanOffset;
         double gh = terrain ? terrain->height(pac.x, pac.z) : 0;
@@ -562,7 +569,7 @@ void CraftSim::runStrips(int lo, int hi, const Quatd& q, const Vec3d& origin, co
         if (sp < 0.3) { stripBuf_[std::size_t(si)] = StripResult{}; continue; }
         double alpha = std::atan2(dot(a3, nrm), -dot(a3, c));
         aero::GroundEffect ge = aero::groundEffect(pac.y - gh, geSpan);
-        aero::WingCoefficients co = aero::wing(alpha, sp / sos, sp * chord / nu, *wing, flapDelta, ge.phi, ge.liftGain);
+        aero::WingCoefficients co = aero::wing(alpha, sp / sos, sp * chord / nu, *wing, flapDelta, ge.phi, ge.liftGain, stallScale);
         double qS = 0.5 * rho * sp * sp * st.area;
         Vec3d dd = a3 / sp;
         Vec3d ld = normalize(cross(dd, s));
@@ -749,7 +756,9 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
                 P[i].vi = aero::diskVelocity(Tn, rho, kPi * Rd * Rd, vax, P[i].kDucted);
             } else P[i].vi = 0;
             double targetOmega = 2 * kPi * r.rps * std::fabs(thr) * (thr >= 0 ? 1 : -1) * P[i].kSpin;
+            double omegaPrev = P[i].omega;
             P[i].omega += (targetOmega - P[i].omega) * smin(1, h / 0.4);
+            if (tg.spinReaction) T -= dir * (P[i].kIrot * (P[i].omega - omegaPrev) / h);   // spin-up reaction (h = dir I omega)
             if (slip && tg.pFactor && Tn > 0 && std::fabs(P[i].omega) > 1) {
                 Vec3d rel = inflowWind - pointVel(pw);
                 PFactorLoads pf = pFactorLoads(dir, rel, Tn, P[i].omega, smax(0.05, P[i].kD / 2), rho, vax, P[i].vi);
@@ -798,6 +807,7 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
                 double Tn = P[i].kThrust * k;
                 apply(dir * Tn, pw);
                 P[i].fuel -= P[i].fuelCapacity / smax(P[i].kBurn, 1e-3) * k * h;
+                out.fuelChanged = true;
                 if (P[i].fuel <= 0) { P[i].fuel = 0; P[i].burning = false; }
                 P[i].thrustNow = Tn; thrustTotal += Tn;
             }
@@ -810,7 +820,7 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
     if (liquidUse > 0 && liquid > 0) {
         double k = smax(0, 1 - liquidUse / liquid);
         for (int i = 0; i < np; ++i) if (P[i].is(PartType::Tank)) P[i].fuel *= k;
-        massDirty = true;
+        massDirty = true; out.fuelChanged = true;
     }
     for (int i = 0; i < np; ++i) if (P[i].burning) { massDirty = true; break; }
 
@@ -823,6 +833,7 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
         bool anyContact = false;
         double ceiling = env.terrain ? env.terrain->maxHeight() : 0;
         bool clear = origin.y - contactRadius_ > ceiling + 1;
+        if ((clear || cornerFlat_.empty()) && anyStick_) { std::fill(cornerStick_.begin(), cornerStick_.end(), uint8_t(0)); anyStick_ = false; }
         if (!cornerFlat_.empty() && !clear) {
             double* tmp = cornerTmp_.data();
             for (int i = 0; i < np; ++i) {
@@ -842,7 +853,7 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
             for (int k = 0; k < int(cornerFlat_.size()); ++k) {
                 Vec3d pw{tmp[4 * k], tmp[4 * k + 1], tmp[4 * k + 2]};
                 double gh = tmp[4 * k + 3];
-                if (pw.y >= gh) continue;
+                if (pw.y >= gh) { cornerStick_[std::size_t(k)] = 0; continue; }
                 Vec3d n = groundNormal(env, pw.x, pw.z);
                 double pen = (gh - pw.y) * n.y;
                 Vec3d vp = pointVel(pw);
@@ -851,12 +862,25 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
                 if (-vn > maxImpactSpeed_) maxImpactSpeed_ = -vn;
                 if (-vn > crashSpeed) crashed_ = true;
                 double N = smax(0, pen * kB - vn * cB);
-                if (N <= 0) continue;
+                if (N <= 0) { cornerStick_[std::size_t(k)] = 0; continue; }
                 double mu = env.terrain ? env.terrain->material(pw.x, pw.z).friction : 0.6;
                 Vec3d vt = vp - n * vn;
                 double vts = length(vt);
                 Vec3d f = n * N;
-                if (vts > 1e-4) f -= vt * (smin(mu * N, vts * cB) / vts);
+                if (tg.staticFriction) {
+                    // Coulomb friction with stiction: tangential spring-damper to the touch-down anchor, capped at mu N;
+                    // while sliding the anchor follows so the force is mu N against the slip velocity.
+                    Vec3d& anchor = cornerAnchor_[std::size_t(k)];
+                    if (!cornerStick_[std::size_t(k)]) { anchor = pw; cornerStick_[std::size_t(k)] = 1; anyStick_ = true; }
+                    Vec3d d = pw - anchor; d -= n * dot(d, n);
+                    Vec3d ft = -(d * kB) - vt * cB;
+                    double fm = length(ft), lim = mu * N;
+                    if (fm > lim) {
+                        ft = vts > 1e-3 ? vt * (-lim / vts) : ft * (lim / fm);
+                        anchor = pw + (ft + vt * cB) / kB;
+                    }
+                    f += ft;
+                } else if (vts > 1e-4) f -= vt * (smin(mu * N, vts * cB) / vts);
                 apply(f, pw);
             }
         }
@@ -907,6 +931,15 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
                     double fx = D * std::sin(Cx * std::atan(Bx * kappa));
                     double alpha = std::atan2(vl, den);
                     double fy = -D * std::sin(1.3 * std::atan(8 * alpha));
+                    if (tg.staticFriction && std::fabs(vf) < 0.5 && std::fabs(vl) < 0.5) {
+                        // Parked / creeping: the slip-angle curve is viscous at zero speed (a car across a slope would
+                        // slide sideways); hold laterally with a spring to the anchor, capped at the grip D.
+                        if (!P[i].latStick) { P[i].latAnchor = cp; P[i].latStick = true; }
+                        double dl = dot(cp - P[i].latAnchor, lat);
+                        double fs = -dl * kW - vl * cW;
+                        if (std::fabs(fs) > D) { fs = fs > 0 ? D : -D; P[i].latAnchor = cp - lat * ((-fs - vl * cW) / kW); }
+                        fy = fs;
+                    } else P[i].latStick = false;
                     double mag = std::sqrt(fx * fx + fy * fy);
                     if (mag > D && mag > 0) { fx *= D / mag; fy *= D / mag; }
                     double roll = -clamp(vf * 4, -1, 1) * P[i].kRoll * mat.rollingResistance * N;
@@ -915,7 +948,10 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
                     if (P[i].servo >= 0) P[P[i].servo].load += std::fabs(fy) * 0.04;
                 }
             }
-            if (!contact) { omega += h * motorT / Iw; omega *= (1 - 0.2 * h); }
+            if (!contact) { omega += h * motorT / Iw; omega *= (1 - 0.2 * h); P[i].latStick = false; }
+            // Spin h = -axle Iw omega; the airframe takes -dh/dt (motor / bearing reaction; ground torque on the wheel
+            // was already applied to the body through the contact force).
+            if (tg.spinReaction) T += axle * (Iw * (omega - P[i].omega) / h);
             P[i].omega = omega; P[i].contact = contact;
             if (contact) anyContact = true;
             P[i].spinAngle = std::fmod(P[i].spinAngle + omega * h, 2 * kPi);
@@ -1139,6 +1175,7 @@ std::unique_ptr<CraftSim> CraftSim::clone() const {
     c->position_ = position_; c->orientation_ = orientation_; c->velocity_ = velocity_; c->angularMomentum_ = angularMomentum_;
     c->time_ = time_; c->stepCounter_ = stepCounter_; c->lastForce_ = lastForce_;
     c->crashed_ = crashed_; c->groundContact_ = groundContact_; c->maxImpactSpeed_ = maxImpactSpeed_;
+    c->cornerAnchor_ = cornerAnchor_; c->cornerStick_ = cornerStick_; c->anyStick_ = anyStick_;
     c->inputs_ = inputs_; c->noiseState_ = noiseState_;
     return c;
 }

@@ -74,7 +74,9 @@ WingConst::WingConst(const WingParams& p) : params(p) {
     }
 }
 
-WingCoefficients wing(double a, double mach, double reynolds, const WingConst& k, double delta, double phi, double groundLiftGain) {
+double finiteWingStallScale(double A) { return 0.9 * (2 * kPi * 0.95) / liftSlope(A, 0); }
+
+WingCoefficients wing(double a, double mach, double reynolds, const WingConst& k, double delta, double phi, double groundLiftGain, double stallScale) {
     const WingParams& p = k.params;
     double M = mn(mach, 0.8), beta2 = 1 - M * M, beta = sqrt(beta2);
     double slope = k.liftNum / (2 + sqrt(k.AA * beta2 / (0.95 * 0.95) + 4)) * groundLiftGain;
@@ -88,6 +90,7 @@ WingCoefficients wing(double a, double mach, double reynolds, const WingConst& k
     }
     double lr = std::log10(mx(reynolds, 1e3));
     double stall = (11 + 5 * smoothstep(5, 7, lr) - k.stallThick) * kDeg;
+    if (stallScale != 1) stall = mn(stall * stallScale, 35 * kDeg);
     double aZL = a + cl0 / slope;
     double flat = 1.05 * sin(2 * a);
     double cl; bool stalled = false;

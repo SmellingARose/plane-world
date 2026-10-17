@@ -407,7 +407,7 @@ bool parityRun(Context& c, const std::string& name, int workers, ScriptRuntimeFa
     if (!rr.ok) { c.note("missing reference " + dir + "/" + name + ".ref.json: " + rr.error); return false; }
     const Value& ref = rr.value;
     ExperimentDocument e = ExperimentDocument::load(dir + "/" + ref["experiment"].str());
-    e.aero.toggles.hingeAtAC = false;   // Swift references used the legacy hinge-load model
+    e.aero.toggles.setSwiftLegacy();   // Swift references: legacy hinge load, viscous friction, no spin reaction
     e.workers = workers;
     e.scripts.callBudgetMs = 2000;   // JS watchdog: generous on shared CI runners (not under test here; no effect on results)
     std::string err;
@@ -557,6 +557,7 @@ void registerRunTests() {
     });
     selftest::add("evolution.evaluator-determinism", [](Context& c) -> bool {
         auto e = neuralExperiment(4, 2);
+        e.aero.toggles.setSwiftLegacy();   // the fitness range below is the Swift reference (legacy mechanics)
         auto r1 = makeRun(e, 1), rN = makeRun(e, 0);
         EvoRNG rng(5);
         std::vector<Genome> pop;
