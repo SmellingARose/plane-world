@@ -1,7 +1,8 @@
 // Plane World (Qt 6 Quick). Native Qt Quick Controls style per OS; the 3D viewport is our own Metal / D3D12
 // renderer sharing Qt's device (GpuViewport).
-//   pwapp [--quit-after <s>] [--screenshot <file.png>] [--tab build|fly|world|evolve]
+//   pwapp [--quit-after <s>] [--screenshot <file.png>] [--tab build|fly|world|evolve] [--color-scheme dark|light]
 #include <QGuiApplication>
+#include <QStyleHints>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -29,6 +30,10 @@ int main(int argc, char** argv) {
 #endif
     QStringList args = app.arguments();
     auto value = [&](const QString& f) { int i = args.indexOf(f); return i >= 0 && i + 1 < args.size() ? args[i + 1] : QString(); };
+
+    // --color-scheme dark|light: force the scheme (screenshots / UX review); default follows the OS
+    if (const QString cs = value("--color-scheme"); !cs.isEmpty())
+        QGuiApplication::styleHints()->setColorScheme(cs == "dark" ? Qt::ColorScheme::Dark : Qt::ColorScheme::Light);
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("pwVersion", QString(PW_VERSION));

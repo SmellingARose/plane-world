@@ -14,6 +14,9 @@ Item {
     signal addPartRequested()
     signal focusPartName()
     readonly property bool building: tab === "BUILD"
+    // craft-document shortcuts; WORLD / EVOLVE pages bind their own Ctrl+Z/S/O (two enabled Shortcuts on one
+    // key are "ambiguous" in Qt and neither fires)
+    readonly property bool craftTab: tab === "BUILD" || tab === "FLY"
     readonly property bool flying: tab === "FLY"
     // arrow / page nudges only while the 3D view has focus, so lists, fields and popups keep their arrow keys
     readonly property bool nudging: building && App.selectedId !== "" && viewport !== null && viewport.activeFocus
@@ -71,14 +74,14 @@ Item {
     }
 
     // global (any tab)
-    Shortcut { sequences: [StandardKey.Undo]; onActivated: App.undo() }
-    Shortcut { sequences: [StandardKey.Redo, "Ctrl+Shift+Z"]; onActivated: App.redo() }
-    Shortcut { sequences: [StandardKey.New]; onActivated: App.newCraft() }
-    Shortcut { sequences: [StandardKey.Open]; onActivated: cmds.openRequested() }
-    Shortcut { sequences: [StandardKey.Save]; onActivated: cmds.saveOrSaveAs() }
-    Shortcut { sequence: "Ctrl+Shift+S"; onActivated: cmds.saveAsRequested() }
-    Shortcut { sequence: "Ctrl+Shift+L"; onActivated: App.saveToLibrary() }
-    Shortcut { sequence: "Ctrl+Shift+I"; onActivated: cmds.importRequested(false) }
+    Shortcut { enabled: cmds.craftTab; sequences: [StandardKey.Undo]; onActivated: App.undo() }
+    Shortcut { enabled: cmds.craftTab; sequences: [StandardKey.Redo, "Ctrl+Shift+Z"]; onActivated: App.redo() }
+    Shortcut { enabled: cmds.craftTab; sequences: [StandardKey.New]; onActivated: App.newCraft() }
+    Shortcut { enabled: cmds.craftTab; sequences: [StandardKey.Open]; onActivated: cmds.openRequested() }
+    Shortcut { enabled: cmds.craftTab; sequences: [StandardKey.Save]; onActivated: cmds.saveOrSaveAs() }
+    Shortcut { enabled: cmds.craftTab; sequence: "Ctrl+Shift+S"; onActivated: cmds.saveAsRequested() }
+    Shortcut { enabled: cmds.craftTab; sequence: "Ctrl+Shift+L"; onActivated: App.saveToLibrary() }
+    Shortcut { enabled: cmds.craftTab; sequence: "Ctrl+Shift+I"; onActivated: cmds.importRequested(false) }
     Shortcut { sequence: "Ctrl+Shift+M"; onActivated: cmds.cycleAero() }
     // BUILD
     Shortcut { enabled: cmds.building; sequences: ["Backspace", "Delete"]; onActivated: App.deleteSelected() }

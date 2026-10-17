@@ -96,13 +96,14 @@ Rectangle {
             Label { visible: ev.runError !== ""; Layout.fillWidth: true; text: ev.runError; color: Theme.bad; wrapMode: Text.Wrap; font.pixelSize: Theme.caption }
         }
 
-        TabBar {
+        PwTabBar {
             id: pageBar
             Layout.fillWidth: true
             Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
-            TabButton { text: qsTr("Setup") }
-            TabButton { text: qsTr("Script") + (ev.scriptErrorLine > 0 ? "  ●" : "") }
-            TabButton { text: qsTr("Train") + (ev.generations.length > 0 ? "  " + ev.generations.length : "") }
+            fill: true
+            model: [qsTr("Setup"), qsTr("Script"), qsTr("Train")]
+            badges: ["", ev.scriptErrorLine > 0 ? "●" : "", ev.generations.length > 0 ? String(ev.generations.length) : ""]
+            tints: ({ "Setup": Theme.tabTint["EVOLVE"], "Script": Theme.tabTint["EVOLVE"], "Train": Theme.tabTint["EVOLVE"] })
         }
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.separator }
 

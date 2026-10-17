@@ -35,6 +35,7 @@ ApplicationWindow {
     })
 
     function selectTab(i) { currentTab = i }
+    readonly property var undoTarget: currentTab <= 1 ? App : currentTab === 2 ? WorldModel : null
 
     readonly property var commands: baseCommands.concat(appCommands.commands)
     readonly property var baseCommands: [
@@ -72,26 +73,21 @@ ApplicationWindow {
             anchors.rightMargin: Theme.s3
             spacing: Theme.s4
             Label { text: "Plane World"; font.weight: Font.DemiBold; font.pixelSize: Theme.title }
-            TabBar {
+            PwTabBar {
                 id: bar
+                Layout.fillHeight: true
+                model: win.tabs
+                tints: Theme.tabTint
+                tips: win.tabs.map((t, i) => t + "  " + Theme.shortcutText("Ctrl+" + (i + 1)))
                 currentIndex: win.currentTab
                 onCurrentIndexChanged: win.currentTab = currentIndex
-                Repeater {
-                    model: win.tabs
-                    TabButton {
-                        required property string modelData
-                        required property int index
-                        text: modelData
-                        width: implicitWidth + Theme.s4
-                        ToolTip.visible: hovered
-                        ToolTip.delay: 600
-                        ToolTip.text: modelData + "  " + Theme.shortcutText("Ctrl+" + (index + 1))
-                    }
-                }
             }
             Item { Layout.fillWidth: true }
-            PwIconButton { text: "↶"; font.pixelSize: Theme.title; enabled: App.canUndo; tip: App.canUndo ? "Undo " + App.undoText : "Nothing to undo"; shortcut: "Ctrl+Z"; onClicked: App.undo() }
-            PwIconButton { text: "↷"; font.pixelSize: Theme.title; enabled: App.canRedo; tip: App.canRedo ? "Redo " + App.redoText : "Nothing to redo"; shortcut: "Ctrl+Shift+Z"; onClicked: App.redo() }
+            // undo / redo act on the document of the visible tab (craft in BUILD/FLY, world in WORLD)
+            PwIconButton { text: "↩\uFE0E"; font.pixelSize: Theme.title; enabled: win.undoTarget ? win.undoTarget.canUndo : false
+                tip: enabled ? "Undo " + win.undoTarget.undoText : "Nothing to undo"; shortcut: "Ctrl+Z"; onClicked: win.undoTarget.undo() }
+            PwIconButton { text: "↪\uFE0E"; font.pixelSize: Theme.title; enabled: win.undoTarget ? win.undoTarget.canRedo : false
+                tip: enabled ? "Redo " + (win.undoTarget.redoText || "") : "Nothing to redo"; shortcut: "Ctrl+Shift+Z"; onClicked: win.undoTarget.redo() }
             ToolButton {
                 text: "Commands  " + Theme.shortcutText("Ctrl+K")
                 onClicked: cmdPalette.open()

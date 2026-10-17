@@ -21,6 +21,7 @@ Rectangle {
         anchors.leftMargin: Theme.s3; anchors.rightMargin: Theme.s3
         spacing: Theme.s3
         Rectangle {
+            visible: bar.tab === "BUILD" || bar.tab === "FLY"
             radius: 3
             implicitWidth: mlabel.implicitWidth + 10; implicitHeight: mlabel.implicitHeight + 2
             color: Theme.alpha(App.fullModel && App.aeroError === "" ? Theme.cfd : Theme.accent, 0.16)
@@ -39,7 +40,8 @@ Rectangle {
         }
         Text {
             color: Theme.textMuted; font.pixelSize: Theme.caption; font.family: Theme.mono
-            text: bar.viewport ? (bar.viewport.fps > 0 ? bar.viewport.fps.toFixed(0) + " fps  ·  GPU " + bar.viewport.gpuMs.toFixed(2) + " ms" : (bar.viewport.backendName || "GPU")) : ""
+            visible: text !== ""
+            text: bar.viewport ? (bar.viewport.fps > 0 ? bar.viewport.fps.toFixed(0) + " fps  ·  GPU " + bar.viewport.gpuMs.toFixed(2) + " ms" : (bar.viewport.backendName || "")) : ""
         }
         Item { Layout.fillWidth: true }
         Row {

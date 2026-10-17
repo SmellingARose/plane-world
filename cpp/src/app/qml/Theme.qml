@@ -65,7 +65,9 @@ QtObject {
     readonly property color text: sys.windowText
     readonly property color textMuted: Qt.rgba(text.r, text.g, text.b, 0.64)
     readonly property color textFaint: Qt.rgba(text.r, text.g, text.b, 0.42)
-    readonly property color accent: sys.highlight
+    // macOS: SystemPalette.highlight is the pale *selection* colour, so text/fills tinted with it wash out in light
+    // mode; the user's accent colour (QPalette::Accent, Qt 6.6+) is the right brand tint on both platforms.
+    readonly property color accent: sys.accent !== undefined ? sys.accent : sys.highlight
     readonly property color accentText: sys.highlightedText
     readonly property color accentSoft: Qt.rgba(accent.r, accent.g, accent.b, dark ? 0.24 : 0.14)
     readonly property color surface: dark ? Qt.lighter(window, 1.18) : Qt.darker(window, 1.03)

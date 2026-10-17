@@ -18,7 +18,8 @@ TextField {
     horizontalAlignment: TextInput.AlignRight
     font.family: Theme.mono
     font.pixelSize: Theme.small
-    function show() { text = (+value).toFixed(decimals).replace(/\.?0+$/, "") || "0" }
+    function fmt(v) { let t = (+v).toFixed(decimals); if (t.indexOf(".") >= 0) t = t.replace(/0+$/, "").replace(/\.$/, ""); return (t === "-0" || t === "") ? "0" : t }
+    function show() { text = fmt(value) }
     Component.onCompleted: show()
     onValueChanged: if (!activeFocus) show()
     onActiveFocusChanged: if (activeFocus) selectAll(); else commit()
@@ -41,7 +42,7 @@ TextField {
     function nudge(e, dir) {
         const m = (e.modifiers & Qt.ShiftModifier) ? 10 : (e.modifiers & Qt.AltModifier) ? 0.1 : 1
         const v = clamp(Math.round((value + dir * step * m) / (step * (m < 1 ? 0.1 : 1))) * (step * (m < 1 ? 0.1 : 1)))
-        committed(v); text = v.toFixed(decimals).replace(/\.?0+$/, "") || "0"; selectAll(); e.accepted = true
+        committed(v); text = fmt(v); selectAll(); e.accepted = true
     }
     ToolTip.visible: hovered && tip !== "" && !activeFocus
     ToolTip.delay: Theme.tooltipDelay

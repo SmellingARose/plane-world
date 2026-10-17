@@ -38,8 +38,7 @@ Rectangle {
         nameFilters: ["Images (*.png *.jpg *.jpeg)", "Raw 16-bit (*.r16 *.raw)"]
         onAccepted: { WorldModel.heightmapPath = selectedFile.toString(); WorldModel.terrainKind = "heightmap" }
     }
-    Shortcut { sequences: [StandardKey.Open]; enabled: root.visible; onActivated: openDlg.open() }
-    Shortcut { sequence: "Ctrl+Shift+S"; enabled: root.visible; onActivated: saveDlg.open() }
+    // Ctrl+O / Ctrl+Shift+S are bound once, in WorldPage (duplicates would make them ambiguous)
 
     ScrollView {
         id: sv
@@ -100,17 +99,13 @@ Rectangle {
                     }
                     Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0; text: "Save"; onClicked: WorldModel.save(); enabled: !WorldModel.busy
                         ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.tip("Save to the world library", "Ctrl+S") }
-                    Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0; text: "Save as…"; onClicked: saveDlg.open(); enabled: !WorldModel.busy }
-                                        ToolButton { text: "↶"; enabled: WorldModel.canUndo; onClicked: WorldModel.undo()
-                        ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.tip("Undo " + WorldModel.undoText, "Ctrl+Z") }
-                    ToolButton { text: "↷"; enabled: WorldModel.canRedo; onClicked: WorldModel.redo()
-                        ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.tip("Redo " + WorldModel.redoText, "Ctrl+Shift+Z") }
+                    Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0; text: "Save As"; onClicked: saveDlg.open(); enabled: !WorldModel.busy }
                 }
                 Label { Layout.fillWidth: true; text: WorldModel.terrainInfo; color: Theme.textFaint; font.pixelSize: Theme.caption; wrapMode: Text.WordWrap }
             }
 
             // ---- brush (context of the active tool)
-            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0
+            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0; Layout.leftMargin: Theme.s4; Layout.rightMargin: Theme.s4
                 title: WorldModel.tool === "orbit" ? "Tools" : "Brush · " + WorldModel.tool
                 Layout.fillWidth: true
                 Label {
@@ -166,7 +161,7 @@ Rectangle {
             }
 
             // ---- terrain source
-            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0
+            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0; Layout.leftMargin: Theme.s4; Layout.rightMargin: Theme.s4
                 title: "Terrain"
                 Layout.fillWidth: true
                 hint: "Where the base heightfield comes from. Sculpt and paint edits are layered on top."
@@ -265,7 +260,7 @@ Rectangle {
             }
 
             // ---- water
-            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0
+            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0; Layout.leftMargin: Theme.s4; Layout.rightMargin: Theme.s4
                 title: "Water"
                 Layout.fillWidth: true
                 expanded: false
@@ -289,7 +284,7 @@ Rectangle {
             }
 
             // ---- vegetation
-            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0
+            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0; Layout.leftMargin: Theme.s4; Layout.rightMargin: Theme.s4
                 title: "Vegetation"
                 Layout.fillWidth: true
                 expanded: false
@@ -316,7 +311,7 @@ Rectangle {
             }
 
             // ---- objects
-            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0
+            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0; Layout.leftMargin: Theme.s4; Layout.rightMargin: Theme.s4
                 title: "Objects (" + WorldModel.objects.length + ")"
                 Layout.fillWidth: true
                 expanded: false
@@ -357,7 +352,7 @@ Rectangle {
             }
 
             // ---- sky
-            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0
+            PwSection { Layout.minimumWidth: 0; Layout.preferredWidth: 0; Layout.leftMargin: Theme.s4; Layout.rightMargin: Theme.s4
                 title: "Sky & wind"
                 Layout.fillWidth: true
                 expanded: false
