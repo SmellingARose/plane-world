@@ -1,6 +1,7 @@
 // Plane World (Qt 6 Quick). Native Qt Quick Controls style per OS; the 3D viewport is our own Metal / D3D12
 // renderer sharing Qt's device (GpuViewport).
 //   pwapp [--quit-after <s>] [--screenshot <file.png>] [--tab build|fly|world|evolve] [--color-scheme dark|light]
+//         [--size <w>x<h>] [--command "<palette entry>"]...   (commands run 1 s after launch, in order)
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
@@ -43,6 +44,20 @@ int main(int argc, char** argv) {
     engine.loadFromModule("PlaneWorld", "Main");
     if (engine.rootObjects().isEmpty()) return 1;
     auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+
+    // --size WxH: window size in logical pixels (screenshots)
+    if (const QStringList wh = value("--size").split('x'); win && wh.size() == 2) win->resize(wh[0].toInt(), wh[1].toInt());
+    // --command "<name>" (repeatable): run command-palette entries once the UI has settled
+    QStringList commands;
+    for (int i = 0; i + 1 < args.size(); ++i) if (args[i] == "--command") commands << args[i + 1];
+    if (!commands.isEmpty() && win)
+        QTimer::singleShot(1000, win, [win, commands] {
+            for (const QString& c : commands) {
+                QVariant ok;
+                QMetaObject::invokeMethod(win, "runCommand", Q_RETURN_ARG(QVariant, ok), Q_ARG(QVariant, c));
+                if (!ok.toBool()) qWarning("--command: no palette entry named \"%s\"", qPrintable(c));
+            }
+        });
 
     bool okQuit = true;
     const QString shot = value("--screenshot");

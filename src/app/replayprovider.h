@@ -13,4 +13,6 @@ public:
     virtual const pw::craft::CraftDocument* replayCraft(uint64_t& version) const = 0;
     /// Part poses in the craft document's part order, plus the craft origin. False when no frame is available.
     virtual bool replayPoses(std::vector<pw::geo::Transform>& parts, pw::geo::Transform& origin) const = 0;
+    /// Craft shown at the world spawn while nothing is replayed (nullptr = none); `version` changes with it.
+    virtual const pw::craft::CraftDocument* idleCraft(uint64_t& version) const { (void)version; return nullptr; }
 };

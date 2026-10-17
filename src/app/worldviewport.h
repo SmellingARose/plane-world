@@ -111,6 +111,7 @@ private:
     struct Orbit { double yaw = 2.4, pitch = 0.5, dist = 160, height = 1.0, tx = 0, tz = 0; } m_goal, m_cur;
     double m_groundY = 0;
     pw::Vec3d m_replayFollow{0, 0, 0};
+    const void* m_lastScene = nullptr;   // scene last framed by the new-world overview
     double m_frameDist = 14, m_frameHeight = 1.0;
     QPointF m_lastMouse;
     Qt::MouseButton m_dragButton = Qt::NoButton;

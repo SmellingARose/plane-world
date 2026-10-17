@@ -37,8 +37,8 @@ struct WorldViewportNode : QSGSimpleTextureNode {
     std::unique_ptr<pw::render::GpuMesh> box;
     pw::render::MeshRenderable propsR{5};
     std::unique_ptr<pw::render::CraftRenderable> replay;
-    uint64_t replayVersion = ~0ull;
-    bool replayAdded = false, craftAdded = true;
+    uint64_t replayVersion = ~0ull, idleVersion = ~0ull;
+    bool replayAdded = false, craftAdded = false;
     std::vector<pw::geo::Transform> poses;
     std::unique_ptr<QSGTexture> tex;   // wrapper of renderer->output()
     pw::gpu::Texture* wrapped = nullptr;
@@ -62,6 +62,18 @@ WorldViewport::WorldViewport(QQuickItem* parent) : QQuickItem(parent) {
     m_clock.start(); m_fpsClock.start();
     connect(WorldModel::instance(), &WorldModel::skyChanged, this, [this] { setTimeOfDay(WorldModel::instance()->timeOfDay()); });
     m_timeOfDay = WorldModel::instance()->timeOfDay();
+    // a freshly built world with relief: pull back to an overview instead of staying at ground level
+    connect(WorldModel::instance(), &WorldModel::sceneChanged, this, [this] {
+        auto sc = WorldModel::instance()->scene();
+        if (!m_editWorld || !sc || sc.get() == m_lastScene) return;
+        m_lastScene = sc.get();
+        const auto b = sc->terrain.bounds();
+        const double relief = b.max.y - b.min.y;
+        if (!(relief > 50)) return;
+        m_goal.tx = 0.5 * (b.min.x + b.max.x); m_goal.tz = 0.5 * (b.min.z + b.max.z);
+        m_goal.dist = std::clamp(relief * 2.2, 400.0, 6000.0); m_goal.pitch = 0.45; m_goal.height = 0;
+        update();
+    });
 }
 
 void WorldViewport::setInfo(const QString& b, const QString& a, const QString& e, const QString& c) {
@@ -320,7 +332,27 @@ QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
     }
     const bool showRep = rc && n->replay;
     if (showRep != n->replayAdded) { if (showRep) n->renderer->add(n->replay.get()); else n->renderer->remove(n->replay.get()); n->replayAdded = showRep; }
-    if (n->craft && showRep == n->craftAdded) { if (showRep) n->renderer->remove(n->craft.get()); else n->renderer->add(n->craft.get()); n->craftAdded = !showRep; }
+    // idle (EVOLVE, no replay): the experiment's craft parked at the spawn, framed like FLY's chase view
+    uint64_t idleVer = 0;
+    const pw::craft::CraftDocument* ic = m_showReplay && !showRep ? EvolveModel::instance()->idleCraft(idleVer) : nullptr;
+    if (ic && idleVer != n->idleVersion) {
+        if (n->craft && n->craftAdded) { n->renderer->remove(n->craft.get()); n->craftAdded = false; }
+        n->dev->waitIdle();
+        n->craft = std::make_unique<pw::render::CraftRenderable>(*n->dev);
+        n->craft->setCraft(*ic);
+        n->craft->setCraftPose(wm->document().spawn);
+        n->idleVersion = idleVer;
+        const auto& b = n->craft->worldBounds();
+        const Vec3d c = b.center(), e = b.max - b.min;
+        const double r = std::max({e.x, e.y, e.z, 1.0});
+        m_goal.tx = c.x; m_goal.tz = c.z;
+        m_goal.height = c.y - wm->heightAt(c.x, c.z);
+        m_goal.dist = std::clamp(r * 1.9, 4.0, 60.0); m_goal.pitch = 0.28;
+        m_cur = m_goal;
+        m_groundY = wm->heightAt(c.x, c.z);
+    }
+    const bool showIdle = !showRep && m_showReplay && n->craft;
+    if (n->craft && showIdle != n->craftAdded) { if (showIdle) n->renderer->add(n->craft.get()); else n->renderer->remove(n->craft.get()); n->craftAdded = showIdle; }
     if (showRep) {
         geo::Transform origin;
         if (EvolveModel::instance()->replayPoses(n->poses, origin)) {

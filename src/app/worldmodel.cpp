@@ -362,7 +362,7 @@ void WorldModel::install(std::shared_ptr<WorldScene> s, world::WorldDocument doc
     m_progress = m_scene->terrain.loadingProgress(); emit progressChanged();
     syncSourceFromScene();
     emitAll();
-    setStatus(tr("Terrain ready: %1").arg(terrainInfo()));
+    setStatus(tr("Terrain ready"));   // the stats are in the panel header (terrainInfo)
 }
 
 void WorldModel::clearEdits() {
