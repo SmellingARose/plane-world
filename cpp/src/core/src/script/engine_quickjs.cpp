@@ -76,7 +76,8 @@ class QJSEngine final : public JSEngine {
 public:
     QJSEngine() {
         rt_ = JS_NewRuntime2(&kMalloc, &allocs_);
-        JS_SetMaxStackSize(rt_, 1024 * 1024);
+        // Stay well inside the smallest thread stack we run on (Windows: 1 MB main thread, std::thread default).
+        JS_SetMaxStackSize(rt_, 256 * 1024);
         JS_SetInterruptHandler(rt_, &QJSEngine::interrupt, this);
         ctx_ = JS_NewContext(rt_);
         JS_SetContextOpaque(ctx_, this);
