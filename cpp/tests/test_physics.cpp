@@ -10,6 +10,8 @@
 #include "pw/jobs.h"
 #include "pw/parity.h"
 #include "pw/sim/craft_sim.h"
+#include "pw/simd_kernels.h"
+#include "pw/rng.h"
 
 using namespace pw;
 using namespace pw::sim;
@@ -303,4 +305,45 @@ TEST_CASE("sim: CAD part flies with panel aero (serial and parallel identical)")
     for (int i = 0; i < cap.count(); ++i) sawPanel = sawPanel || cap.record(i).id == EquationID::PanelNewtonian;
     CHECK(sawPanel);
     CHECK(a.velocity().x < 35);   // drag
+}
+
+TEST_CASE("simd: panel kernel is bit-identical on every ISA level (scalar / NEON / AVX2 / AVX-512)") {
+    SplitMix rng(42);
+    const int n = 1003;
+    std::vector<double> cx(n), cy(n), cz(n), nx(n), ny(n), nz(n), area(n), wx(n), wy(n), wz(n);
+    std::vector<uint8_t> sh(n);
+    for (int k = 0; k < n; ++k) {
+        cx[k] = rng.next() * 4 - 2; cy[k] = rng.next() - 0.5; cz[k] = rng.next() * 2 - 1;
+        Vec3d nn = normalize({rng.next() - 0.5, rng.next() - 0.5, rng.next() - 0.5});
+        nx[k] = nn.x; ny[k] = nn.y; nz[k] = nn.z;
+        area[k] = rng.next() * 0.01;
+        sh[k] = rng.next() < 0.2;
+        wx[k] = rng.next() * 3; wy[k] = rng.next(); wz[k] = rng.next() - 0.5;
+    }
+    cx[5] = cy[5] = cz[5] = 0;   // panel at the CoM with zero relative velocity -> skipped (valid = 0)
+    simdk::PanelSoA m{cx.data(), cy.data(), cz.data(), nx.data(), ny.data(), nz.data(), area.data(), sh.data()};
+    Quatd q = Quatd::eulerXYZDegrees({12, -40, 7});
+    for (int wash = 0; wash < 2; ++wash)
+        for (double speed : {0.0, 30.0, 290.0}) {
+            simdk::PanelParams p{};
+            p.qx = q.x; p.qy = q.y; p.qz = q.z; p.qw = q.w;
+            p.ox = 1; p.oy = 2; p.oz = 3;
+            p.comx = 1; p.comy = 2; p.comz = 3;
+            p.vx = speed; p.vy = -1; p.vz = 0.5;
+            p.wx = 0.3; p.wy = -0.2; p.wz = 0.9;
+            p.windx = 2; p.windy = 0; p.windz = -1;
+            if (speed == 0.0) { p.vx = p.vy = p.vz = 0; p.wx = p.wy = p.wz = 0; p.windx = p.windy = p.windz = 0; }
+            if (wash) { p.washX = wx.data(); p.washY = wy.data(); p.washZ = wz.data(); }
+            p.rho = 1.1; p.nu = 1.6e-5; p.sos = 330; p.refL = 4;
+            std::vector<double> ref(7 * n), got(7 * n);
+            simdk::detail::panelsScalar(m, p, 0, n, ref.data());
+            for (auto lvl : {cpu::Level::NEON, cpu::Level::AVX2, cpu::Level::AVX512}) {
+                std::fill(got.begin(), got.end(), -7.0);
+                simdk::panelKernel(lvl)(m, p, 3, n, got.data());   // odd start: exercises the scalar tail and offsets
+                bool same = std::memcmp(ref.data() + 21, got.data() + 21, sizeof(double) * 7 * (n - 3)) == 0;
+                CHECK_MESSAGE(same, std::string(cpu::name(lvl)) << " lanes=" << simdk::lanes(lvl) << " wash=" << wash << " speed=" << speed);
+            }
+            if (speed == 0.0 && !wash) CHECK(ref[7 * 5 + 6] == 0);
+        }
+    MESSAGE("panel kernel: " << std::string(cpu::name(cpu::bestLevel())) << " (" << simdk::lanes(cpu::bestLevel()) << " lanes)");
 }

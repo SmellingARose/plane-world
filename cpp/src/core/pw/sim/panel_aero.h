@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 #include "pw/math.h"
+#include "pw/simd_kernels.h"
 #include "pw/sim/environment.h"
 #include "pw/sim/slipstream.h"
 
@@ -63,6 +64,12 @@ private:
     std::vector<Tri> tris_;
     std::vector<uint8_t> shadowed_;
     std::vector<double> depth_;   // G*G scratch for updateShadows
+    // Struct-of-arrays copy for the SIMD kernel (pw/simd_kernels.h) + per-panel output / wash scratch. Disjoint panel
+    // ranges write disjoint scratch, so parallel work items over one mesh are safe.
+    std::vector<double> sx_, sy_, sz_, snx_, sny_, snz_;
+    mutable std::vector<double> out_, washX_, washY_, washZ_;
+    simdk::PanelSoA soa() const;
+    ForceTorque accumulate(int lo, int hi) const;
     int grid_ = 16;
     double refL_ = 1;
     bool flipped_ = false;

@@ -39,6 +39,12 @@ PanelMesh::PanelMesh(const std::vector<Vec3d>& soup) {
     oriented_.reserve(normals_.size());
     for (auto& n : normals_) oriented_.push_back(flipped_ ? -n : n);
     grid_ = int(clamp(std::sqrt(double(count())) * 1.5, 16, 256));
+    for (std::size_t k = 0; k < centers_.size(); ++k) {
+        sx_.push_back(centers_[k].x); sy_.push_back(centers_[k].y); sz_.push_back(centers_[k].z);
+        snx_.push_back(oriented_[k].x); sny_.push_back(oriented_[k].y); snz_.push_back(oriented_[k].z);
+    }
+    out_.assign(centers_.size() * 7, 0.0);
+    washX_.assign(centers_.size(), 0.0); washY_.assign(centers_.size(), 0.0); washZ_.assign(centers_.size(), 0.0);
     depth_.assign(std::size_t(grid_) * std::size_t(grid_), inf);
 }
 
@@ -79,62 +85,57 @@ void PanelMesh::updateShadows(const Vec3d& u) {
     }
 }
 
-namespace {
-inline void panelForce(const Vec3d& n, const Vec3d& vrel, double sp, double rho, double nu, double sos, double refL, double A, bool sh, Vec3d& f) {
-    Vec3d u = -vrel / sp;
-    double qdyn = 0.5 * rho * sp * sp;
-    double c = dot(n, u);
-    if (c < 0) {
-        if (!sh) {
-            double M = sp / sos;
-            double cpmax = 1 + M * M / 4;
-            f -= n * (cpmax * c * c * qdyn * A);
-        }
-    } else {
-        f += n * (0.25 * c * qdyn * A);
-    }
-    Vec3d tang = u - n * c;
-    double tl = length(tang);
-    if (tl > 1e-6) {
-        double re = smax(1e4, sp * refL / nu);
-        double cf = 0.455 / std::pow(std::log10(re), 2.58);
-        f += tang / tl * (cf * qdyn * A * tl);
-    }
+simdk::PanelSoA PanelMesh::soa() const {
+    return {sx_.data(), sy_.data(), sz_.data(), snx_.data(), sny_.data(), snz_.data(), areas_.data(), shadowed_.data()};
 }
+
+namespace {
+simdk::PanelParams params(const Quatd& q, const Vec3d& origin, const Vec3d& com, const Vec3d& linVel, const Vec3d& angVel,
+                          const Vec3d& wind, double rho, double nu, double sos, double refL) {
+    simdk::PanelParams p;
+    p.qx = q.x; p.qy = q.y; p.qz = q.z; p.qw = q.w;
+    p.ox = origin.x; p.oy = origin.y; p.oz = origin.z;
+    p.comx = com.x; p.comy = com.y; p.comz = com.z;
+    p.vx = linVel.x; p.vy = linVel.y; p.vz = linVel.z;
+    p.wx = angVel.x; p.wy = angVel.y; p.wz = angVel.z;
+    p.windx = wind.x; p.windy = wind.y; p.windz = wind.z;
+    p.rho = rho; p.nu = nu; p.sos = sos; p.refL = refL;
+    return p;
+}
+}
+
+ForceTorque PanelMesh::accumulate(int lo, int hi) const {
+    // Sum in panel order exactly like the scalar loop (F += f; T += cross(r, f)), skipping |v_rel| < 0.05 panels.
+    Vec3d F, T;
+    const double* o = out_.data();
+    for (int k = lo; k < hi; ++k) {
+        const double* r = o + 7 * k;
+        if (r[6] == 0) continue;
+        F += Vec3d{r[0], r[1], r[2]};
+        T += Vec3d{r[3], r[4], r[5]};
+    }
+    return {F, T};
 }
 
 ForceTorque PanelMesh::evaluate(int lo, int hi, const Quatd& q, const Vec3d& origin, const Vec3d& com, const Vec3d& linVel,
                                 const Vec3d& angVel, const Vec3d& wind, double rho, double nu, double sos) const {
-    Vec3d F, T;
-    for (int k = lo; k < hi; ++k) {
-        Vec3d pw = origin + q.act(centers_[std::size_t(k)]);
-        Vec3d r = pw - com;
-        Vec3d vrel = linVel + cross(angVel, r) - wind;
-        double sp = length(vrel);
-        if (sp < 0.05) continue;
-        Vec3d n = q.act(oriented_[std::size_t(k)]);
-        Vec3d f;
-        panelForce(n, vrel, sp, rho, nu, sos, refL_, areas_[std::size_t(k)], shadowed_[std::size_t(k)] != 0, f);
-        F += f; T += cross(r, f);
-    }
-    return {F, T};
+    if (hi <= lo) return {};
+    simdk::PanelParams p = params(q, origin, com, linVel, angVel, wind, rho, nu, sos, refL_);
+    simdk::panelKernel()(soa(), p, lo, hi, out_.data());
+    return accumulate(lo, hi);
 }
 
 ForceTorque PanelMesh::evaluate(int lo, int hi, const Quatd& q, const Vec3d& origin, const Vec3d& com, const Vec3d& linVel,
                                 const Vec3d& angVel, const Vec3d& wind, const PanelWash& wash, double rho, double nu, double sos) const {
-    Vec3d F, T;
+    if (hi <= lo) return {};
     for (int k = lo; k < hi; ++k) {
-        Vec3d pw = origin + q.act(centers_[std::size_t(k)]);
-        Vec3d r = pw - com;
-        Vec3d vrel = linVel + cross(angVel, r) - (wind + wash.velocity(pw));
-        double sp = length(vrel);
-        if (sp < 0.05) continue;
-        Vec3d n = q.act(oriented_[std::size_t(k)]);
-        Vec3d f;
-        panelForce(n, vrel, sp, rho, nu, sos, refL_, areas_[std::size_t(k)], shadowed_[std::size_t(k)] != 0, f);
-        F += f; T += cross(r, f);
+        Vec3d w = wash.velocity(origin + q.act(centers_[std::size_t(k)]));
+        washX_[std::size_t(k)] = w.x; washY_[std::size_t(k)] = w.y; washZ_[std::size_t(k)] = w.z;
     }
-    return {F, T};
+    simdk::PanelParams p = params(q, origin, com, linVel, angVel, wind, rho, nu, sos, refL_);
+    p.washX = washX_.data(); p.washY = washY_.data(); p.washZ = washZ_.data();
+    simdk::panelKernel()(soa(), p, lo, hi, out_.data());
+    return accumulate(lo, hi);
 }
 
 PanelBreakdown PanelMesh::breakdown(const Quatd& q, const Vec3d& origin, const Vec3d& com, const Vec3d& linVel, const Vec3d& angVel,
