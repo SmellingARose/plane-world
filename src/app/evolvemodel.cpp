@@ -100,6 +100,18 @@ const std::vector<ParamSpec>& schemaFor(const std::string& k) {
 }
 } // namespace
 
+static evo::ExperimentDocument quickStartDoc(const std::string& craftName) {
+    evo::ExperimentDocument d = evo::presets::make("Neural controller", craftName);
+    d.name = "Quick start — hold altitude (" + craftName + ")";
+    d.notes = "Trains in about 10 seconds: from an air start at 150 m, the network learns to hold height and keep the wings level.";
+    d.population = 32; d.generations = 40;
+    d.episode.duration = 20; d.episode.episodesPerCandidate = 1;
+    d.episode.wind = {};
+    d.episode.spawn.mode = "air"; d.episode.spawn.altitudeAGL = 150; d.episode.spawn.speed = 35;
+    d.world.source = "flat";
+    return d;
+}
+
 EvolveModel* EvolveModel::instance() {
     if (!g_instance) g_instance = new EvolveModel(QCoreApplication::instance());
     return g_instance;
@@ -113,7 +125,8 @@ EvolveModel* EvolveModel::create(QQmlEngine*, QJSEngine*) {
 EvolveModel::EvolveModel(QObject* parent) : QObject(parent) {
     if (!g_instance) g_instance = this;
     refreshLibrary();
-    setDoc(evo::presets::make("Neural controller", m_crafts.isEmpty() ? "Trainer" : m_crafts.first().toStdString()), false);
+    // the out-of-the-box experiment is the quick start: it visibly learns within seconds
+    setDoc(quickStartDoc(m_crafts.contains("Trainer") || m_crafts.isEmpty() ? "Trainer" : m_crafts.first().toStdString()), false);
     connect(&m_timer, &QTimer::timeout, this, &EvolveModel::frame);
     m_timer.start(16);
 }
@@ -219,6 +232,17 @@ void EvolveModel::newFromPreset(const QString& preset) {
     m_scriptMsg.clear(); m_errLine = 0; m_scriptOk = false; emit scriptChanged();
     refreshRunDirs();
     setStatus(tr("New experiment from “%1”").arg(preset));
+}
+
+void EvolveModel::quickStart() {
+    const std::string craftName = m_doc.crafts.empty() || !m_doc.crafts[0].name ? "Trainer" : *m_doc.crafts[0].name;
+    m_path.clear();
+    stopReplay();
+    newRun();
+    setDoc(quickStartDoc(craftName), true);
+    m_scriptMsg.clear(); m_errLine = 0; m_scriptOk = false; emit scriptChanged();
+    refreshRunDirs();
+    setStatus(tr("Quick start ready — press Train"));
 }
 
 bool EvolveModel::open(const QString& pathOrUrl) {

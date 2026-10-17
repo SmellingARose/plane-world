@@ -17,6 +17,8 @@
 #include "pw/craft/meshcut.h"
 #include "pw/craft/outputs.h"
 #include "pw/flow/lbm.h"
+#include "pw/evo/evaluator.h"
+#include "worldmodel.h"
 
 using namespace pw;
 namespace pc = pw::craft;
@@ -241,8 +243,8 @@ void AppController::reloadSim() {
     fresh->equationCapture = &m_capture;
     if (m_sim) m_sim->aeroBackend = nullptr;
     m_sim = std::move(fresh);
-    m_sim->reset(m_sim->restingSpawn(0));
-    m_env.time = 0;
+    syncWorld();
+    respawn();
     // keep slider values across edits in FLY; zero in BUILD
     m_values.assign(m_sim->outputs().size(), 0.0);
     applyAeroToSim();
@@ -817,8 +819,7 @@ void AppController::cycleCamera() {
 
 void AppController::resetFlight() {
     if (!m_sim) return;
-    m_sim->reset(m_sim->restingSpawn(0));
-    m_env.time = 0;
+    respawn();
     std::fill(m_values.begin(), m_values.end(), 0.0);
     for (int i = 0; i < int(m_values.size()); ++i) m_sim->setOutput(i, 0.0);
     if (m_backend && m_sim->isRunningFull()) m_backend->reset();
@@ -827,11 +828,145 @@ void AppController::resetFlight() {
     updateTelemetry();
 }
 
+// ---------------------------------------------------------------- FLY world
+
+void AppController::syncWorld() {
+    if (m_mode != "fly" && !m_worldConnected) {   // don't create the world model before anything needs it
+        m_env.terrain = m_ground.get(); m_env.water = nullptr; m_env.wind = {};
+        return;
+    }
+    auto* wm = WorldModel::instance();
+    if (!m_worldConnected) {
+        m_worldConnected = true;
+        // A new or edited world reaches FLY immediately: terrain / water / wind / obstacles are re-pointed; a new
+        // scene (generate, open, new world) also puts the craft back on the (new) spawn.
+        auto resync = [this](bool place) {
+            if (m_mode != "fly" || !m_sim) { emit worldChanged(); return; }
+            syncWorld();
+            if (place && m_flyInWorld) resetFlight();
+        };
+        connect(wm, &WorldModel::sceneChanged, this, [this, resync] { m_hasFlyFrom = false; resync(true); });
+        connect(wm, &WorldModel::objectsChanged, this, [resync] { resync(false); });
+        connect(wm, &WorldModel::vegChanged, this, [resync] { resync(false); });
+        connect(wm, &WorldModel::skyChanged, this, [resync] { resync(false); });
+        connect(wm, &WorldModel::waterChanged, this, [resync] { resync(false); });
+        connect(wm, &WorldModel::docChanged, this, [this] { emit worldChanged(); });
+    }
+    m_worldScene = wm->scene();
+    m_obstacles.reset();
+    if (m_flyInWorld && m_worldScene && m_mode == "fly") {
+        m_env.terrain = &m_worldScene->terrain;
+        m_env.water = nullptr;   // like EVOLVE: buoyancy is not ported yet, water is visual only
+        const auto& e = wm->document().environment;
+        const double dir = e.windDirectionDeg * kDeg;
+        m_env.wind = Vec3d{std::sin(dir), 0, std::cos(dir)} * e.windSpeed;   // same convention as EVOLVE episodes
+        auto o = std::make_shared<evo::HeadlessObstacles>();
+        o->addObjects(wm->document().objects);
+        if (m_worldScene->veg.enabled) {
+            std::vector<evo::HeadlessObstacles::TreeProxy> trees;
+            for (const auto& p : m_worldScene->veg.collisionProxies())
+                if (p.shape.kind == collision::CollisionShape::Kind::Capsule) trees.push_back({p.id, p.transform, p.shape.radius, p.shape.halfHeight});
+            o->addTrees(trees);
+        }
+        if (!o->empty()) {
+            m_obstacles = o;
+            m_cornersPrev.assign(512, Vec3d{}); m_cornersCur.assign(512, Vec3d{});
+            if (m_sim) { m_sim->writeWorldCorners(m_cornersPrev.data(), int(m_cornersPrev.size())); m_prevPos = m_sim->position(); }
+        }
+    } else {
+        m_env.terrain = m_ground.get();
+        m_env.water = nullptr;
+        m_env.wind = {};
+    }
+    emit worldChanged();
+}
+
+void AppController::respawn() {
+    if (!m_sim) return;
+    Vec3d pos = m_sim->restingSpawn(0);
+    Quatd rot = Quatd::identity();
+    if (m_flyInWorld && m_worldScene && m_mode == "fly") {
+        auto* wm = WorldModel::instance();
+        const auto& sp = wm->document().spawn;
+        double x = sp.position.x, z = sp.position.z;
+        rot = sp.rotation;
+        if (m_hasFlyFrom) { x = m_flyFromX; z = m_flyFromZ; rot = Quatd::angleAxis(-m_flyFromHeading * kDeg, {0, 1, 0}); }
+        // The spawn sits under the sea or a lake (e.g. a freshly generated world): move to the nearest dry ground.
+        auto wet = [&](double px, double pz) {
+            const double h = m_worldScene->terrain.height(px, pz);
+            if (wm->oceanEnabled() && h < wm->seaLevel() + 0.5) return true;
+            const auto s = m_worldScene->water.sample(px, pz, 0);
+            return s.surfaceHeight > h + 0.05;
+        };
+        if (wet(x, z)) {
+            bool found = false;
+            for (double r = 40; r <= 8000 && !found; r *= 1.25)
+                for (int k = 0; k < 24 && !found; ++k) {
+                    const double a = k * 2 * kPi / 24, px = x + r * std::cos(a), pz = z + r * std::sin(a);
+                    if (!wet(px, pz)) { x = px; z = pz; found = true; }
+                }
+        }
+        const double g = m_worldScene->terrain.height(x, z);
+        pos = m_sim->restingSpawn(g) + Vec3d{x, 0, z};
+    }
+    m_sim->reset(pos, rot);
+    m_env.time = 0;
+    m_prevPos = m_sim->position();
+    if (m_obstacles) m_sim->writeWorldCorners(m_cornersPrev.data(), int(m_cornersPrev.size()));
+}
+
+void AppController::setFlyInWorld(bool on) {
+    if (on == m_flyInWorld) return;
+    m_flyInWorld = on;
+    syncWorld();
+    if (m_mode == "fly") resetFlight();
+}
+
+QString AppController::worldName() const {
+    auto* wm = WorldModel::instance();
+    return wm->name().isEmpty() ? QStringLiteral("Untitled world") : wm->name();
+}
+
+QString AppController::worldSummary() const {
+    if (!m_flyInWorld) return QStringLiteral("Flat ground, no wind");
+    auto* wm = WorldModel::instance();
+    QStringList bits;
+    const QString kind = wm->terrainKind();
+    bits << (kind == "flat" ? QStringLiteral("flat terrain") : kind == "procedural" ? QStringLiteral("generated terrain") : kind + QStringLiteral(" terrain"));
+    if (wm->oceanEnabled() || wm->lakeCount() > 0) bits << QStringLiteral("water");
+    if (wm->vegEnabled() && wm->treeCount() > 0) bits << QStringLiteral("%1 trees").arg(wm->treeCount());
+    const int props = int(wm->document().objects.size());
+    if (props > 0) bits << QStringLiteral("%1 prop%2").arg(props).arg(props > 1 ? "s" : "");
+    bits << QStringLiteral("wind %1 m/s").arg(wm->windSpeed(), 0, 'f', 0);
+    if (m_hasFlyFrom) bits << QStringLiteral("custom start");
+    return bits.join(QStringLiteral(" · "));
+}
+
+void AppController::flyFrom(double x, double z, double headingDeg) {
+    m_hasFlyFrom = true; m_flyFromX = x; m_flyFromZ = z; m_flyFromHeading = headingDeg;
+    m_flyInWorld = true;
+    if (m_mode == "fly") { syncWorld(); resetFlight(); } else emit worldChanged();
+}
+
+void AppController::clearFlyFrom() {
+    if (!m_hasFlyFrom) return;
+    m_hasFlyFrom = false;
+    if (m_mode == "fly") resetFlight();
+    emit worldChanged();
+}
+
+double AppController::groundHeight(double x, double z) const {
+    return m_env.terrain ? m_env.terrain->height(x, z) : 0.0;
+}
+
 void AppController::airStart(double altitude, double speed) {
     if (!m_sim) return;
     resetFlight();
-    m_sim->reset(m_sim->restingSpawn(0) + Vec3d{0, altitude, 0});
-    m_sim->setVelocity({speed, 0, 0}, {});   // craft forward is +X
+    const Quatd q = m_sim->orientation();
+    m_sim->reset(m_sim->originPosition() + Vec3d{0, altitude, 0}, q);
+    m_sim->setVelocity(q.act(Vec3d{speed, 0, 0}), {});   // craft forward is +X
+    m_prevPos = m_sim->position();
+    if (m_obstacles) m_sim->writeWorldCorners(m_cornersPrev.data(), int(m_cornersPrev.size()));
     if (m_backend && m_sim->isRunningFull()) m_backend->reset();
     updateTelemetry();
 }
@@ -913,6 +1048,14 @@ void AppController::stepFly(double dt) {
     QElapsedTimer t; t.start();
     m_sim->step(dt, m_env);
     m_env.time += dt;
+    if (m_obstacles) {   // world props and tree trunks (same swept-corner test as EVOLVE's headless runs)
+        const int n = m_sim->writeWorldCorners(m_cornersCur.data(), int(m_cornersCur.size()));
+        const double travel = length(m_sim->position() - m_prevPos);
+        if (!m_sim->crashed() && m_obstacles->hit(m_sim->position(), m_sim->collisionRadius(), m_cornersPrev.data(), m_cornersCur.data(), n, travel))
+            m_sim->markObstacleHit(length(m_sim->velocity()));
+        std::swap(m_cornersPrev, m_cornersCur);
+    }
+    m_prevPos = m_sim->position();
     m_simMsAccum += t.nsecsElapsed() / 1e6;
     m_simTimeAccum += dt;
     ++m_simFrames;
@@ -928,7 +1071,7 @@ void AppController::updateTelemetry() {
     const double rho = Atmosphere::isa(alt).density;
     QVariantMap m;
     m["ias"] = t.airspeed * std::sqrt(rho / 1.225); m["tas"] = t.airspeed; m["gs"] = t.groundSpeed; m["mach"] = t.mach;
-    m["alt"] = alt; m["agl"] = t.altitude; m["vs"] = t.verticalSpeed;
+    m["alt"] = alt; m["agl"] = m_env.terrain && m_env.terrain != m_ground.get() ? alt - groundHeight(m_sim->position().x, m_sim->position().z) : t.altitude; m["vs"] = t.verticalSpeed;   // agl over WORLD terrain: height above the ground below
     m["aoa"] = t.angleOfAttackDeg; m["beta"] = t.sideslipDeg; m["g"] = t.gLoad;
     m["pitch"] = m_sim->pitchDeg();
     m["roll"] = std::atan2(-right.y, up.y) * 180 / kPi;

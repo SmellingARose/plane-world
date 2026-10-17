@@ -31,7 +31,7 @@ inspector panel. Controls come from the native Qt Quick Controls style (macOS / 
 `PwPropertyRow`, `PwSlider`, `PwSegmented`, ...). `AeroModelPicker.qml` is the aero model list shared by FLY and EVOLVE.
 Every action is in the command palette (Ctrl/⌘+K, `AppCommands.qml`) with its shortcut.
 
-`pwapp` flags: `--tab build|fly|world|evolve`, `--color-scheme dark|light`, `--size WxH`, `--command "<palette entry>"`
+`pwapp` flags: `--tab build|fly|world|evolve`, `--color-scheme dark|light`, `--size WxH`, `--command "<palette entry>"` or `"wait <s>"`
 (repeatable, runs 1 s after launch), `--screenshot file.png --quit-after <s>`.
 
 ## Threading

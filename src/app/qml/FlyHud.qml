@@ -151,4 +151,23 @@ Item {
             }
         }
     }
+
+    // ---- top right, under the craft / clock pill: which world you are flying in (click to edit it)
+    Rectangle {
+        id: worldChip
+        anchors { right: parent.right; top: parent.top; rightMargin: Theme.s3; topMargin: Theme.s3 + 44 }
+        radius: Theme.radius
+        color: chipMa.containsMouse ? Theme.hudStrong : Theme.hud
+        width: chipRow.implicitWidth + Theme.s3 * 2; height: chipRow.implicitHeight + Theme.s2 * 2
+        Row {
+            id: chipRow
+            anchors.centerIn: parent
+            spacing: Theme.s2
+            Rectangle { width: 8; height: 8; radius: 2; anchors.verticalCenter: parent.verticalCenter; color: App.flyInWorld ? Theme.tabTint["WORLD"] : Theme.hudFaint }
+            Text { color: Theme.hudText; font.pixelSize: Theme.caption; font.weight: Font.DemiBold
+                text: App.flyInWorld ? App.worldName : qsTr("Flat ground") }
+            Text { color: Theme.hudFaint; font.pixelSize: Theme.caption; text: qsTr("Edit ›") }
+        }
+        MouseArea { id: chipMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: App.requestTab("WORLD") }
+    }
 }

@@ -79,6 +79,8 @@ protected:
     void keyPressEvent(QKeyEvent* e) override;
     void keyReleaseEvent(QKeyEvent* e) override;
     void releaseResources() override;
+    // the node is dropped while hidden (tab switch); ask for a frame again when shown
+    void itemChange(ItemChange c, const ItemChangeData& d) override { QQuickItem::itemChange(c, d); if (c == ItemVisibleHasChanged && d.boolValue) update(); }
 private:
     Q_INVOKABLE void setInfo(const QString& backend, const QString& adapter, const QString& error, const QString& craft);
     Q_INVOKABLE void setStats(double fps, double gpuMs, const QString& passes, bool async);

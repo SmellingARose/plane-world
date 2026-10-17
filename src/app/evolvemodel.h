@@ -68,7 +68,7 @@ class EvolveModel : public QObject, public ReplayProvider {
     Q_PROPERTY(bool replayPlaying READ replayPlaying WRITE setReplayPlaying NOTIFY replayChanged)
     Q_PROPERTY(QVariantList replayOutputs READ replayOutputs NOTIFY replayTimeChanged)
 public:
-    explicit EvolveModel(QObject* parent = nullptr);
+    explicit EvolveModel(QObject* parent);   // no default: QML must use create() (one shared instance)
     ~EvolveModel() override;
     static EvolveModel* instance();
     static EvolveModel* create(QQmlEngine*, QJSEngine*);
@@ -118,6 +118,9 @@ public:
     Q_INVOKABLE void set(const QString& path, const QVariant& value);
     Q_INVOKABLE QVariant get(const QString& path) const;
     Q_INVOKABLE void newFromPreset(const QString& preset);
+    /// Out-of-the-box experiment that visibly learns in ~10 s: the Trainer's network learns to hold 150 m and
+    /// stay level from an air start over flat ground (population 32, 40 generations, 20 s episodes).
+    Q_INVOKABLE void quickStart();
     Q_INVOKABLE bool open(const QString& pathOrUrl);
     Q_INVOKABLE bool save();
     Q_INVOKABLE bool saveAs(const QString& pathOrUrl);

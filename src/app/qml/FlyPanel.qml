@@ -23,6 +23,43 @@ ColumnLayout {
     }
     Label { text: "C cycles the camera"; color: Theme.textFaint; font.pixelSize: Theme.caption; Layout.topMargin: -Theme.s2 }
 
+    // Where you fly: the WORLD tab's world (terrain, water, trees, props, wind all count) or neutral flat ground.
+    PwSection {
+        title: "World"
+        hint: "FLY uses the world open in the WORLD tab. Edits there show up here immediately."
+        PwCard {
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.s2
+                Rectangle { width: 4; Layout.fillHeight: true; radius: 2; color: App.flyInWorld ? Theme.tabTint["WORLD"] : Theme.separator }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Label { Layout.fillWidth: true; elide: Text.ElideRight; font.weight: Font.DemiBold
+                        text: App.flyInWorld ? App.worldName + (WorldModel.dirty ? "  •" : "") : "Flat test ground" }
+                    Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: Theme.textMuted; font.pixelSize: Theme.caption; text: App.worldSummary }
+                }
+            }
+            PwSegmented {
+                model: [{ text: "Fly in world", tip: "Terrain, water, trees, props and wind from the WORLD tab" },
+                        { text: "Flat ground", tip: "Endless flat ground, no wind — for testing a design" }]
+                currentIndex: App.flyInWorld ? 0 : 1
+                onActivated: (i) => App.flyInWorld = (i === 0)
+                ToolTip.visible: false
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.s1
+                Button { Layout.fillWidth: true; Layout.preferredWidth: 1; text: "Edit world"; onClicked: App.requestTab("WORLD")
+                    ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.tip("Sculpt terrain, add water, trees and props, move the spawn", "Ctrl+3") }
+                Button { Layout.fillWidth: true; Layout.preferredWidth: 1; text: "Air start"; onClicked: App.airStart(150, 35)
+                    ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: "Restart 150 m above the start point at 35 m/s" }
+            }
+            Label { visible: App.worldSummary.indexOf("custom start") >= 0; Layout.fillWidth: true; font.pixelSize: Theme.caption; color: Theme.accent
+                text: "<a href='#'>Use the world's spawn point again</a>"; onLinkActivated: App.clearFlyFrom() }
+        }
+    }
+
     PwSection {
         title: "Controls (" + App.outputs.length + ")"
         hint: "Drag a slider or use its keys; held keys light up. Bind keys in BUILD › Outputs."

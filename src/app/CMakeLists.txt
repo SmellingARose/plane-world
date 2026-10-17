@@ -3,7 +3,7 @@ qt_standard_project_setup(REQUIRES 6.8)
 
 # Sources and QML are globbed so the BUILD / FLY (P5a) and WORLD / EVOLVE (P5b) work can add files independently.
 file(GLOB PW_APP_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
-file(GLOB PW_APP_QML RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/*.qml)
+file(GLOB PW_APP_QML RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/*.qml ${CMAKE_CURRENT_SOURCE_DIR}/qml/*.js)
 qt_add_executable(pwapp MACOSX_BUNDLE WIN32 ${PW_APP_SOURCES})
 if(APPLE)
   target_sources(pwapp PRIVATE gpuviewport_metal.mm)

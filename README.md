@@ -22,6 +22,23 @@ C++20 core, Qt 6 Quick UI, Metal and Direct3D 12 renderers with shaders written 
 - **EVOLVE:** GA, CMA-ES, sep-CMA-ES, OpenAI-ES, NEAT, MAP-Elites, novelty search or your own algorithm in JavaScript;
   neural controllers, craft designs or both; headless parallel training, charts, replays in the viewport.
 
+## Using the app
+
+The four tabs form one loop: **BUILD** a craft → shape the **WORLD** it flies in → **FLY** it there → **EVOLVE** a
+controller or design, then fly the result.
+
+- FLY always flies the craft open in BUILD, in the world open in WORLD: terrain, trees and props collide, and the
+  world's wind blows. The chip at the top right of FLY names the world (click it to edit); the inspector's *World*
+  card switches to flat ground for testing a design.
+- WORLD edits are live, no export step. *Fly here* (`Ctrl+Shift+2`) starts a flight at the centre of the view,
+  facing the way the camera looks; *Fly from spawn* uses the spawn point (spawn tool, key `O`). Save keeps a world for
+  later sessions.
+- EVOLVE is laid out as steps: **Set up** (① craft & world, ② what evolves, ③ goal picked in plain words —
+  hold altitude, hover, fly to a target, max distance, drive to a point — or your own script, ④ algorithm) and
+  **Train** (⑤ Start training with live generation / best score / time left, ⑥ fly the best with its evolved
+  autopilot, replay it or save it as a craft). The default *Quick start* learns to hold altitude in about ten seconds.
+- `Ctrl+1`…`4` switch tabs, `Ctrl+K` searches every action, and the welcome tour is in Settings (`Ctrl+,`).
+
 ## Platforms
 
 | OS | GPU API | Tested on |
@@ -77,7 +94,7 @@ pwcli --info                                               # CPU features, GPU b
 ```
 
 `--train` also takes `--workers`, `--population`, `--seed`, `--aero fast|full`, `--cfd-preset`, `--script-engine`.
-The app takes `--tab`, `--color-scheme`, `--size WxH`, `--command "<palette entry>"` and
+The app takes `--tab`, `--color-scheme`, `--size WxH`, `--command "<palette entry>"` (or `"wait <s>"`, run in order) and
 `--screenshot out.png --quit-after <s>` (how the screenshots above were made).
 
 ## Docs

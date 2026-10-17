@@ -9,6 +9,7 @@ SplitView {
     id: page
     property bool inspectorVisible: true
     property alias viewport: vp
+    function flyHere() { panel.flyHere() }
     orientation: Qt.Horizontal
     readonly property var wm: WorldModel
 
@@ -18,6 +19,7 @@ SplitView {
     Shortcut { sequences: [StandardKey.Save]; enabled: page.visible; onActivated: wm.save() }
     Shortcut { sequence: "Ctrl+Shift+S"; enabled: page.visible; onActivated: panel.saveFileAs() }
     Shortcut { sequences: [StandardKey.Open]; enabled: page.visible; onActivated: panel.openFile() }
+    Shortcut { sequence: "Ctrl+Shift+2"; enabled: page.visible && !wm.busy; onActivated: panel.flyHere() }
     Shortcut { sequence: "Ctrl+G"; enabled: page.visible && !wm.busy; onActivated: wm.generate() }
 
     Item {

@@ -16,6 +16,11 @@ Rectangle {
     readonly property bool natureTool: ["trees", "erase", "grass"].indexOf(WorldModel.tool) >= 0
 
     function openFile() { openDlg.open() }
+    function flyHere() {
+        const t = viewport ? viewport.viewTarget() : [0, 0, 0]
+        App.flyFrom(t[0], t[1], t[2])
+        App.requestTab("FLY")
+    }
     function saveFileAs() { saveDlg.open() }
     FileDialog {
         id: openDlg
@@ -102,6 +107,39 @@ Rectangle {
                     Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0; text: "Save As"; onClicked: saveDlg.open(); enabled: !WorldModel.busy }
                 }
                 Label { Layout.fillWidth: true; text: WorldModel.terrainInfo; color: Theme.textFaint; font.pixelSize: Theme.caption; wrapMode: Text.WordWrap }
+
+                // How this world is used: FLY and EVOLVE ("Open world") read it live, saved or not.
+                PwCard {
+                    Layout.topMargin: Theme.s1
+                    color: Theme.accentSoft
+                    border.color: "transparent"
+                    Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.small
+                        text: "FLY and EVOLVE use this world. Edits apply right away — terrain, water, trees, props and wind all affect the flight." }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.s1
+                        Button {
+                            Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0
+                            highlighted: true
+                            text: "✈\uFE0E Fly here"
+                            enabled: !WorldModel.busy
+                            onClicked: root.flyHere()
+                            ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay
+                            ToolTip.text: Theme.tip("Start a flight at the centre of this view, facing the way the camera looks", "Ctrl+Shift+2")
+                        }
+                        Button {
+                            Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0
+                            text: "Fly from spawn"
+                            enabled: !WorldModel.busy
+                            onClicked: { App.clearFlyFrom(); App.flyInWorld = true; App.requestTab("FLY") }
+                            ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay
+                            ToolTip.text: "Start at the world's spawn point (move it with the spawn tool, key O)"
+                        }
+                    }
+                    Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.textMuted
+                        text: WorldModel.dirty ? "Unsaved changes — Save keeps this world in your library for later sessions."
+                                               : (WorldModel.filePath !== "" ? "Saved." : "Save it to reuse it in later sessions.") }
+                }
             }
 
             // ---- brush (context of the active tool)

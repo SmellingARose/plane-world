@@ -4,7 +4,7 @@ import QtQuick.Layouts
 
 // EVOLVE tab: the world viewport (replays fly in it) with a replay transport + live output bars, and the EVOLVE
 // inspector. Keys while shown: Ctrl+Return train / pause, Space play / pause replay, ←/→ scrub (with the replay
-// focused), Esc closes the replay, Ctrl+1..3 inside the panel pages via Alt+1..3, Ctrl+Shift+E large editor.
+// focused), Esc closes the replay, panel pages Set up / Train / Script via Alt+1..3, Ctrl+Shift+E large editor.
 SplitView {
     id: page
     property bool inspectorVisible: true
@@ -15,7 +15,8 @@ SplitView {
 
     Connections { target: EvolveModel; function onFlyRequested(p) { page.flyRequested(p) } }
 
-    Shortcut { sequence: "Ctrl+Return"; enabled: page.visible; onActivated: ev.running ? ev.pause() : (ev.hasRun && ev.runState === "idle" ? ev.resume() : ev.start()) }
+    function train() { panel.train() }
+    Shortcut { sequence: "Ctrl+Return"; enabled: page.visible; onActivated: panel.train() }
     Shortcut { sequences: [StandardKey.Save]; enabled: page.visible; onActivated: ev.save() }
     Shortcut { sequence: "Ctrl+Shift+S"; enabled: page.visible; onActivated: panel.saveFileAs() }
     Shortcut { sequences: [StandardKey.Open]; enabled: page.visible; onActivated: panel.openFile() }
@@ -56,7 +57,7 @@ SplitView {
                     text: ev.replayBusy ? qsTr("Re-simulating…") : ev.preparing ? qsTr("Preparing run…") : ev.running ? qsTr("Training") : qsTr("Evolve a flyer") }
                 Text { anchors.horizontalCenter: parent.horizontalCenter; color: Theme.hudMuted; font.pixelSize: Theme.caption; horizontalAlignment: Text.AlignHCenter
                     text: ev.generations.length > 0 ? qsTr("Click a generation in the chart or table to replay it here")
-                                                   : qsTr("Set up the experiment on the right, then press %1").arg(Theme.shortcutText("Ctrl+Return")) }
+                                                   : qsTr("Follow steps 1–4 on the right (or keep the quick start), then Start training  %1").arg(Theme.shortcutText("Ctrl+Return")) }
             }
         }
 
