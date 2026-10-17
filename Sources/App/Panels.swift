@@ -11,8 +11,9 @@ import PWPhysics
 struct SidePanel: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 switch model.tab {
                 case .build: BuildPanel()
                 case .fly: FlyPanel()
@@ -21,11 +22,16 @@ struct SidePanel: View {
                 }
                 if !model.status.isEmpty {
                     Divider()
-                    Text(model.status).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    Label(model.status, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 }
             }
-            .padding(14)
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .controlSize(.regular)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onChange(of: model.equationsScrollRequest) { _ in
+            withAnimation { proxy.scrollTo("equations", anchor: .top) }
+        }
         }
         .background(.regularMaterial)
     }
@@ -33,7 +39,7 @@ struct SidePanel: View {
 
 struct SectionHeader: View {
     let title: String
-    var body: some View { Text(title.uppercased()).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).tracking(0.8).padding(.top, 6) }
+    var body: some View { Text(title.uppercased()).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary).tracking(0.9).padding(.top, 8).padding(.bottom, -2) }
 }
 
 // MARK: - BUILD
@@ -41,93 +47,101 @@ struct SectionHeader: View {
 struct BuildPanel: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
-        SectionHeader(title: "Library")
-        Menu("Load craft: \(model.craft.name)") {
-            ForEach(model.library, id: \.name) { c in Button(c.name) { model.loadCraft(c) } }
+        SectionHeader(title: "Craft")
+        Card {
+            TextField("Craft name", text: Binding(get: { model.craft.name }, set: { model.craft.name = $0 })).textFieldStyle(.roundedBorder)
+            Menu("Load: \(model.craft.name)") {
+                ForEach(model.library, id: \.name) { c in Button(c.name) { model.loadCraft(c) } }
+            }.help("Bundled and saved crafts")
+            HStack {
+                Button("New") { model.newCraft() }.help("Start from a single fuselage box")
+                Button("Save to library") { model.saveCraftToLibrary() }
+                Spacer()
+                Button { FileDialogs.openCraftJSON(model) } label: { Image(systemName: "square.and.arrow.down") }.help("Import craft JSON… (⌘O)")
+                Button { FileDialogs.saveCraftJSON(model) } label: { Image(systemName: "square.and.arrow.up") }.help("Export craft JSON… (⌘S)")
+            }.controlSize(.small)
+            let mp = model.massProperties
+            StatRow(label: "Mass · CoM", value: String(format: "%.1f kg · (%.2f, %.2f, %.2f) m", mp.mass, mp.com.x, mp.com.y, mp.com.z))
         }
-        HStack {
-            Button("New") { model.newCraft() }
-            Button("Save to library") { model.saveCraftToLibrary() }
-        }
-        HStack {
-            Button("Import JSON…") { FileDialogs.openCraftJSON(model) }
-            Button("Export JSON…") { FileDialogs.saveCraftJSON(model) }
-        }
-        TextField("Craft name", text: Binding(get: { model.craft.name }, set: { model.craft.name = $0 }))
 
         SectionHeader(title: "Add part")
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
             ForEach(PartType.allCases.filter { $0 != .cad }, id: \.self) { t in
-                Button(t.rawValue) { model.addPart(t) }.controlSize(.small)
+                Button(t.rawValue) { model.addPart(t) }.controlSize(.small).frame(maxWidth: .infinity).help("Add a \(t.rawValue) above the selected part")
             }
         }
 
-        SectionHeader(title: "CAD import")
-        HStack {
-            Toggle("Z-up", isOn: $model.importUpZ)
-            Toggle("Auto-rig", isOn: $model.autoRigOnImport)
-        }
-        HStack {
-            Text("Scale"); TextField("", value: $model.importScale, format: .number).frame(width: 60)
-            Text("Yaw°"); TextField("", value: $model.importYaw, format: .number).frame(width: 50)
-        }
-        HStack {
-            Button("Import as craft…") { FileDialogs.importCAD(model, into: false) }
-            Button("Add to craft…") { FileDialogs.importCAD(model, into: true) }
-        }
-        Text("STL · OBJ · glTF/GLB · USD/USDZ").font(.caption2).foregroundStyle(.secondary)
-        Button("Auto-rig current craft") { model.autoRig() }
-        if !model.rigReport.isEmpty {
-            VStack(alignment: .leading, spacing: 1) {
-                ForEach(Array(model.rigReport.prefix(30).enumerated()), id: \.offset) { _, l in Text(l).font(.caption2.monospaced()) }
-            }
-        }
-
-        let mp = model.massProperties
-        SectionHeader(title: "Mass")
-        Text(String(format: "%.1f kg  ·  CoM (%.2f, %.2f, %.2f) m", mp.mass, mp.com.x, mp.com.y, mp.com.z)).font(.caption.monospaced())
+        DisclosureGroup("CAD import (STL · OBJ · glTF · USDZ)") {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Toggle("Z-up", isOn: $model.importUpZ).help("Source file uses Z as up")
+                    Toggle("Auto-rig", isOn: $model.autoRigOnImport).help("Detect wings, control surfaces and props after import")
+                }.toggleStyle(.checkbox)
+                HStack {
+                    Text("Scale"); TextField("", value: $model.importScale, format: .number).frame(width: 60)
+                    Text("Yaw°"); TextField("", value: $model.importYaw, format: .number).frame(width: 50)
+                }
+                HStack {
+                    Button("Import as craft…") { FileDialogs.importCAD(model, into: false) }.help("⌘I")
+                    Button("Add to craft…") { FileDialogs.importCAD(model, into: true) }
+                }
+                Button("Auto-rig current craft") { model.autoRig() }
+                if !model.rigReport.isEmpty {
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(Array(model.rigReport.prefix(30).enumerated()), id: \.offset) { _, l in Text(l).font(.caption2.monospaced()) }
+                    }
+                }
+            }.padding(.top, 4).controlSize(.small)
+        }.font(.callout)
 
         SectionHeader(title: "Parts (\(model.craft.parts.count))")
-        VStack(spacing: 0) {
-            ForEach(model.craft.parts) { p in
-                HStack {
-                    Circle().fill(Color(nsColor: NSColor(hex: p.color))).frame(width: 8, height: 8)
-                    Text(p.name).lineLimit(1)
-                    Spacer()
-                    if p.servo != nil { Image(systemName: "link").font(.caption2).foregroundStyle(.purple) }
-                    if p.motor != nil { Image(systemName: "bolt").font(.caption2).foregroundStyle(.orange) }
-                    Text(p.type).foregroundStyle(.secondary).font(.caption)
+        Card {
+            VStack(spacing: 0) {
+                ForEach(model.craft.parts) { p in
+                    HStack {
+                        Circle().fill(Color(nsColor: NSColor(hex: p.color))).frame(width: 8, height: 8)
+                        Text(p.name).lineLimit(1)
+                        Spacer()
+                        if p.servo != nil { Image(systemName: "link").font(.caption2).foregroundStyle(.purple).help("Driven by a servo") }
+                        if p.motor != nil { Image(systemName: "bolt").font(.caption2).foregroundStyle(.orange).help("Driven by a motor") }
+                        Text(p.type).foregroundStyle(.secondary).font(.caption)
+                    }
+                    .font(.callout)
+                    .padding(.vertical, 3).padding(.horizontal, 6)
+                    .background(model.selectedPartID == p.id ? Color.accentColor.opacity(0.25) : .clear, in: RoundedRectangle(cornerRadius: 4))
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.selectedPartID = p.id }
                 }
-                .padding(.vertical, 2).padding(.horizontal, 6)
-                .background(model.selectedPartID == p.id ? Color.accentColor.opacity(0.25) : .clear, in: RoundedRectangle(cornerRadius: 4))
-                .contentShape(Rectangle())
-                .onTapGesture { model.selectedPartID = p.id }
             }
         }
         if model.selectedPart != nil { PartInspector() }
 
         SectionHeader(title: "Outputs (auto)")
-        ForEach(model.outputs) { o in
-            VStack(alignment: .leading, spacing: 1) {
-                TextField("name", text: Binding(get: { model.outputRenames[o.id] ?? o.name }, set: { model.outputRenames[o.id] = $0 }))
-                    .onSubmit { if let n = model.outputRenames[o.id] { model.renameOutput(o.id, n); model.outputRenames[o.id] = nil } }
-                    .font(.body.bold())
-                Text("\(o.kind.rawValue) · \(o.info)").font(.caption2).foregroundStyle(.secondary)
+        Card {
+            if model.outputs.isEmpty { Text("No controllable parts yet.").font(.caption).foregroundStyle(.secondary) }
+            ForEach(model.outputs) { o in
+                VStack(alignment: .leading, spacing: 1) {
+                    TextField("name", text: Binding(get: { model.outputRenames[o.id] ?? o.name }, set: { model.outputRenames[o.id] = $0 }))
+                        .onSubmit { if let n = model.outputRenames[o.id] { model.renameOutput(o.id, n); model.outputRenames[o.id] = nil } }
+                        .font(.callout.bold()).help("Rename; press Return to apply")
+                    Text("\(o.kind.rawValue) · \(o.info)").font(.caption2).foregroundStyle(.secondary)
+                }
             }
         }
-        SectionHeader(title: "Inputs (auto, from sensors)")
-        let ins = CraftInputs.list(model.craft)
-        if ins.isEmpty { Text("No sensors. Add a 'sensor' part; each sensor adds named inputs that controllers read.").font(.caption2).foregroundStyle(.secondary) }
-        ForEach(ins) { i in
-            HStack {
-                Text(i.name).font(.caption.bold()).lineLimit(1)
-                Spacer()
-                Text("\(i.kind) · \(i.unit)").font(.caption2).foregroundStyle(.secondary)
+        SectionHeader(title: "Inputs (from sensors)")
+        Card {
+            let ins = CraftInputs.list(model.craft)
+            if ins.isEmpty { Text("No sensors. Add a 'sensor' part; each adds named inputs that controllers read.").font(.caption2).foregroundStyle(.secondary) }
+            ForEach(ins) { i in
+                HStack {
+                    Text(i.name).font(.caption.bold()).lineLimit(1)
+                    Spacer()
+                    Text("\(i.kind) · \(i.unit)").font(.caption2).foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { model.selectedPartID = i.partID }
             }
-            .contentShape(Rectangle())
-            .onTapGesture { model.selectedPartID = i.partID }
         }
-        Text("Viewport: click = select part · ⇧-drag = move · ⌘-drag = rotate · right-drag = orbit").font(.caption2).foregroundStyle(.tertiary)
     }
 }
 
@@ -233,28 +247,40 @@ struct VecRow: View {
 struct FlyPanel: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
+        HStack {
+            Text(model.craft.name).font(.title3.weight(.semibold)).lineLimit(1)
+            Spacer()
+            Button { model.paused.toggle() } label: { Image(systemName: model.paused ? "play.fill" : "pause.fill") }
+                .help(model.paused ? "Resume (P)" : "Pause (P)")
+            Button { model.resetFlight() } label: { Image(systemName: "arrow.counterclockwise") }.help("Reset flight (R)")
+        }.buttonStyle(.borderless)
+        Picker("Camera", selection: $model.cameraMode) { ForEach(CameraMode.allCases) { Text($0.rawValue).tag($0) } }
+            .pickerStyle(.segmented).labelsHidden().help("Camera mode (C cycles)")
+        AeroSection()
         EvolvedAutopilotToggle()
-        SectionHeader(title: "Outputs — \(model.craft.name)")
-        if model.outputs.isEmpty { Text("This craft has no outputs.").foregroundStyle(.secondary) }
-        ForEach(model.outputs) { o in
-            VStack(alignment: .leading, spacing: 2) {
-                HStack { Text(o.name).bold(); Spacer(); Text(String(format: "%+.2f", o.value)).monospacedDigit().foregroundStyle(Color.accentColor) }
-                Slider(value: Binding(get: { o.value }, set: { model.setOutput(o.id, $0) }), in: o.range)
-                Text(o.info).font(.caption2).foregroundStyle(.secondary)
+        SectionHeader(title: "Controls")
+        Card {
+            if model.outputs.isEmpty { Text("This craft has no outputs.").foregroundStyle(.secondary) }
+            ForEach(model.outputs) { o in
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack { Text(o.name).font(.callout.weight(.medium)); Spacer(); Text(String(format: "%+.2f", o.value)).font(.callout).monospacedDigit().foregroundStyle(Color.accentColor) }
+                    Slider(value: Binding(get: { o.value }, set: { model.setOutput(o.id, $0) }), in: o.range).controlSize(.small)
+                }.help(o.info)
             }
         }
         if !model.inputs.isEmpty {
-            SectionHeader(title: "Inputs (sensors)")
-            ForEach(model.inputs) { i in
-                HStack { Text(i.name).font(.caption); Spacer(); Text(String(format: "%.2f %@", i.value, i.unit)).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+            SectionHeader(title: "Sensors")
+            Card {
+                ForEach(model.inputs) { i in StatRow(label: i.name, value: String(format: "%.2f %@", i.value, i.unit)) }
             }
         }
-        SectionHeader(title: "Camera")
-        Picker("", selection: $model.cameraMode) { ForEach(CameraMode.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented).labelsHidden()
+        EquationsPanel().id("equations")
         SectionHeader(title: "Simulation")
-        Text("R reset · P pause · C camera · drag to look").font(.caption).foregroundStyle(.secondary)
-        HStack { Text("Physics"); Spacer(); Text("\(Int(model.sim.substepHz)) Hz substeps").monospacedDigit() }
-        HStack { Text("Collision world"); Spacer(); Text("240 Hz").monospacedDigit() }
+        Card {
+            StatRow(label: "Physics", value: "\(Int(model.sim.substepHz)) Hz substeps")
+            StatRow(label: "Collision world", value: "240 Hz")
+            StatRow(label: "Real-time factor", value: String(format: "×%.2f", model.perf.realTimeFactor))
+        }
     }
 }
 
@@ -279,6 +305,13 @@ struct WorldPanel: View {
         }
 
         SectionHeader(title: "Terrain source")
+        Card { terrainSource }
+        SectionHeader(title: "Tools (click / drag in viewport)")
+        Card { tools }
+        waterSkyRender
+    }
+
+    @ViewBuilder private var terrainSource: some View {
         Picker("", selection: $model.terrainSource) { Text("Real").tag(0); Text("Procedural").tag(1); Text("Heightmap").tag(2); Text("Flat").tag(3) }.pickerStyle(.segmented).labelsHidden()
         switch model.terrainSource {
         case 0:
@@ -309,8 +342,9 @@ struct WorldPanel: View {
         default:
             Button("Flat ground") { model.setFlat() }
         }
+    }
 
-        SectionHeader(title: "Tools (click / drag in viewport)")
+    @ViewBuilder private var tools: some View {
         Picker("Tool", selection: $model.worldTool) { ForEach(WorldTool.allCases) { Text($0.rawValue).tag($0) } }
         LabeledSlider(label: "Radius", value: $model.brushRadius, range: 2...300, format: "%.0f m")
         LabeledSlider(label: "Strength", value: $model.brushStrength, range: 0.5...50, format: "%.1f")
@@ -336,9 +370,19 @@ struct WorldPanel: View {
         HStack {
             Button("Clear sculpt/paint") { model.terrain.clearEdits() }
             Button("Regrow vegetation") { model.regenerateVegetation() }
-        }
+        }.controlSize(.small)
+    }
 
+    @ViewBuilder private var waterSkyRender: some View {
         SectionHeader(title: "Water")
+        Card { water }
+        SectionHeader(title: "Sky, atmosphere & wind")
+        Card { sky }
+        SectionHeader(title: "Rendering")
+        Card { rendering }
+    }
+
+    @ViewBuilder private var water: some View {
         Toggle("Ocean (FFT)", isOn: $model.oceanEnabled).onChange(of: model.oceanEnabled) { model.applyWater() }
         LabeledSlider(label: "Sea level", value: $model.seaLevel, range: -200...400, format: "%.0f m", onCommit: { model.applyWater() })
         LabeledSlider(label: "Ocean wind", value: $model.oceanWind, range: 0...25, format: "%.1f m/s", onCommit: { model.applyWater() })
@@ -347,14 +391,17 @@ struct WorldPanel: View {
             if model.water.spawnLocalFluidZone(around: model.sim.bodyState.centerOfMass) == nil { model.status = "No water (or zone limit) at the craft" }
         }
 
-        SectionHeader(title: "Sky & atmosphere")
+    }
+
+    @ViewBuilder private var sky: some View {
         LabeledSlider(label: "Time of day", value: $model.environment.timeOfDayHours, range: 4...20, format: "%.1f h")
         LabeledSlider(label: "Sun azimuth", value: $model.environment.sunAzimuthDeg, range: 0...360, format: "%.0f°")
         LabeledSlider(label: "Aerial perspective", value: $model.environment.fogDensity, range: 0...8, format: "%.1fx")
-        SectionHeader(title: "Wind")
-        LabeledSlider(label: "Speed", value: $model.environment.windSpeed, range: 0...30, format: "%.1f m/s")
-        LabeledSlider(label: "Direction", value: $model.environment.windDirectionDeg, range: 0...360, format: "%.0f°")
-        SectionHeader(title: "Rendering")
+        LabeledSlider(label: "Wind speed", value: $model.environment.windSpeed, range: 0...30, format: "%.1f m/s")
+        LabeledSlider(label: "Wind direction", value: $model.environment.windDirectionDeg, range: 0...360, format: "%.0f°")
+    }
+
+    @ViewBuilder private var rendering: some View {
         Picker("Anti-aliasing", selection: $model.renderSettings.antiAliasing) {
             Text("TAA").tag(AntiAliasing.taa); Text("MSAA 4x").tag(AntiAliasing.msaa4)
         }
@@ -371,8 +418,8 @@ struct LabeledSlider: View {
     var onCommit: (() -> Void)? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack { Text(label); Spacer(); Text(String(format: format, value)).monospacedDigit().foregroundStyle(.secondary) }
-            Slider(value: $value, in: range, onEditingChanged: { editing in if !editing { onCommit?() } })
+            HStack { Text(label).font(.callout); Spacer(); Text(String(format: format, value)).font(.callout).monospacedDigit().foregroundStyle(.secondary) }
+            Slider(value: $value, in: range, onEditingChanged: { editing in if !editing { onCommit?() } }).controlSize(.small)
         }
     }
 }
@@ -383,7 +430,8 @@ struct HUDOverlay: View {
     @EnvironmentObject var model: AppModel
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
-            Text(model.stats)
+            // fps / GPU ms live in the status bar; the HUD keeps the scene counters.
+            Text(model.stats.components(separatedBy: " · ").dropFirst(2).joined(separator: " · "))
             if model.tab == .fly {
                 ForEach(model.hudExtra, id: \.self) { Text($0) }
                 ForEach(model.warnings, id: \.self) { Text($0).foregroundStyle(.red).bold() }

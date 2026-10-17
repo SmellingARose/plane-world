@@ -34,16 +34,21 @@ final class MainViewController: NSViewController, NSToolbarDelegate, MTKViewDele
 
         let panel = NSHostingView(rootView: SidePanel().environmentObject(model))
         let hud = NSHostingView(rootView: HUDOverlay().environmentObject(model))
-        for x in [panel, v, hud] as [NSView] { x.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(x) }
+        let bar = NSHostingView(rootView: StatusBar().environmentObject(model))
+        for x in [panel, v, hud, bar] as [NSView] { x.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(x) }
         NSLayoutConstraint.activate([
             panel.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             panel.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
             panel.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            panel.widthAnchor.constraint(equalToConstant: 320),
+            panel.widthAnchor.constraint(equalToConstant: 340),
             v.leadingAnchor.constraint(equalTo: panel.trailingAnchor),
             v.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             v.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-            v.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            v.bottomAnchor.constraint(equalTo: bar.topAnchor),
+            bar.leadingAnchor.constraint(equalTo: panel.trailingAnchor),
+            bar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            bar.heightAnchor.constraint(equalToConstant: 24),
             hud.trailingAnchor.constraint(equalTo: v.trailingAnchor, constant: -12),
             hud.topAnchor.constraint(equalTo: v.topAnchor, constant: 12),
         ])
@@ -83,6 +88,10 @@ final class MainViewController: NSViewController, NSToolbarDelegate, MTKViewDele
     @objc func openWorld(_ sender: Any?) { MainActor.assumeIsolated { FileDialogs.openWorld(model) } }
     @objc func saveWorld(_ sender: Any?) { MainActor.assumeIsolated { FileDialogs.saveWorld(model) } }
     @objc func importCAD(_ sender: Any?) { MainActor.assumeIsolated { FileDialogs.importCAD(model, into: false) } }
+    @objc func selectTabMenu(_ sender: NSMenuItem) { selectTab(AppTab.allCases[max(0, min(AppTab.allCases.count - 1, sender.tag))]) }
+    @objc func toggleAeroModel(_ sender: Any?) {
+        MainActor.assumeIsolated { model.aero.model = model.aero.model == .fast ? .full : .fast }
+    }
     func selectTab(_ t: AppTab) {
         MainActor.assumeIsolated { model.tab = t }
         tabControl?.selectedSegment = AppTab.allCases.firstIndex(of: t) ?? 0
@@ -112,7 +121,7 @@ final class MainViewController: NSViewController, NSToolbarDelegate, MTKViewDele
 
 /// MTKView input. Navigate: left drag orbit · right/option drag pan · scroll/pinch zoom · WASD/QE move target.
 /// BUILD: click selects a part, shift-drag moves it, cmd-drag rotates it. WORLD: with a tool, left click/drag applies it
-/// (right drag orbits). FLY: R reset, P pause, C cycle camera.
+/// (right drag orbits). FLY: R reset, P pause, C cycle camera, E toggle live equations.
 final class ViewportView: MTKView {
     weak var model: AppModel?
     private var keys = Set<UInt16>()
@@ -173,6 +182,7 @@ final class ViewportView: MTKView {
                 switch e.charactersIgnoringModifiers?.lowercased() {
                 case "r": model.resetFlight(); return
                 case "p": model.paused.toggle(); return
+                case "e": model.showEquations.toggle(); if model.showEquations { model.equationsScrollRequest += 1 }; return
                 case "c": let all = CameraMode.allCases; model.cameraMode = all[((all.firstIndex(of: model.cameraMode) ?? 0) + 1) % all.count]; return
                 default: break
                 }

@@ -97,6 +97,19 @@ final class AppModel: ObservableObject {
     @Published var lakeRadius = 120.0
     @Published var terrainSource = 1
     @Published var outputRenames: [String: String] = [:]
+    // --- fidelity UI (AppModel+Fidelity.swift)
+    @Published var aero = AeroRunSettings() { didSet { if aero != oldValue { applyAero(old: oldValue) } } }
+    @Published var aeroError: String?
+    /// CFD slice + tracer particles (FLY, Full model); filled by `updateFlowOverlay`.
+    let flowOverlay = FlowOverlayRenderable()
+    @Published var showEquations = true
+    /// Bumped to scroll the FLY sidebar to the EQUATIONS panel (E key when turning it on, --show-equations).
+    @Published var equationsScrollRequest = 0
+    @Published var equationRows: [EquationRecord] = []
+    @Published var cfdDiagnostics = CFDDiagnostics()
+    @Published var perf = PerfStatus()
+    let equationCapture = EquationCapture(capacity: 512)
+    var fidelityAccum = 0.0, rateWall = 0.0, rateSim = 0.0, lastSimTime = 0.0
 
     let services = SimulationServices()
     var renderer: Renderer?
@@ -324,6 +337,8 @@ final class AppModel: ObservableObject {
         r.environment = environment
         r.settings = renderSettings
         scene.setup(device: r.device)
+        flowOverlay.enabled = false
+        RenderRegistry.shared.add(flowOverlay)
         scene.rebuildCraft(craft, device: r.device)
         do {
             let vr = try VegetationRenderable(device: r.device, system: vegetation)
@@ -695,6 +710,7 @@ final class AppModel: ObservableObject {
         }
         if tab == .fly { updateFlyCamera(dt: dt) }
         terrain.update(cameraPosition: camera.camera.position, deltaTime: dt)
+        tickFidelity(dt: dt)
         statAccum += dt
         if statAccum > 0.2 {
             statAccum = 0

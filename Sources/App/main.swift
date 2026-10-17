@@ -15,6 +15,9 @@ import PWVegetation
 import PWWater
 import PWCraft
 import PWEvolution
+import PWFlow
+
+FlowModule.register()   // AeroModel.full factories (docs/FIDELITY.md)
 
 func registerAllSelfTests() {
     CoreSelfTests.register()
@@ -30,6 +33,7 @@ func registerAllSelfTests() {
     JSScriptSelfTests.register()
     AlgorithmSelfTests.register()
     AppSelfTests.register()
+    FidelitySelfTests.register()
 }
 
 let args = CommandLine.arguments
@@ -40,7 +44,9 @@ if let i = args.firstIndex(of: "--selftest") {
 }
 
 if args.contains("--bench") { exit(Bench.run(args)) }
-if args.contains("--train") { exit(TrainCLI.run(args)) }
+if args.contains("--train") { FlowModule.register(); exit(TrainCLI.run(args)) }
+if args.contains("--nan-hunt") { exit(NaNHunt.run(args)) }
+if args.contains("--aero-compare") { FlowModule.register(); exit(AeroCompareCLI.run(args)) }
 if args.contains("--make-experiment") { exit(TrainCLI.makeExperiment(args)) }
 
 let app = NSApplication.shared
