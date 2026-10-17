@@ -125,8 +125,10 @@ struct BuildPanel: View {
                         .onSubmit { if let n = model.outputRenames[o.id] { model.renameOutput(o.id, n); model.outputRenames[o.id] = nil } }
                         .font(.callout.bold()).help("Rename; press Return to apply")
                     Text("\(o.kind.rawValue) · \(o.info)").font(.caption2).foregroundStyle(.secondary)
+                    KeybindEditor(output: o)
                 }
             }
+            .padding(.bottom, 4)
         }
         SectionHeader(title: "Inputs (from sensors)")
         Card {
@@ -263,7 +265,14 @@ struct FlyPanel: View {
             if model.outputs.isEmpty { Text("This craft has no outputs.").foregroundStyle(.secondary) }
             ForEach(model.outputs) { o in
                 VStack(alignment: .leading, spacing: 1) {
-                    HStack { Text(o.name).font(.callout.weight(.medium)); Spacer(); Text(String(format: "%+.2f", o.value)).font(.callout).monospacedDigit().foregroundStyle(Color.accentColor) }
+                    HStack {
+                        Text(o.name).font(.callout.weight(.medium))
+                        if let kb = model.craft.part(o.id)?.keybind, !kb.isEmpty {
+                            Text(kb.label).font(.caption.monospaced()).padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                                .help("Keyboard: \(KeyNames.display(kb.pos)) = more, \(KeyNames.display(kb.neg)) = less (\(kb.mode.rawValue))")
+                        }
+                        Spacer(); Text(String(format: "%+.2f", o.value)).font(.callout).monospacedDigit().foregroundStyle(Color.accentColor) }
                     Slider(value: Binding(get: { o.value }, set: { model.setOutput(o.id, $0) }), in: o.range).controlSize(.small)
                 }.help(o.info)
             }
