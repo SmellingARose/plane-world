@@ -88,7 +88,20 @@ struct Parser {
         auto r = std::from_chars(s.data() + b, s.data() + i, d);
         if (r.ec != std::errc() || r.ptr != s.data() + i) return fail("bad number");
 #endif
-        v = Value::number(d); return true;
+        v = Value::number(d);
+        // integer literal: keep the exact 64-bit value (doubles lose bits above 2^53)
+        bool integral = true; std::size_t q = b; bool neg = false;
+        if (q < i && s[q] == '-') { neg = true; ++q; }
+        for (std::size_t k = q; k < i; ++k) if (s[k] < '0' || s[k] > '9') { integral = false; break; }
+        if (integral && i - q <= 20) {
+            uint64_t u = 0; bool ovf = false;
+            for (std::size_t k = q; k < i; ++k) { uint64_t dgt = uint64_t(s[k] - '0'); if (u > (~0ull - dgt) / 10) { ovf = true; break; } u = u * 10 + dgt; }
+            if (!ovf) {
+                if (!neg) v = Value::u64(u);
+                else if (u != 0 && u <= 9223372036854775808ull) v = Value::i64(u == 9223372036854775808ull ? INT64_MIN : -int64_t(u));
+            }
+        }
+        return true;
     }
     bool value(Value& v) {
         if (++depth > 512) return fail("nesting too deep");
@@ -144,7 +157,10 @@ void dumpTo(std::string& o, const Value& v, int indent, int level) {
     switch (v.type()) {
     case Value::Type::Null: o += "null"; break;
     case Value::Type::Bool: o += v.boolean() ? "true" : "false"; break;
-    case Value::Type::Number: o += formatNumber(v.num()); break;
+    case Value::Type::Number:
+        if (v.isInteger()) o += v.num() < 0 ? std::to_string(v.asI64()) : std::to_string(v.asU64());
+        else o += formatNumber(v.num());
+        break;
     case Value::Type::String: esc(o, v.str()); break;
     case Value::Type::Array:
         o += '[';

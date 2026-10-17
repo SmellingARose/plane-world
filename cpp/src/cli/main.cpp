@@ -13,6 +13,7 @@
 #include "pw/cpu.h"
 #include "pw/gpu.h"
 #include "pw/parity.h"
+#include "pw/evo/train.h"
 #include "pw/selftest.h"
 
 int runBench(const std::vector<std::string>& args);
@@ -57,7 +58,7 @@ int main(int argc, char** argv) {
         return r.ok ? 0 : 1;
     }
     if (has(args, "--bench")) return runBench(args);
-    if (has(args, "--train")) return runTrain(args);
+    if (has(args, "--train")) { pw::evo::installTrainHandler(); return runTrain(args); }
     if (has(args, "--make-experiment")) return runMakeExperiment(args);
     std::printf("usage: pwcli --selftest <name|all|list> | --gpu-smoke [--warp] | --bench <name|all|list> | --train <exp.json> | --make-experiment \"<preset>\" <out.json> | --info | --version\n");
     return 2;

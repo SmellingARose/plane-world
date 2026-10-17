@@ -46,3 +46,27 @@ Verification: on macOS arm64 all 30 reference trajectories and the Swift self-te
 every craft and profile); serial / parallel / every SIMD level give identical bits. On Windows the platform libm
 differs from Apple's in the last ulp, so runs are compared with tolerances (1e-9 for the first second, 1e-6 over 3 s);
 the ducted rocket with the slipstream model is excluded there because the wake cut-offs make it discontinuous.
+
+## Evolution + headless training (phase 2a)
+
+| Header | What |
+|---|---|
+| `pw/evo/types.h` | `EvoRNG` (xoshiro256** via SplitMix64, `derive` seed paths), `GeneSpec` / `GenomeLayout`, NEAT genome data, `Genome`, `Fitness`, `EliteArchive`, JSON codecs with the Swift key names (64-bit seeds / ids exact) |
+| `pw/evo/algorithm.h` | ask/tell `Algorithm`, registry, operators (tournament / roulette / rank, uniform / one-point / blend / SBX, gaussian / polynomial, iso+line) and the built-ins: `random`, `simple-es`, `ga`, `cmaes` (IPOP / BIPOP), `sep-cmaes`, `openai-es`, `neat`, `map-elites` (grid + CVT), `novelty`, plus `script` (JS `ask`/`tell`) |
+| `pw/evo/experiment.h` | `ExperimentDocument` (same JSON as the Swift app, same tolerant / synthesized-Codable decode rules), presets, craft resolution |
+| `pw/evo/policy.h` | allocation-free `MLPPolicy`, lane-batched `MLPBatch`, `NEATNetwork` (feed-forward / recurrent), design decoder |
+| `pw/evo/script.h` | evolution script runtimes: none, C++ closures, the preset scripts natively, and any JavaScript through `pw/script` (JavaScriptCore / QuickJS) incl. select / crossover / mutate hooks |
+| `pw/evo/evaluator.h` | headless world + static obstacles, `ExperimentContext`, `EvalWorker` (zero-allocation episode loop), `SimEvaluator` (job-system parallel, results independent of the thread count) |
+| `pw/evo/run.h` | `EvolutionRun` (history, hall of fame, background loop, checkpoint / resume in the Swift run-directory format, export of the best craft with its embedded controller), replay, `EvolvedAutopilot` |
+
+`pwcli --train <experiment.json> [--generations N] [--out dir] [--resume] [--current-as-flat] [--script-engine auto|jsc|quickjs]`
+prints the Swift CLI's per-generation lines and writes `history.csv`, `run.json`, `algorithm.state` and `best-craft.json`.
+
+Verification (`pwcli --selftest evolution-algo.` / `evolution.`, `pwtests -tc="evolution*"`): on macOS every number the Swift
+algorithm self-tests print (CMA-ES sphere / Rosenbrock / IPOP + BIPOP Rastrigin, sep-CMA-ES, OpenAI-ES, 12 GA
+configurations, NEAT XOR + species control, MAP-Elites / CVT coverage, novelty archive) is reproduced bit for bit, and four
+training runs recorded with the Swift app (`tests/parity/evolution`: neural controller with sep-CMA-ES, craft design with
+the GA, NEAT controller, MAP-Elites) give bit-identical fitness histories, hall of fame genomes and NEAT topologies — with
+1, 4 or all workers, with the native preset runtime and on both JavaScript engines. Checkpoint → resume continues
+bit-identically for every algorithm; the episode loop allocates nothing per control tick. On Windows (different libm in the
+last ulp) the same criteria as the Swift tests are checked, and generation 0 of the parity runs must agree within 1e-6.

@@ -15,6 +15,9 @@ public:
     enum class Type : uint8_t { Null, Bool, Number, String, Array, Object };
     Value() = default;
     static Value number(double d) { Value v; v.t_ = Type::Number; v.n_ = d; return v; }
+    /// Exact 64-bit integers (seeds, RNG state, ids): kept alongside the double so they round-trip losslessly.
+    static Value u64(uint64_t u) { Value v; v.t_ = Type::Number; v.n_ = double(u); v.int_ = 1; v.u_ = u; return v; }
+    static Value i64(int64_t i) { Value v; v.t_ = Type::Number; v.n_ = double(i); v.int_ = i < 0 ? 2 : 1; v.u_ = uint64_t(i); return v; }
     static Value fromBool(bool b) { Value v; v.t_ = Type::Bool; v.b_ = b; return v; }
     static Value string(std::string s) { Value v; v.t_ = Type::String; v.s_ = std::move(s); return v; }
     static Value array() { Value v; v.t_ = Type::Array; return v; }
@@ -28,6 +31,21 @@ public:
     bool isObject() const { return t_ == Type::Object; }
 
     double num(double fallback = 0) const { return t_ == Type::Number ? n_ : fallback; }
+    /// True when the number was written/parsed as an integer literal that fits 64 bits.
+    bool isInteger() const { return t_ == Type::Number && int_ != 0; }
+    /// Exact unsigned value of an integer literal (else the double, truncated and clamped).
+    uint64_t asU64(uint64_t fallback = 0) const {
+        if (t_ != Type::Number) return fallback;
+        if (int_ == 1) return u_;
+        if (int_ == 2 || !(n_ >= 0)) return fallback;
+        return n_ >= 18446744073709551615.0 ? ~0ull : uint64_t(n_);
+    }
+    int64_t asI64(int64_t fallback = 0) const {
+        if (t_ != Type::Number) return fallback;
+        if (int_ != 0) return int64_t(u_);
+        if (!(n_ == n_)) return fallback;
+        return n_ >= 9.2e18 ? INT64_MAX : n_ <= -9.2e18 ? INT64_MIN : int64_t(n_);
+    }
     bool boolean(bool fallback = false) const { return t_ == Type::Bool ? b_ : fallback; }
     const std::string& str() const { return s_; }
     const std::vector<Value>& items() const { return a_; }
@@ -45,7 +63,9 @@ public:
 private:
     Type t_ = Type::Null;
     bool b_ = false;
+    uint8_t int_ = 0;   // 0 = plain double, 1 = exact non-negative integer in u_, 2 = exact negative (int64 bits in u_)
     double n_ = 0;
+    uint64_t u_ = 0;
     std::string s_;
     std::vector<Value> a_;
     std::vector<std::pair<std::string, Value>> o_;   // insertion order kept (round-trips documents)

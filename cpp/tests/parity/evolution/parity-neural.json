@@ -1,0 +1,155 @@
+{
+ "aero": {
+  "cfd": {
+   "cellsPerMeter": 16,
+   "collision": "cumulant",
+   "convergenceEvery": 200,
+   "ground": true,
+   "lattice": "d3q19",
+   "latticeMach": 0.1,
+   "maxCellsPerAxis": 192,
+   "maxMach": 0.3,
+   "padDownstream": 2.5,
+   "padLateral": 1,
+   "padUpstream": 1,
+   "preset": "medium",
+   "smagorinskyCs": 0.17,
+   "substeps": 0,
+   "turbulence": "smagorinsky",
+   "updateEvery": 4,
+   "visualization": {
+    "enabled": false,
+    "field": "speed",
+    "particleCount": 4096,
+    "particles": false,
+    "sliceAxis": 2,
+    "sliceOffset": 0
+   },
+   "wall": "interpolatedBounceBack"
+  },
+  "model": "fast",
+  "profile": "fast.plus",
+  "toggles": {
+   "blockage": true,
+   "cadWash": true,
+   "downwash": true,
+   "gyro": true,
+   "pFactor": true,
+   "slipstream": true
+  }
+ },
+ "algorithm": {
+  "kind": "sep-cmaes",
+  "values": {
+   "sigma0": 0.5
+  }
+ },
+ "batchLanes": 1,
+ "checkpointEvery": 0,
+ "controller": {
+  "hz": 50,
+  "mode": "mlp"
+ },
+ "crafts": [
+  {
+   "name": "Trainer"
+  }
+ ],
+ "descriptorAxes": [],
+ "episode": {
+  "aggregate": "mean",
+  "commonRandomNumbers": true,
+  "crashSpeed": 8,
+  "duration": 6.0,
+  "episodesPerCandidate": 2,
+  "physicsHz": 1000,
+  "spawn": {
+   "altitudeAGL": 0,
+   "headingDeg": 0,
+   "jitterAttitudeDeg": 0,
+   "jitterHeadingDeg": 0,
+   "jitterPosition": 0,
+   "jitterSpeed": 0,
+   "mode": "runway",
+   "speed": 0
+  },
+  "stopOnCrash": true,
+  "wind": {
+   "directionMaxDeg": 360,
+   "directionMinDeg": 0,
+   "speedMax": 4,
+   "speedMin": 0,
+   "turbulence": 0.3
+  }
+ },
+ "generations": 3,
+ "genome": {
+  "design": [],
+  "mlp": {
+   "activation": "tanh",
+   "hidden": [
+    12
+   ],
+   "inputScale": {
+    "aero.aoa": 10,
+    "aero.sideslip": 10,
+    "air": 40,
+    "alt": 100,
+    "att.pitch": 30,
+    "att.roll": 45,
+    "att.yaw": 180,
+    "rate.pitch": 30,
+    "rate.roll": 60,
+    "rate.yaw": 30,
+    "vs": 10
+   },
+   "inputs": [
+    "alt",
+    "att.pitch",
+    "att.roll",
+    "rate.roll",
+    "rate.pitch",
+    "rate.yaw",
+    "air",
+    "vs",
+    "aero.aoa"
+   ],
+   "outputActivation": "tanh",
+   "outputs": [
+    "Ailerons",
+    "Elevator",
+    "Rudder",
+    "Engine"
+   ],
+   "weightRange": 3
+  },
+  "preset": "neural"
+ },
+ "headless": {
+  "breakables": false,
+  "oceanWaves": false,
+  "terrain": true,
+  "vegetation": false,
+  "water": true
+ },
+ "name": "parity-neural",
+ "notes": "MLP (sensors \u2192 control surfaces + throttle) learns to take off, climb to 150 m AGL and hold wings level.",
+ "population": 12,
+ "rewardTerms": [
+  "altitude",
+  "speed",
+  "level",
+  "crash"
+ ],
+ "scripts": {
+  "callBudgetMs": 5,
+  "language": "javascript",
+  "source": "// Neural controller preset. The native MLP (genome \u2192 weights) writes ctx.out before control() runs;\n// this script shapes the genome and scores the flight. See docs/EVOLUTION.md \u00a74.\nfunction terms() { return [\"altitude\", \"speed\", \"level\", \"crash\"]; }\n\n// Start every MLP weight at 0 (neutral surfaces, half throttle) and let the optimiser explore with a\n// step of 0.5 per weight. Random \u00b13 weights saturate the network and the Trainer never leaves the runway.\nfunction genome(base) {\n  base.genes.forEach(function (g) { if (g.group === \"mlp\") { g.initial = 0; g.sigma = 0.5; } });\n  return base;\n}\n\nfunction control(ctx) {\n  // optional post-processing of the network outputs, e.g. keep the brakes off:\n  // ctx.out[\"Main L motor\"] = 0;\n}\n\nfunction reward(ctx) {\n  const s = ctx.state, dt = ctx.dt;\n  return {\n    altitude: -Math.min(Math.abs(s.agl - 150) / 150, 1) * dt,\n    speed: Math.min(s.airspeed, 45) / 45 * dt * 0.5,\n    level: -Math.min(Math.abs(s.roll) / 90, 1) * dt * 0.5,\n  };\n}\n\nfunction terminate(ctx) { return ctx.state.crashed; }\n\nfunction fitness(ctx) {\n  const crash = ctx.state.crashed ? -20 : 0;\n  return { fitness: ctx.sum.altitude + ctx.sum.speed + ctx.sum.level + crash, terms: { crash: crash } };\n}\n\nfunction descriptor(ctx) { return [ctx.state.x / 1000, ctx.state.agl / 300]; }"
+ },
+ "seed": 1,
+ "version": 1,
+ "workers": 4,
+ "world": {
+  "source": "flat"
+ }
+}
