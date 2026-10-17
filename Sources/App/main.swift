@@ -4,6 +4,7 @@
 //   PlaneWorld --train <experiment.json> [--generations N] [--out dir] [--workers N]   headless training
 //   PlaneWorld --bench <name|all|list> [--reps N] [--quick] [--json f]   benchmarks (release build; docs/PERF.md)
 //   PlaneWorld --make-experiment "<preset>" <out.json>
+//   PlaneWorld --export-parity <dir>   reference trajectories for the C++ port parity harness
 //   PlaneWorld --quit-after <seconds>  launch and quit automatically (smoke testing)
 import AppKit
 import PWCore
@@ -47,6 +48,7 @@ if args.contains("--bench") { exit(Bench.run(args)) }
 if args.contains("--train") { FlowModule.register(); exit(TrainCLI.run(args)) }
 if args.contains("--nan-hunt") { exit(NaNHunt.run(args)) }
 if args.contains("--aero-compare") { FlowModule.register(); exit(AeroCompareCLI.run(args)) }
+if args.contains("--export-parity") { exit(ParityExport.run(args)) }
 if args.contains("--make-experiment") { exit(TrainCLI.makeExperiment(args)) }
 
 let app = NSApplication.shared

@@ -1,0 +1,117 @@
+# C++ port CI (docs/PORT_PLAN.md): macOS arm64 (Metal) + Windows x64 (MSVC, Direct3D 12 / WARP).
+name: cpp
+on:
+  push:
+    branches: [cpp-port]
+    paths: ["cpp/**", ".github/workflows/cpp.yml"]
+  pull_request:
+    paths: ["cpp/**", ".github/workflows/cpp.yml"]
+  workflow_dispatch:
+
+env:
+  QT_VERSION: "6.8.3"
+  SLANG_VERSION: "2026.18.3"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            name: macos-arm64
+            slang_asset: macos-aarch64.tar.gz
+          - os: windows-latest
+            name: windows-x64
+            slang_asset: windows-x86_64.zip
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Slang ${{ env.SLANG_VERSION }} (official release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/slang" && cd "$RUNNER_TEMP/slang"
+          gh release download "v$SLANG_VERSION" -R shader-slang/slang -p "slang-$SLANG_VERSION-${{ matrix.slang_asset }}" -O slang.archive
+          if [[ "${{ matrix.slang_asset }}" == *.zip ]]; then unzip -q slang.archive; else tar xzf slang.archive; fi
+          echo "SLANG_DIR=$RUNNER_TEMP/slang" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/slang/bin" >> "$GITHUB_PATH"
+
+      - name: Configure
+        run: cmake -S cpp -B cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build cpp/build
+
+      - name: Unit + parity tests (pwtests)
+        env:
+          PW_GPU_WARP: ${{ runner.os == 'Windows' && '1' || '' }}
+        run: cpp/build/tests/pwtests
+
+      - name: Self-tests (pwcli --selftest all)
+        run: cpp/build/src/cli/pwcli --selftest all --verbose
+
+      - name: Direct3D 12 WARP smoke test
+        if: runner.os == 'Windows'
+        run: cpp/build/src/cli/pwcli --gpu-smoke --warp
+
+      - name: Metal smoke test
+        if: runner.os == 'macOS'
+        run: cpp/build/src/cli/pwcli --gpu-smoke || echo "::warning::no Metal device on this runner"
+
+      - name: Benchmarks
+        run: cpp/build/src/cli/pwcli --bench all --reps 1 --json cpp/build/bench.json
+
+      - name: Deploy app
+        run: cmake --build cpp/build --target pwapp_deploy
+
+      - name: App launch smoke (screenshot)
+        continue-on-error: ${{ runner.os == 'Windows' }}
+        env:
+          QSG_RHI_PREFER_SOFTWARE_RENDERER: "1"
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            "cpp/build/src/app/Plane World.app/Contents/MacOS/Plane World" --quit-after 5 --screenshot app-${{ matrix.name }}.png --tab fly
+          else
+            pwsh -Command '$p = Start-Process -FilePath "cpp/build/src/app/Plane World.exe" -ArgumentList "--quit-after","5","--screenshot","app-${{ matrix.name }}.png","--tab","fly" -PassThru -Wait; exit $p.ExitCode'
+          fi
+          ls -la app-${{ matrix.name }}.png
+
+      - name: Package artefacts
+        run: |
+          mkdir -p dist
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            ditto -c -k --keepParent "cpp/build/src/app/Plane World.app" "dist/PlaneWorld-${{ matrix.name }}.zip"
+            cp cpp/build/src/cli/pwcli dist/
+          else
+            cp cpp/build/src/cli/pwcli.exe dist/
+            pwsh -Command 'Compress-Archive -Path "cpp/build/src/app/*" -DestinationPath "dist/PlaneWorld-${{ matrix.name }}.zip"'
+          fi
+          cp cpp/build/bench.json dist/bench-${{ matrix.name }}.json
+          cp app-${{ matrix.name }}.png dist/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planeworld-${{ matrix.name }}
+          path: dist/
