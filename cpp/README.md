@@ -155,3 +155,7 @@ cells (wings keep their sharp-edge seal: inflating nothing drops the wing slope 
 error by 6-9 points at no cost; it is opt-in (`LBMSolver::accuracy`, `pwcli --aero-compare --accurate`) so the default
 stays Swift-identical. Refining the Bouzidi wall fraction with secant steps changed nothing measurable (kept as an
 option). Coarse-grid lift is dominated by the unresolved boundary layer; no equal-cost fix for it was found.
+
+## Packaging (phase 6)
+
+`cpp/packaging/macos/make_dmg.sh cpp/build` (ad-hoc signed .dmg) and `cpp/packaging/windows/make_msi.sh cpp/build` (WiX v5 .msi); see [docs/PACKAGING.md](../docs/PACKAGING.md).

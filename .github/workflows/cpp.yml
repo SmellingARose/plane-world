@@ -3,6 +3,7 @@ name: cpp
 on:
   push:
     branches: [cpp-port]
+    tags: ["v*"]          # release builds (path filters are not evaluated for tag pushes)
     paths: ["cpp/**", ".github/workflows/cpp.yml"]
   pull_request:
     paths: ["cpp/**", ".github/workflows/cpp.yml"]
@@ -126,9 +127,42 @@ jobs:
             ls -la app-${{ matrix.name }}-$t.png
           done
 
+      - name: Installer (macOS .dmg, ad-hoc signed)
+        if: runner.os == 'macOS'
+        run: cpp/packaging/macos/make_dmg.sh cpp/build dist
+
+      - name: Installer (Windows .msi, WiX v5)
+        if: runner.os == 'Windows'
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          echo "$USERPROFILE/.dotnet/tools" >> "$GITHUB_PATH"
+          export PATH="$USERPROFILE/.dotnet/tools:$PATH"
+          cpp/packaging/windows/make_msi.sh cpp/build dist
+
+      - name: Installer smoke (install, launch, uninstall)
+        env:
+          QSG_RHI_PREFER_SOFTWARE_RENDERER: "1"
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            M=$(mktemp -d); hdiutil attach -nobrowse -mountpoint "$M" dist/*.dmg
+            cp -R "$M/Plane World.app" "$RUNNER_TEMP/"; hdiutil detach "$M"
+            "$RUNNER_TEMP/Plane World.app/Contents/MacOS/pwcli" --info
+            "$RUNNER_TEMP/Plane World.app/Contents/MacOS/Plane World" --quit-after 5 --screenshot installed-${{ matrix.name }}.png --tab build
+          else
+            MSI=$(cygpath -w dist/*.msi)
+            pwsh -Command "\$p = Start-Process msiexec -ArgumentList '/i','$MSI','/qn','/l*v','msi.log' -PassThru -Wait; exit \$p.ExitCode" || { tail -50 msi.log; exit 1; }
+            "/c/Program Files/Plane World/pwcli.exe" --info
+            pwsh -Command "\$p = Start-Process -FilePath 'C:/Program Files/Plane World/Plane World.exe' -ArgumentList '--quit-after','5','--screenshot','installed-${{ matrix.name }}.png','--tab','build' -PassThru -Wait; exit \$p.ExitCode"
+            pwsh -Command "\$p = Start-Process msiexec -ArgumentList '/x','$MSI','/qn' -PassThru -Wait; exit \$p.ExitCode"
+            test ! -e "/c/Program Files/Plane World/Plane World.exe"
+          fi
+          ls -la installed-${{ matrix.name }}.png
+
       - name: Package artefacts
         run: |
           mkdir -p dist
+          rm -rf dist/stage
+          cp installed-${{ matrix.name }}.png dist/
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             ditto -c -k --keepParent "cpp/build/src/app/Plane World.app" "dist/PlaneWorld-${{ matrix.name }}.zip"
             cp cpp/build/src/cli/pwcli dist/
@@ -144,3 +178,21 @@ jobs:
         with:
           name: planeworld-${{ matrix.name }}
           path: dist/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefacts
+      - name: Draft GitHub release with installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --draft --generate-notes \
+            --title "Plane World ${GITHUB_REF_NAME}" \
+            artefacts/*/*.dmg artefacts/*/*.msi artefacts/*/PlaneWorld-*.zip

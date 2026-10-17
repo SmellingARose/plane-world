@@ -1,0 +1,24 @@
+<!-- Plane World MSI (WiX Toolset v5: `dotnet tool install --global wix`).
+     wix build -arch x64 -d Version=0.1.0 -bindpath deploy=<windeployqt folder> -o PlaneWorld.msi PlaneWorld.wxs -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Plane World" Manufacturer="Plane World" Version="$(Version)" Scope="perMachine"
+           UpgradeCode="6F1B6C2E-4D7A-4E0B-9B57-2C8D3A1F5E90">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Plane World is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/SmellingARose/plane-world" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Plane World">
+        <Files Include="!(bindpath.deploy)**" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="PwShortcut" Name="Plane World" Description="Design, fly and evolve aircraft"
+                  Target="[INSTALLFOLDER]Plane World.exe" WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\PlaneWorld" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+  </Package>
+</Wix>
