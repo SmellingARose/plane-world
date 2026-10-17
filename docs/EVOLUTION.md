@@ -517,7 +517,10 @@ controller, Trainer, flat world. The integration numbers are in the README.
 | `hold100-neat.json` | `neat` | The same task; NEAT evolves the topology |
 | `hold100-mapelites.json` | `map-elites` | The same script; archive over (final x, final altitude) |
 | `glide-cmaes.json` | `cmaes` | Craft design: engine off from 150 m, maximise glide distance |
-| `hold100.js`, `glide.js` | | The scripts embedded in those documents, for reading |
+| `hover-ducted-rocket.json` | `sep-cmaes` | MLP controller for the ducted rocket: lift off, climb to 10 m and hover upright over the start point (20 s) |
+| `hover-pid.json` | `cmaes` | The same hover task with a scripted (PID-style) controller whose gains are the genome |
+| `design.json`, `neural.json` | | Preset-derived starting documents (`--make-experiment`) |
+| `hold100.js`, `glide.js`, `hover.js` | | The scripts embedded in those documents, for reading |
 
 ## 11. Tutorial: writing your own reward with named points
 
@@ -587,3 +590,52 @@ function descriptor(ctx) { return [ctx.state.x, ctx.state.agl]; }
   doing the task?" directly.
 - **Check a reward quickly** with a short CLI run (`--generations 3 --population 16`) and a `log()` call in
   `control()`. `log` is rate-limited per worker.
+
+## 12. Hover experiment and the reward-shaping lesson
+
+`examples/experiments/hover-ducted-rocket.json` (script: `hover.js`) trains an MLP (9 inputs, 16 tanh hidden,
+4 outputs: `Lift upper`, `Lift lower`, `Vane X`, `Vane Z`) to fly the ducted rocket (`docs/CRAFTS.md`) from the
+ground to a hover at 10 m over the start point. Settings: sep-CMA-ES, 20 s episodes, 2 episodes per candidate with
+common random numbers, wind up to 2 m/s with turbulence 0.2.
+
+### What went wrong first
+
+The first reward paid only for time spent **within ±10 m** of the target height. Most random controllers either
+stayed on the ground (0 reward) or went full throttle and **shot straight through the band** in under a second
+(also about 0). The landscape was flat almost everywhere, so CMA-ES had no gradient to follow, and the few
+candidates that got any reward did it by passing through the band on the way up.
+
+### The shaped reward (current `hover.js`)
+
+| Term | Per second | Why |
+|---|---|---|
+| `height` | −min(|Δy|, 20)/10, **always on** | Every candidate gets a gradient toward 10 m, wherever it is |
+| `hover` | +1 inside ±1.5 m vertically and 2 m horizontally | The headline number (seconds hovering) |
+| `calm` | −min(|vs|/5, 1) × 0.5, full weight within 3 m of the target, 0.3 outside | Penalises vertical speed, so shooting through the target is worse than arriving slowly |
+| `drift` | −min(dist/10, 1) × 0.5 | Stay over the start point |
+| `upright` | −tilt/90° | Stay vertical |
+| `spin` | −min(|yaw rate|/180, 1) × 0.3 | Use the differential motors to stop yaw |
+| `crash` | one-off | See below |
+
+**Fly-away termination.** The episode ends early if the craft crashes, tilts past 80°, or climbs above 30 m.
+Without the altitude cap, "climb forever" was a local optimum the height cap alone did not remove, and it wasted
+sim time.
+
+**Crash penalty size.** The remaining episode time is charged at −1 per second (the same rate as sitting on the
+ground with a 10 m height error), plus 1. An earlier, harsher penalty of −2/s − 5 made "never take off" the best
+strategy, because any attempt to fly risked a bigger loss than doing nothing.
+
+The general lessons:
+- Reward **distance to the goal continuously**, not only a band around it.
+- Penalise the **rate** (vertical speed), or the optimiser learns to pass through the goal.
+- **Terminate** obviously bad behaviour early and charge for the lost time.
+- Size failure penalties so that **trying is never worse than doing nothing**.
+
+`hover-pid.json` is the same task with a hand-written controller structure and CMA-ES over its gains. It is a
+useful baseline for judging whether the MLP is learning anything a PID could not.
+
+## 13. Aero model in training (fast or full)
+
+An experiment can carry `"aero": { "model": "fast" | "full", "cfd": { ... }, "toggles": { ... } }`
+(`AeroRunSettings`, see `docs/CFD.md` §4). The CLI overrides are `--aero fast|full` and `--cfd-preset draft|medium|high|ultra`. Missing keys mean fast with
+default toggles, so every existing experiment is unchanged. Full mode gives each worker its own CFD domain on the scalar sim (batch lanes forced to 1); it is about 3000× slower than fast, see `docs/CFD.md` §6 for measured throughput.

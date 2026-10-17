@@ -2,6 +2,24 @@
 
 Native macOS flight and vehicle physics sandbox. Built with Swift 6, Metal, AppKit and SwiftPM only. Metal shaders compile at runtime, so no Xcode or `metal` CLI is needed.
 
+## Overview
+- **Four tabs:** BUILD (make crafts), FLY (fly them), WORLD (make terrain and weather), EVOLVE (train controllers and designs).
+- **Two aero models**, selectable per flight and per experiment:
+  - **fast** (default): per-strip wing aero, momentum-theory props, actuator-disk slipstream with ducts and rotor ground effect, Newtonian + friction panels for CAD bodies. Runs well above real time, so it is what training normally uses. Equations, code locations and typical error: `docs/PHYSICS.md`.
+  - **full**: GPU lattice-Boltzmann CFD (Metal) in a craft-following domain, with per-part forces fed back into the rigid body. Resolution, domain, collision and turbulence models, and Draft/Medium/High/Ultra presets are all adjustable, with grid-convergence and mass diagnostics. Guide: `docs/CFD.md`. Status of the solver in this pass: `docs/FIDELITY.md`.
+- **EQUATIONS panel** in FLY: the fast-model equations for the selected part with live values, and the CFD force for comparison when full is on.
+
+## Docs
+| File | Contents |
+|---|---|
+| `docs/ARCHITECTURE.md` | Modules, threading, rendering, slipstream overview |
+| `docs/PHYSICS.md` | Every fast-model equation with file:line, validity, research error table and sources |
+| `docs/CFD.md` | Full-flow method, settings guide, presets, diagnostics, training in full mode |
+| `docs/FIDELITY.md` | Contract between the fast and full models (types, invariants, threading) |
+| `docs/CRAFTS.md` | Bundled crafts and the ducted-rocket design rationale |
+| `docs/EVOLUTION.md` | EVOLVE, JS API, algorithms, experiments, hover reward-shaping lesson |
+| `docs/PERF.md` | Performance measurements |
+
 ## Build and run
 ```sh
 swift build -c release --scratch-path /tmp/pw-build
@@ -10,6 +28,7 @@ swift build -c release --scratch-path /tmp/pw-build
 /tmp/pw-build/release/PlaneWorld --selftest all     # headless tests (or: core, physics, collision, terrain, vegetation, water, craft, evolution, evolution-js, evolution-algo, app)
 /tmp/pw-build/release/PlaneWorld --quit-after 10    # smoke test
 /tmp/pw-build/release/PlaneWorld --train examples/experiments/hold100-ga.json --generations 40 --out /tmp/run   # headless training
+/tmp/pw-build/release/PlaneWorld --train examples/experiments/hover-ducted-rocket.json --out /tmp/hover   # ducted-rocket hover (CMA-ES)
 /tmp/pw-build/release/PlaneWorld --make-experiment "Neural controller" my.json  # preset -> editable experiment
 swift test --scratch-path /tmp/pw-build
 ```
@@ -41,4 +60,12 @@ Release build, Apple M4 (10 cores), CLI `--train`, flat world, Trainer craft, 1 
 Throughput (JS-scored neural controller): 67–69 sim-s per wall-second on 1 worker and 218–222 on 10 workers, a 3.2× speedup. The 10-worker run gives identical fitness. `evolution.bench-headless` measures 67 sim-s/s on 1 core and 240 on 10 cores (3.6×). The M4's 6 efficiency cores bound the scaling.
 
 ## Architecture
-See `docs/ARCHITECTURE.md`. The App wires TerrainSystem, WaterSystem, ProceduralVegetation and VegetationRenderable, RigidWorld and CraftSim through `SimulationServices`. Physics runs at 1 kHz substeps and the collision world at 240 Hz. The craft is coupled to the collision world through a kinematic proxy box, so it pushes props and breaks breakables. Craft-tree contacts and grass flattening go through the vegetation `interact` API. Screenshots are in `docs/screens/`.
+See `docs/ARCHITECTURE.md`. The App wires TerrainSystem, WaterSystem, ProceduralVegetation and VegetationRenderable, RigidWorld and CraftSim through `SimulationServices`. Physics runs at 1 kHz substeps and the collision world at 240 Hz. The craft is coupled to the collision world through a kinematic proxy box, so it pushes props and breaks breakables. Craft-tree contacts and grass flattening go through the vegetation `interact` API. Screenshots are in `docs/screens/`:
+
+| FLY (fast model) | FLY (full CFD, speed slice + particles) |
+|---|---|
+| ![FLY](docs/screens/fly.jpg) | ![FLY full CFD](docs/screens/fly-full.jpg) |
+| **EQUATIONS (live values, fast vs CFD)** | **BUILD** |
+| ![EQUATIONS](docs/screens/equations.jpg) | ![BUILD](docs/screens/build.jpg) |
+| **WORLD** | **EVOLVE** |
+| ![WORLD](docs/screens/world.jpg) | ![EVOLVE](docs/screens/evolve.jpg) |
