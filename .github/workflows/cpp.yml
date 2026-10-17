@@ -151,6 +151,7 @@ jobs:
           else
             MSI=$(cygpath -w dist/*.msi)
             pwsh -Command "\$p = Start-Process msiexec -ArgumentList '/i','$MSI','/qn','/l*v','msi.log' -PassThru -Wait; exit \$p.ExitCode" || { tail -50 msi.log; exit 1; }
+            ls -la "/c/Program Files/Plane World" || { iconv -f UTF-16LE -t UTF-8 msi.log | grep -iE "error|return value 3|INSTALLFOLDER|Plane World.exe" | head -40; exit 1; }
             "/c/Program Files/Plane World/pwcli.exe" --info
             pwsh -Command "\$p = Start-Process -FilePath 'C:/Program Files/Plane World/Plane World.exe' -ArgumentList '--quit-after','5','--screenshot','installed-${{ matrix.name }}.png','--tab','build' -PassThru -Wait; exit \$p.ExitCode"
             pwsh -Command "\$p = Start-Process msiexec -ArgumentList '/x','$MSI','/qn' -PassThru -Wait; exit \$p.ExitCode"

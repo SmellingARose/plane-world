@@ -8,7 +8,7 @@
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Plane World">
-        <Files Include="!(bindpath.deploy)**" />
+        <Files Include="!(bindpath.deploy)\**" />
       </Directory>
     </StandardDirectory>
 
