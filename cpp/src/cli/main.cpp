@@ -2,7 +2,8 @@
 //   pwcli --selftest <name|prefix.|all|list> [--parity-dir d] [--verbose]
 //   pwcli --gpu-smoke [--warp]              render + read back one frame on Metal / D3D12 (WARP software adapter)
 //   pwcli --bench <name|all|list> [--reps N] [--json file]
-//   pwcli --train <experiment.json> ...      (phase 2, not implemented yet)
+//   pwcli --train <experiment.json> [--generations N] [--out dir] [--resume] [--current-as-flat] [--aero m] [--cfd-preset p]
+//   pwcli --make-experiment "<preset>" <out.json> [--craft name]
 //   pwcli --info | --version
 #include <cstdio>
 #include <cstdlib>
@@ -15,6 +16,8 @@
 #include "pw/selftest.h"
 
 int runBench(const std::vector<std::string>& args);
+int runTrain(const std::vector<std::string>& args);
+int runMakeExperiment(const std::vector<std::string>& args);
 
 static const char* value(const std::vector<std::string>& a, const char* flag) {
     for (std::size_t i = 0; i + 1 < a.size(); ++i) if (a[i] == flag) return a[i + 1].c_str();
@@ -54,10 +57,8 @@ int main(int argc, char** argv) {
         return r.ok ? 0 : 1;
     }
     if (has(args, "--bench")) return runBench(args);
-    if (has(args, "--train")) {
-        std::fprintf(stderr, "--train is not implemented in the C++ port yet (phase 2: evolution + headless training).\n");
-        return 3;
-    }
-    std::printf("usage: pwcli --selftest <name|all|list> | --gpu-smoke [--warp] | --bench <name|all|list> | --train <exp.json> | --info | --version\n");
+    if (has(args, "--train")) return runTrain(args);
+    if (has(args, "--make-experiment")) return runMakeExperiment(args);
+    std::printf("usage: pwcli --selftest <name|all|list> | --gpu-smoke [--warp] | --bench <name|all|list> | --train <exp.json> | --make-experiment \"<preset>\" <out.json> | --info | --version\n");
     return 2;
 }

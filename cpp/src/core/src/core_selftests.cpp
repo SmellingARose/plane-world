@@ -10,6 +10,7 @@
 #include "pw/reduce.h"
 #include "pw/rng.h"
 #include "pw/selftest.h"
+#include "pw/script/runtime.h"
 #include "pw/sim/physics_selftests.h"
 
 namespace pw::selftest {
@@ -19,6 +20,7 @@ void registerCoreTests() {
     done = true;
     registerCraftWorldCollisionTests();
     sim::registerPhysicsTests();
+    script::registerSelfTests();
 
     add("core.json-roundtrip", [](Context& c) {
         const char* src = R"({"a":[1,2.5,-3e-300,0.1],"s":"hé\"llo","n":null,"t":true,"o":{}})";

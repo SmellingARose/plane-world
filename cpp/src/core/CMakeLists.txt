@@ -38,3 +38,4 @@ target_link_libraries(pwcore PUBLIC pw_flags)
 target_compile_definitions(pwcore PUBLIC PW_VERSION="${PROJECT_VERSION}"
   PW_DEFAULT_PARITY_DIR="${PROJECT_SOURCE_DIR}/tests/parity")
 include(${CMAKE_CURRENT_SOURCE_DIR}/craft_world.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/script.cmake)
