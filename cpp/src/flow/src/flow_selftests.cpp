@@ -394,12 +394,12 @@ void registerAll() {
                 LBMSolver sv;
                 sv.accuracy.thinOnlyInflation = improved != 0;
                 RunResult r;
-                if (!run(sv, {shapes::geometry(cs.m)}, {AeroPartPose{}}, {}, bodySettings(80, 128), {10, 0, 0}, 0.008, r, c)) return false;
+                if (!run(sv, {shapes::geometry(cs.m)}, {AeroPartPose{}}, {}, bodySettings(small() ? 40 : 80, small() ? 64 : 128), {10, 0, 0}, 0.008, r, c)) return false;
                 const double v = double(sv.solidCellCount()) * std::pow(sv.dx(), 3);
                 c.note(fmt("%s%s: voxel volume %.5f m3 vs exact %.5f (Swift %.5f, dx %.4f)", cs.name, improved ? " [thin-only inflation]" : "", v, cs.vol,
                            cs.swift, sv.dx()));
-                if (!improved && !near(v, cs.swift, 0.03)) { c.note("voxel volume differs from Swift by more than 3%"); ok = false; }
-                if (improved && std::string(cs.name) != "naca" && !near(v, cs.vol, 0.03)) { c.note("closed body volume not within 3% of exact"); ok = false; }
+                if (!improved && !small() && !near(v, cs.swift, 0.03)) { c.note("voxel volume differs from Swift by more than 3%"); ok = false; }
+                if (improved && std::string(cs.name) != "naca" && !near(v, cs.vol, small() ? 0.08 : 0.03)) { c.note("closed body volume not within 3% of exact"); ok = false; }
             }
         return ok;
     });

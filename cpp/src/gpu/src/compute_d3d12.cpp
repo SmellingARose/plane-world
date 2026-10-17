@@ -86,7 +86,9 @@ public:
                 warp.As(&chosen);
             }
             DXGI_ADAPTER_DESC1 d; chosen->GetDesc1(&d);
-            adapter = narrowW(d.Description); software = (d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+            adapter = narrowW(d.Description);
+            // EnumWarpAdapter's adapter does not always carry the SOFTWARE flag: also match Microsoft Basic Render (WARP)
+            software = (d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || (d.VendorId == 0x1414 && d.DeviceId == 0x8c);
             if (FAILED(h = D3D12CreateDevice(chosen.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&dev)))) return fail(e, "D3D12CreateDevice", h);
         }
         if (!queue) {
