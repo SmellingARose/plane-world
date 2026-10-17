@@ -1,4 +1,6 @@
 #include "appcontroller.h"
+#include <QQuickWindow>
+#include <QScreen>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -115,8 +117,8 @@ void AppController::setMode(const QString& m) {
     reloadSim();
     if (m_mode == "fly") {
         m_paused = false; emit pausedChanged();
-        m_lastTick = m_clock.elapsed() / 1000.0;
-        m_timer.start();
+        m_lastTick = m_clock.elapsed() / 1000.0; m_timeDebt = 0;
+        if (!m_window) m_timer.start();          // headless / no window yet: fall back to the timer
     } else {
         m_timer.stop();
     }
@@ -832,6 +834,41 @@ void AppController::airStart(double altitude, double speed) {
     m_sim->setVelocity({speed, 0, 0}, {});   // craft forward is +X
     if (m_backend && m_sim->isRunningFull()) m_backend->reset();
     updateTelemetry();
+}
+
+void AppController::attachWindow(QQuickWindow* w) {
+    m_window = w;
+    if (!w) return;
+    m_timer.stop();
+    // afterAnimating runs on the GUI thread once per frame, right before the scene is synchronised for rendering.
+    connect(w, &QQuickWindow::afterAnimating, this, &AppController::frameTick);
+}
+
+void AppController::frameTick() {
+    if (m_mode != "fly") { m_lastTick = m_clock.elapsed() / 1000.0; return; }
+    const double now = m_clock.elapsed() / 1000.0;
+    double dt = std::clamp(now - m_lastTick, 0.0, 0.05);
+    m_lastTick = now;
+    // Snap timer noise to the display interval so motion advances evenly every frame; repay the difference slowly.
+    // Frame interval = smoothed measured cadence (the screen's nominal refresh can differ from the rate Qt
+    // actually presents at, e.g. a 120 Hz panel driven at 60 fps).
+    if (dt > 0.002 && dt < 0.05) m_frameEma = m_frameEma > 0 ? m_frameEma + (dt - m_frameEma) * 0.05 : dt;
+    const double frame = m_frameEma > 0 ? m_frameEma : dt;
+    m_timeDebt += dt;
+    double step = std::abs(dt - frame) < 0.3 * frame ? frame : dt;
+    // Slow drift correction: repay ~3 % of the accumulated wall/sim difference per frame (a few % speed change,
+    // invisible), so sim time tracks wall time without re-injecting per-frame timer noise.
+    step += std::clamp((m_timeDebt - step) * 0.03, -0.05 * frame, 0.05 * frame);
+    m_timeDebt -= step;
+    if (std::abs(m_timeDebt) > 0.1) m_timeDebt = 0;   // after a stall, resync instead of fast-forwarding
+    QElapsedTimer ft; ft.start();
+    m_lastStep = m_paused ? 0 : step;
+    if (!m_paused && step > 0) stepFly(step);
+    static const bool logFrames = qEnvironmentVariableIsSet("PW_FRAME_LOG");
+    if (logFrames) fprintf(stderr, "frame dt=%.2fms step=%.2fms work=%.2fms\n", dt * 1e3, step * 1e3, ft.nsecsElapsed() / 1e6);
+    m_wallAccum += step;
+    m_statAccum += step;
+    if (m_statAccum >= 0.1) { m_statAccum = 0; updateTelemetry(); }
 }
 
 void AppController::tick() {

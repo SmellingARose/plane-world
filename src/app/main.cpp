@@ -9,6 +9,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTimer>
+#include "appcontroller.h"
 #include "pw/cpu.h"
 #include "pw/gpu.h"
 #include "pw/flow/lbm.h"
@@ -44,6 +45,7 @@ int main(int argc, char** argv) {
     engine.loadFromModule("PlaneWorld", "Main");
     if (engine.rootObjects().isEmpty()) return 1;
     auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+    if (win && AppController::instance()) AppController::instance()->attachWindow(win);   // FLY physics on the frame clock
 
     // --size WxH: window size in logical pixels (screenshots)
     if (const QStringList wh = value("--size").split('x'); win && wh.size() == 2) win->resize(wh[0].toInt(), wh[1].toInt());

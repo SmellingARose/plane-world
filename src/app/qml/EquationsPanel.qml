@@ -41,11 +41,14 @@ PwSection {
             shortcut: !App.equationsLive ? "E" : (App.paused ? "P" : "")
             shortcutLabel: !App.equationsLive ? "turn on" : "resume"
         }
+        // Integer models: cards and value labels are created once and only their text updates at the 10 Hz capture
+        // rate. (A JS-array model rebuilt every card each capture, which hitched the frame — visible as flight jitter.)
         Repeater {
-            model: App.equationsLive ? App.equations : []
+            model: App.equationsLive ? App.equations.length : 0
             delegate: ColumnLayout {
                 id: card
-                required property var modelData
+                required property int index
+                readonly property var modelData: App.equations[index] || ({ title: "", part: "", formula: "", values: [], force: [0, 0, 0], fmag: 0, torque: [0, 0, 0], tmag: 0, source: "" })
                 Layout.fillWidth: true
                 spacing: 2
                 RowLayout {
@@ -65,8 +68,10 @@ PwSection {
                     Layout.fillWidth: true
                     spacing: Theme.s2
                     Repeater {
-                        model: card.modelData.values
-                        Text { required property var modelData; text: modelData.symbol + " = " + Theme.num(modelData.value)
+                        model: card.modelData.values.length
+                        Text { required property int index
+                            readonly property var v: card.modelData.values[index] || ({ symbol: "", value: 0 })
+                            text: v.symbol + " = " + Theme.num(v.value)
                             font.family: Theme.mono; font.pixelSize: Theme.caption; color: Theme.textMuted }
                     }
                 }

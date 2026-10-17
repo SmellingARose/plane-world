@@ -252,6 +252,17 @@ private:
     void reloadSim();
     void applyAeroToSim();
     void tick();
+public:
+    /// Drive FLY physics from the window's frame clock (once per rendered frame, vsync-paced) instead of a free
+    /// timer, so every frame advances exactly one frame of sim time (no 1-vs-2-tick judder).
+    void attachWindow(class QQuickWindow* w);
+    double lastFrameStep() const { return m_lastStep; }
+private:
+    void frameTick();
+    class QQuickWindow* m_window = nullptr;
+    double m_timeDebt = 0;
+    double m_frameEma = 0;
+    double m_lastStep = 0;   // sim time advanced in the last frame (s)   // smoothed frame interval (s)   // measured wall time not yet simulated (drift correction for refresh snapping)
     void stepFly(double dt);
     void applyKeybinds(double dt);
     void updateTelemetry();

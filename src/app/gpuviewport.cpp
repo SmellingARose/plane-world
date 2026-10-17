@@ -351,8 +351,11 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
     }
 
     const double t = m_clock.elapsed() / 1000.0;
-    const double dt = std::clamp(t - m_lastT, 0.0, 0.1);
+    double dt = std::clamp(t - m_lastT, 0.0, 0.1);
     m_lastT = t;
+    // While flying, follow with the same smoothed frame step the physics used, so the camera's lag behind the
+    // craft doesn't wobble with render-thread timer noise.
+    if (app && app->mode() == "fly" && app->lastFrameStep() > 0) dt = app->lastFrameStep();
     stepCamera(dt);
     pw::render::Camera cam;
     const bool cockpit = app && app->mode() == "fly" && app->cameraMode() == "cockpit";
