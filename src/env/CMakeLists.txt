@@ -39,6 +39,7 @@ add_library(pwenv STATIC
   src/env_selftests.cpp
   src/terrain_selftests.cpp
   src/water_selftests.cpp
+  src/validate_selftests.cpp
   src/vegetation_selftests.cpp)
 target_include_directories(pwenv PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${pw_stb_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/shaders/include)
 target_link_libraries(pwenv PUBLIC pwcore pwgpu PRIVATE pw_zlib)

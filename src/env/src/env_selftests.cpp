@@ -55,6 +55,8 @@ static bool shaderLibraryTest(selftest::Context& ctx) {
     return c.ok;
 }
 
+namespace validate { void registerSelfTests(); }
+
 void registerSelfTests() {
     static std::once_flag once;
     std::call_once(once, [] {
@@ -63,6 +65,7 @@ void registerSelfTests() {
         terrain::registerSelfTests();
         water::registerSelfTests();
         veg::registerSelfTests();
+        validate::registerSelfTests();   // validate.* (physics vs theory, docs/VALIDATION.md)
     });
 }
 

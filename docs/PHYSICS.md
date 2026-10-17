@@ -116,6 +116,18 @@ slipstream is on, so the slipstream-off digest is unchanged. Implementations are
 | `blockage` | Bodies shadow rotor wakes | wake attenuated behind bodies on the wake axis | `src/core/src/sim/fast_gaps.cpp:29`, `aero.cpp:156` |
 | `cadWash` | CAD panels see the slipstream per panel | each panel samples wake + downwash velocity at its centre | `craft_sim.cpp:688`, `src/core/src/sim/panel_aero.cpp:147` |
 
+The following toggles are correctness fixes. Unlike the toggles above, they apply whether or not slipstream is
+on. All default to on, and `FastAeroToggles::setSwiftLegacy()` turns them off for the Swift-parity tests.
+`docs/VALIDATION.md` has the before/after numbers.
+
+| Toggle | Effect |
+|---|---|
+| `hingeAtAC` | All-moving surfaces pivot near the aerodynamic centre; the servo load comes from the centre-of-pressure offset |
+| `staticFriction` | Ground corners and slow wheels hold with an anchored tangential spring, capped at μN (Coulomb stiction); no creep on slopes |
+| `spinReaction` | The airframe takes −dh/dt of wheel and rotor spin (motor reaction); angular momentum is conserved |
+| `finiteWingStall` | Stall angle × 0.9·a₀/a(A), capped at 35°, so a finite wing reaches CLmax ≈ 0.9·c_lmax |
+| `exactMass` | Mass properties follow fuel use on every substep, including burnout |
+
 ## 8. Ground, wheels, water
 
 | What | Equation | Code |
