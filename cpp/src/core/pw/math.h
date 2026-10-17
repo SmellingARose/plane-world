@@ -30,7 +30,10 @@ struct Vec3d {
     static constexpr Vec3d splat(double s) { return {s, s, s}; }
     constexpr Vec3d operator+(const Vec3d& b) const { return {x + b.x, y + b.y, z + b.z}; }
     constexpr Vec3d operator-(const Vec3d& b) const { return {x - b.x, y - b.y, z - b.z}; }
-    constexpr Vec3d operator-() const { return {-x, -y, -z}; }
+    /// Swift's SIMD prefix minus is `0 - v` (so -(+0) = +0), unlike C's IEEE negation; keep Swift's semantics.
+    constexpr Vec3d operator-() const { return {0.0 - x, 0.0 - y, 0.0 - z}; }
+    /// True IEEE negation (C `-v`, used where Apple's C headers negate).
+    constexpr Vec3d negated() const { return {-x, -y, -z}; }
     constexpr Vec3d operator*(double s) const { return {x * s, y * s, z * s}; }
     constexpr Vec3d operator/(double s) const { return {x / s, y / s, z / s}; }   // Swift SIMD / scalar divides each lane
     Vec3d& operator+=(const Vec3d& b) { x += b.x; y += b.y; z += b.z; return *this; }

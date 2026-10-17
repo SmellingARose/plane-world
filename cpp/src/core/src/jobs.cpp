@@ -290,9 +290,12 @@ JobSystem::JobSystem(int workers, bool background) {
         threads_.emplace_back([this, i, cl, background] {
             setCurrentThreadName("pw.job." + std::to_string(i));
             configureWorker(cl, background);
+            started_.fetch_add(1, std::memory_order_release);
             workerLoop(i);
         });
     }
+    // Return only once every worker is up, so thread start-up (names, TLS) never lands in a caller's measured window.
+    while (started_.load(std::memory_order_acquire) < workerCount_) std::this_thread::yield();
 }
 
 JobSystem::~JobSystem() {

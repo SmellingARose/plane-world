@@ -129,6 +129,7 @@ private:
     std::atomic<int> sleeping_{0};
     std::atomic<unsigned> rr_{0};
     std::atomic<bool> running_{true};
+    std::atomic<int> started_{0};
     mutable std::mutex statsMutex_;
     std::map<std::string, double> stats_;
 };

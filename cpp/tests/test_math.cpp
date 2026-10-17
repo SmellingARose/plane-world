@@ -20,6 +20,15 @@ Mat3d hm(const pw::json::Value& v) { return Mat3d::columns(hv(v[0]), hv(v[1]), h
 bool same(double a, double b) { return std::memcmp(&a, &b, 8) == 0; }
 bool same(const Vec3d& a, const Vec3d& b) { return same(a.x, b.x) && same(a.y, b.y) && same(a.z, b.z); }
 bool same(const Quatd& a, const Quatd& b) { return same(a.x, b.x) && same(a.y, b.y) && same(a.z, b.z) && same(a.w, b.w); }
+#if defined(__APPLE__) && defined(__aarch64__)
+constexpr bool kAppleLibm = true;
+#else
+constexpr bool kAppleLibm = false;
+#endif
+bool sameOrUlps(const Quatd& a, const Quatd& b, uint64_t n) {
+    if (kAppleLibm) return same(a, b);
+    return pw::parity::ulps(a.x, b.x) <= n && pw::parity::ulps(a.y, b.y) <= n && pw::parity::ulps(a.z, b.z) <= n && pw::parity::ulps(a.w, b.w) <= n;
+}
 bool same(const Mat3d& a, const Mat3d& b) { return same(a.c[0], b.c[0]) && same(a.c[1], b.c[1]) && same(a.c[2], b.c[2]); }
 }
 
@@ -43,8 +52,9 @@ TEST_CASE("math: Vec3d / Quatd / Mat3d are bit-identical to Apple simd (Swift)")
         CHECK(same(q.inverse(), hq(row["inv"])));
         CHECK(same(q.inverse().act(a), hv(row["invact"])));
         CHECK(same(Quatd{q.x * 1.37, q.y * 1.37, q.z * 1.37, q.w * 1.37}.normalized(), hq(row["qnorm"])));
-        CHECK(same(Quatd::angleAxis(ang, ax), hq(row["aa"])));
-        CHECK(same(Quatd::eulerXYZDegrees(e), hq(row["euler"])));
+        // angleAxis / euler use sin and cos: bit-exact with Apple's libm, within a few ulp of other platforms' libm.
+        CHECK(sameOrUlps(Quatd::angleAxis(ang, ax), hq(row["aa"]), 4));
+        CHECK(sameOrUlps(Quatd::eulerXYZDegrees(e), hq(row["euler"]), 8));
         Mat3d R = Mat3d::fromQuat(q);
         CHECK(same(R, hm(row["mq"])));
         CHECK(same(M * a, hv(row["mv"])));
