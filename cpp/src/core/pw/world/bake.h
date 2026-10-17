@@ -7,6 +7,7 @@
 // Not baked headless (as in Swift): the GPU FFT ocean and FLIP fluid zones. Not yet ported (see bake() errors):
 // GPU hydraulic/thermal erosion (procedural terrain is generated un-eroded and flagged), PNG heightmaps
 // (raw 16-bit .r16/.raw work), real-world DEM tiles (network) and compressed terrain edits in params.
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -16,6 +17,15 @@
 namespace pw::world {
 
 struct SplatParams { double seaLevel = 0, snowLine = 1600, rockSlope = 0.2, beachHeight = 4; };
+
+/// Integer rectangle of samples [x0, x1) x [y0, y1) (Swift GridRect).
+struct GridRect {
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    bool empty() const { return x1 <= x0 || y1 <= y0; }
+    GridRect clamped(int w, int h) const { return {x0 < 0 ? 0 : x0, y0 < 0 ? 0 : y0, x1 > w ? w : x1, y1 > h ? h : y1}; }
+    GridRect expanded(int n) const { return {x0 - n, y0 - n, x1 + n, y1 + n}; }
+    bool operator==(const GridRect&) const = default;
+};
 
 /// CPU heightfield: base + sculpt delta = composite heights, moisture and the derived material splat.
 class HeightField {
@@ -39,10 +49,16 @@ public:
     geo::Vec2d worldMax() const { return {origin.x + (width - 1) * spacing, origin.y + (height - 1) * spacing}; }
     /// heights = base + delta, splat, min/max over the whole field.
     void recompute();
+    /// heights = base + delta over `r` and the splat over r expanded by one sample (no min/max update; the
+    /// terrain module keeps a min/max pyramid for incremental edits). Rows run on JobSystem::shared().
+    void recomposite(const GridRect& r);
+    /// Automatic material (slope / height / moisture) blended with paint over `r`. Rows run in parallel.
+    void recomputeSplat(const GridRect& r);
+    GridRect fullRect() const { return {0, 0, width, height}; }
+    double sampleClamped(const std::vector<float>& g, double u, double v) const;
     static double smoothstep(double a, double b, double x);
 private:
-    double sampleClamped(const std::vector<float>& g, double u, double v) const;
-    void recomputeSplat();
+    void splatRow(int y, int x0, int x1);
 };
 
 /// Read-only TerrainProvider over a private HeightField (Swift BakedTerrain).
@@ -129,6 +145,13 @@ struct HeadlessWorld {
     double surfaceHeight(double x, double z) const;
     static HeadlessWorld flat();
 };
+
+/// Optional full terrain builder installed by a higher layer (pwenv: erosion, PNG heightmaps, DEM tiles, sculpt /
+/// paint edits). Returns true when it produced `out`; false with an empty `err` falls back to the built-in bake.
+using TerrainBakeHook = std::function<bool(const TerrainSpec&, const std::string& baseDir, std::shared_ptr<HeightField>& out,
+                                           std::string& err, std::vector<std::string>* notes)>;
+void setTerrainBakeHook(TerrainBakeHook hook);
+bool terrainBakeHookInstalled();
 
 /// Terrain heightfield from a spec (flat, procedural, raw heightmap). False + message when unsupported here.
 bool bakeTerrain(const TerrainSpec& spec, const std::string& baseDir, std::shared_ptr<HeightField>& out, std::string& err,

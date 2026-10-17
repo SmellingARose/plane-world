@@ -1,4 +1,5 @@
 #include "pw/world/bake.h"
+#include "pw/jobs.h"
 #include <algorithm>
 #include <cctype>
 #include <iterator>
@@ -91,16 +92,34 @@ void HeightField::recompute() {
     float lo = INFINITY, hi = -INFINITY;
     for (std::size_t i = 0; i < n; ++i) { heights[i] = base[i] + delta[i]; lo = std::min(lo, heights[i]); hi = std::max(hi, heights[i]); }
     minHeight = lo; maxHeight = hi;
-    recomputeSplat();
+    recomputeSplat(fullRect());
 }
 
-void HeightField::recomputeSplat() {
+void HeightField::recomposite(const GridRect& rect) {
+    GridRect r = rect.clamped(width, height);
+    if (r.empty()) return;
+    jobs::JobSystem::shared().parallelFor(r.y1 - r.y0, 16, [&](int a, int b) {
+        for (int y = r.y0 + a; y < r.y0 + b; ++y)
+            for (int x = r.x0; x < r.x1; ++x) { std::size_t i = std::size_t(y) * std::size_t(width) + std::size_t(x); heights[i] = base[i] + delta[i]; }
+    }, "terrain.composite");
+    recomputeSplat(r.expanded(1));
+}
+
+void HeightField::recomputeSplat(const GridRect& rect) {
+    GridRect r = rect.clamped(width, height);
+    if (r.empty()) return;
+    jobs::JobSystem::shared().parallelFor(r.y1 - r.y0, 16, [&](int a, int b) {
+        for (int y = r.y0 + a; y < r.y0 + b; ++y) splatRow(y, r.x0, r.x1);
+    }, "terrain.splat");
+}
+
+void HeightField::splatRow(int y, int x0, int x1) {
     const int w = width, hgt = height;
     const double s = spacing;
     const SplatParams sp = splat;
-    for (int y = 0; y < hgt; ++y) {
+    {
         int ym = std::max(y - 1, 0), yp = std::min(y + 1, hgt - 1);
-        for (int x = 0; x < w; ++x) {
+        for (int x = x0; x < x1; ++x) {
             int xm = std::max(x - 1, 0), xp = std::min(x + 1, w - 1);
             auto H = [&](int xx, int yy) { return heights[std::size_t(yy) * std::size_t(w) + std::size_t(xx)]; };
             double dx = double(H(xp, y) - H(xm, y)) / (double(xp - xm) * s);
@@ -281,7 +300,9 @@ void generateProcedural(HeightField& field, uint64_t seed, const ProceduralParam
     const double hs = params.heightScale, sea = params.seaLevelFraction, ridgedMix = params.ridged, warp = params.warp;
     const int maxOct = std::max(1, std::min(params.octaves, int(std::log2(params.featureSize / (2 * s))) + 1));
     float* out = field.base.data();
-    for (int y = 0; y < H; ++y)
+    // Rows in parallel (each sample is independent, so the result is identical to a serial loop).
+    jobs::JobSystem::shared().parallelFor(H, 8, [&](int ya, int yb) {
+    for (int y = ya; y < yb; ++y)
         for (int x = 0; x < W; ++x) {
             double wx = (o.x + double(x) * s) * invF, wz = (o.y + double(y) * s) * invF;
             double qx = warpN.fbm(wx * 0.5 + 3.1, wz * 0.5 + 1.7, 2), qz = warpN.fbm(wx * 0.5 - 5.2, wz * 0.5 + 8.3, 2);
@@ -293,16 +314,19 @@ void generateProcedural(HeightField& field, uint64_t seed, const ProceduralParam
             h = std::pow(std::max(h, 0.0), 1.35);
             out[std::size_t(y) * std::size_t(W) + std::size_t(x)] = float(h);
         }
+    }, "terrain.procedural");
     std::size_t N = std::size_t(W) * std::size_t(H);
     float lo = INFINITY, hi = -INFINITY;
     for (std::size_t i = 0; i < N; ++i) { lo = std::min(lo, out[i]); hi = std::max(hi, out[i]); }
     float scale = float(hs) / std::max(hi - lo, 1e-6f), off = float(sea * hs);
     for (std::size_t i = 0; i < N; ++i) out[i] = (out[i] - lo) * scale - off;
-    for (std::size_t i = 0; i < N; ++i) {
+    jobs::JobSystem::shared().parallelFor(int(N), 65536, [&](int ia, int ib) {
+    for (std::size_t i = std::size_t(ia); i < std::size_t(ib); ++i) {
         double h = double(out[i]) / std::max(hs, 1.0);
         double m = std::min(1.0, std::max(0.0, 0.65 - h * 0.8 + 0.15 * n.noise(double(i % std::size_t(W)) * 0.01, double(i / std::size_t(W)) * 0.01)));
         field.moisture[i] = float(m);
     }
+    }, "terrain.moisture");
 }
 
 static void finishBase(HeightField& f) {
@@ -496,8 +520,17 @@ static bool readRaw16(const std::string& path, int& side, std::vector<float>& va
     return true;
 }
 
+static TerrainBakeHook& bakeHook() { static TerrainBakeHook h; return h; }
+void setTerrainBakeHook(TerrainBakeHook hook) { bakeHook() = std::move(hook); }
+bool terrainBakeHookInstalled() { return bool(bakeHook()); }
+
 bool bakeTerrain(const TerrainSpec& spec, const std::string& baseDir, std::shared_ptr<HeightField>& out, std::string& err,
                  std::vector<std::string>* notes) {
+    if (const auto& hook = bakeHook()) {
+        std::string herr;
+        if (hook(spec, baseDir, out, herr, notes)) return true;
+        if (!herr.empty()) { err = herr; return false; }
+    }
     auto note = [&](std::string s) { if (notes) notes->push_back(std::move(s)); };
     switch (spec.kind) {
     case TerrainKind::Flat: {

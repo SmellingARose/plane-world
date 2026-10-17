@@ -17,6 +17,7 @@
 #include "pw/parity.h"
 #include "pw/evo/train.h"
 #include "pw/selftest.h"
+#include "pw/env/env.h"
 
 int runBench(const std::vector<std::string>& args);
 int runTrain(const std::vector<std::string>& args);
@@ -33,6 +34,7 @@ static bool has(const std::vector<std::string>& a, const char* flag) {
 
 int main(int argc, char** argv) {
     std::vector<std::string> args(argv, argv + argc);
+    pw::env::install();   // full terrain builder for headless world bakes (erosion, PNG heightmaps, edits)
     if (has(args, "--version")) { std::printf("Plane World (C++) %s\n", PW_VERSION); return 0; }
     if (has(args, "--info")) {
         std::printf("Plane World (C++) %s\ncpu: %s\ngpu backend: %s\nparity data: %s\n", PW_VERSION, pw::cpu::describe().c_str(),
@@ -41,6 +43,7 @@ int main(int argc, char** argv) {
     }
     if (has(args, "--selftest")) {
         pw::selftest::registerCoreTests();
+        pw::env::registerSelfTests();   // terrain.*, water.*, vegetation.*, env.*
         // GPU smoke as a self-test (skipped with a note when the machine has no usable GPU device).
         pw::selftest::add("gpu.smoke", [](pw::selftest::Context& c) {
             auto r = pw::gpu::smokeTest(false);

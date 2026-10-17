@@ -472,9 +472,15 @@ bool worldBake(selftest::Context& c) {
     k.expect(bake(proc, "", {}, 1, p2, err), "bake procedural again");
     const auto& f1 = p1.terrain->field();
     k.expect(f1.heights == p2.terrain->field().heights && f1.splatW == p2.terrain->field().splatW, "procedural bake deterministic");
-    k.close(f1.minHeight, -pp.seaLevelFraction * pp.heightScale, 1e-3, "relief spans down to -sea");
-    k.close(f1.maxHeight, (1 - pp.seaLevelFraction) * pp.heightScale, 1e-2, "relief spans up to heightScale");
-    k.expect(!p1.notes.empty(), "erosion skip noted");
+    const bool fullBuilder = terrainBakeHookInstalled();   // pwenv installed: erosion runs (CPU, deterministic)
+    if (!fullBuilder) {
+        k.close(f1.minHeight, -pp.seaLevelFraction * pp.heightScale, 1e-3, "relief spans down to -sea");
+        k.close(f1.maxHeight, (1 - pp.seaLevelFraction) * pp.heightScale, 1e-2, "relief spans up to heightScale");
+    } else {
+        k.expect(f1.minHeight >= -pp.seaLevelFraction * pp.heightScale - 1 && f1.maxHeight <= (1 - pp.seaLevelFraction) * pp.heightScale + 1 &&
+                 f1.maxHeight - f1.minHeight > 0.5 * pp.heightScale, "eroded relief within the noise range");
+    }
+    k.expect(!p1.notes.empty(), fullBuilder ? "erosion device noted" : "erosion skip noted");
     double hcen = f1.sampleHeight(0, 0);
     auto down = p1.terrain->raycast(geo::Ray({0, 2000, 0}, {0, -1, 0}), 5000);
     k.expect(down && std::fabs(down->position.y - hcen) < 1e-3, "procedural raycast hits surface");
@@ -511,7 +517,8 @@ bool worldBake(selftest::Context& c) {
         k.close(h3.terrain->height(15, 15), 150, 1e-3, "heightmap corner (3,3)");
     }
     hm.terrain.heightmapPath = "h.png";
-    k.expect(!bake(hm, dir, {}, 1, h3, err) && err.find("raw 16-bit") != std::string::npos, "PNG heightmap -> clear message");
+    if (!fullBuilder) k.expect(!bake(hm, dir, {}, 1, h3, err) && err.find("raw 16-bit") != std::string::npos, "PNG heightmap -> clear message");
+    else k.expect(!bake(hm, dir, {}, 1, h3, err) && err.find("h.png") != std::string::npos, "missing PNG heightmap -> clear message");
     fs::remove_all(dir);
     WorldDocument rw; rw.terrain.kind = TerrainKind::RealWorld;
     k.expect(!bake(rw, "", {}, 1, h3, err) && err.find("network") != std::string::npos, "real-world terrain -> clear message");
