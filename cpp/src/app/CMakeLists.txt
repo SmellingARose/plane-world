@@ -16,13 +16,13 @@ set_target_properties(pwapp PROPERTIES
   MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
   MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION})
 
-set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/Theme.qml qml/WorldTools.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(pwapp
   URI PlaneWorld
   VERSION 1.0
   QML_FILES ${PW_APP_QML}
 )
-target_link_libraries(pwapp PRIVATE Qt6::Quick Qt6::QuickControls2 pwcore pwgpu pwrender pwflow pwflow_render)
+target_link_libraries(pwapp PRIVATE Qt6::Quick Qt6::QuickControls2 pwcore pwgpu pwrender pwflow pwflow_render pwenv pwenv_render)   # pwenv: WORLD (P5b)
 
 if(WIN32)
   # Deploy Qt next to the exe for CI artefacts (windeployqt from the same Qt install).
