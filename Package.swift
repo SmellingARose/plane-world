@@ -24,13 +24,15 @@ let package = Package(
         .target(name: "PWTerrain", dependencies: ["PWCore", "PWRender"], path: "Sources/Terrain", swiftSettings: common),
         .target(name: "PWVegetation", dependencies: ["PWCore", "PWRender"], path: "Sources/Vegetation", swiftSettings: common),
         .target(name: "PWWater", dependencies: ["PWCore", "PWRender"], path: "Sources/Water", swiftSettings: common),
+        // Full-flow CFD (GPU lattice-Boltzmann) behind PWCore.AeroBackend; see docs/FIDELITY.md.
+        .target(name: "PWFlow", dependencies: ["PWCore"], path: "Sources/Flow", swiftSettings: common, linkerSettings: [.linkedFramework("Metal")]),
         .target(name: "PWCraft", dependencies: ["PWCore", "PWRender", "PWPhysics"], path: "Sources/Craft", swiftSettings: common),
         // Evolution workbench (EVOLVE tab): headless world, evaluators, algorithms, JavaScriptCore scripting.
-        .target(name: "PWEvolution", dependencies: ["PWCore", "PWPhysics", "PWCollision", "PWTerrain", "PWWater", "PWVegetation"], path: "Sources/Evolution",
+        .target(name: "PWEvolution", dependencies: ["PWCore", "PWPhysics", "PWCollision", "PWTerrain", "PWWater", "PWVegetation", "PWFlow", "PWCraft"], path: "Sources/Evolution",
                 swiftSettings: common, linkerSettings: [.linkedFramework("JavaScriptCore")]),
         .executableTarget(
             name: "PlaneWorld",
-            dependencies: ["PWCore", "PWRender", "PWPhysics", "PWCollision", "PWTerrain", "PWVegetation", "PWWater", "PWCraft", "PWEvolution"],
+            dependencies: ["PWCore", "PWRender", "PWPhysics", "PWCollision", "PWTerrain", "PWVegetation", "PWWater", "PWCraft", "PWEvolution", "PWFlow"],
             path: "Sources/App",
             resources: [.copy("Resources/Crafts")],
             swiftSettings: common),

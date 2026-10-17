@@ -47,6 +47,9 @@ struct SimPart {
     var kPropPower = 0.0                                       // Propulsion.propPower(thrust, max(0.1, d))
     var cornerStart = 0, cornerCount = 0                      // range in CraftSim.cornerFlat
     var meshSlot = -1, itemStart = 0, itemCount = 0           // CAD panel work items in CraftSim.panels
+    var wingGroup = -1                                        // horseshoe group (downwash), set by buildWingGroups
+    var kIrot = 0.0                                           // spin inertia of a prop / wheel about its axis (gyro)
+    var isBlocker = false                                     // body that shadows rotor wakes (blockage)
 
     mutating func bake() {
         let t = type
@@ -68,6 +71,11 @@ struct SimPart {
         servoAxis = axisName == "x" ? [1, 0, 0] : axisName == "y" ? [0, 1, 0] : [0, 0, 1]
         servoAxisBase = baseQ.act(servoAxis)
         kPropPower = Propulsion.propPower(staticThrust: kThrust, diameter: max(0.1, kD))
+        // Spin inertia: a prop as two slender blades (m·R²/3), a wheel as a disc (m·r²/2).
+        if t == .prop { let R = max(0.05, kD / 2); kIrot = docMass * R * R / 3 }
+        else if t == .wheel { kIrot = 0.5 * docMass * kR * kR } else { kIrot = 0 }
+        // Motors are abstract 0.5 m placeholder boxes, so they do not shadow wakes.
+        isBlocker = isBody && t != .motor
     }
 }
 
@@ -86,6 +94,8 @@ final class PanelBatch {
     var qp: UnsafeMutablePointer<Quatd>, op: UnsafeMutablePointer<Vec3d>, out: UnsafeMutablePointer<ForceTorque>
     var com = Vec3d.zero, linVel = Vec3d.zero, angVel = Vec3d.zero, wind = Vec3d.zero
     var rho = 0.0, nu = 0.0, sos = 340.0
+    /// cadWash: sample rotor wakes + wing downwash per panel (set per substep; false = original uniform-wind path).
+    var washOn = false, wash = PanelWash()
     lazy var loop = ParallelLoop { [unowned(unsafe) self] r in self.runItems(r) }
 
     init(meshes: [PanelMesh]) {
@@ -103,6 +113,11 @@ final class PanelBatch {
     func runItems(_ r: Range<Int>) {
         for k in r {
             let it = items[k], s = it.slot
+            if washOn {
+                out[k] = meshes[s].evaluate(range: it.lo..<it.hi, toWorld: qp[s], origin: op[s], com: com, linVel: linVel, angVel: angVel,
+                                            wind: wind, wash: wash, rho: rho, nu: nu, speedOfSound: sos)
+                continue
+            }
             out[k] = meshes[s].evaluate(range: it.lo..<it.hi, toWorld: qp[s], origin: op[s], com: com, linVel: linVel, angVel: angVel,
                                         wind: wind, rho: rho, nu: nu, speedOfSound: sos)
         }
@@ -111,7 +126,12 @@ final class PanelBatch {
 
 /// One spanwise wing strip evaluated per substep (possibly in parallel).
 struct WingStrip { var part: Int; var spanOffset: Double; var area: Double }
-struct StripResult { var ft = ForceTorque.zero; var hinge = 0.0; var stalled = false; var bigStall = false }
+struct StripResult {
+    var ft = ForceTorque.zero; var hinge = 0.0; var stalled = false; var bigStall = false
+    // Equation-capture / downwash bookkeeping (written every substep, never read by the force path).
+    var lift = Vec3d.zero, pac = Vec3d.zero
+    var alpha = 0.0, speed = 0.0, cl = 0.0, cd = 0.0, cp = 0.25, ch = 0.0, re = 0.0, phi = 1.0, gain = 1.0, flap = 0.0
+}
 
 public final class CraftSim: CraftSimulation {
     // configuration
@@ -126,6 +146,22 @@ public final class CraftSim: CraftSimulation {
         wakeBuf.deallocate(); wakeCap = max(1, parts.filter { $0.type == .prop }.count)
         wakeBuf = .allocate(capacity: wakeCap); wakeBuf.initialize(repeating: RotorWake(), count: wakeCap); wakeCount = 0
     }
+    // --- fidelity contract (docs/FIDELITY.md). `.full` + a configured backend: wing-strip/body/panel aero is replaced
+    // by per-part CFD forces (FullAero.swift); props keep the momentum model and drive the CFD actuator disks.
+    public var aeroModel = AeroModel.fast
+    public var aeroBackend: AeroBackend? = nil
+    /// Preallocated `.full` buffers (FullAero.swift); nil while running fast.
+    var full: FullAeroBuffers? = nil
+    /// Set once per substep in `substep` (outside substepCore): `.full` with a backend and buffers ready.
+    var fullActive = false
+    /// New fast-model effects; only consulted when `slipstream` is on.
+    public var fastToggles = FastAeroToggles()
+    /// UI-owned capture buffer; when `equationCapture?.requested` the next substep records EquationRecords.
+    public var equationCapture: EquationCapture? = nil
+    // Wing downwash horseshoes (Slipstream.swift): static groups + previous-substep state.
+    var wingGroups: [WingGroup] = []
+    var groupState = UnsafeMutablePointer<WingGroupState>.allocate(capacity: 1)
+    var horseshoes = UnsafeMutablePointer<Horseshoe>.allocate(capacity: 1), horseshoeCount = 0
     public var groundEnabled = true
     public var turbulence = 0.0
     public var stripsPerWing = 4
@@ -174,7 +210,7 @@ public final class CraftSim: CraftSimulation {
     public var sensorNoiseSeed: UInt64 = 0x9E3779B97F4A7C15
 
     public init() {}
-    deinit { stripBuf?.deallocate(); cornerTmp?.deallocate(); wakeBuf.deallocate() }
+    deinit { stripBuf?.deallocate(); cornerTmp?.deallocate(); wakeBuf.deallocate(); groupState.deallocate(); horseshoes.deallocate() }
 
     // MARK: load / outputs
     public func load(_ craft: CraftDocument) throws {
@@ -206,7 +242,7 @@ public final class CraftSim: CraftSimulation {
             if let m = parts[i].motor, parts[m].type != .motor { parts[i].motor = nil; if parts[i].type == .wheel || parts[i].type == .prop { parts[i].autoMotor = true } }
         }
         bakeParts()
-        detectDucts(); allocWakes()
+        detectDucts(); allocWakes(); buildWingGroups()
         rebuildPanelBatch()
         rebuildStrips()
         wheelCount = parts.filter { $0.type == .wheel }.count
@@ -432,8 +468,11 @@ public final class CraftSim: CraftSimulation {
         velocity = .zero; angularMomentum = .zero; time = 0; stepCounter = 0
         crashed = false; groundContact = false; maxImpactSpeed = 0; lastForce = .zero; noiseState = sensorNoiseSeed | 1
         for i in parts.indices { parts[i].contact = false; parts[i].compression = 0 }
+        for g in 0..<max(1, wingGroups.count) { groupState[g] = WingGroupState() }
+        horseshoeCount = 0
         telemetry = CraftTelemetry()
         updateEffective()
+        resetFull()
     }
 
     /// Total number of part bounding-box corners (for preallocating `writeWorldCorners` buffers).
@@ -507,7 +546,7 @@ public final class CraftSim: CraftSimulation {
     }
 
     @inline(__always) func groundHeight(_ env: SimEnvironment, _ x: Double, _ z: Double) -> Double { env.terrain?.height(x: x, z: z) ?? 0 }
-    @inline(__always) func groundNormal(_ env: SimEnvironment, _ x: Double, _ z: Double) -> Vec3d { env.terrain?.normal(x: x, z: z) ?? [0, 1, 0] }
+    @inline(__always) func groundNormal(_ env: SimEnvironment, _ x: Double, _ z: Double) -> Vec3d { env.terrain?.normal(x: x, z: z) ?? Vec3d(0, 1, 0) }
 
     /// Per-substep values handed from the pointer-based core back to the array-based epilogue.
     struct SubstepOut { var massDirty = false; var stalled = 0; var thrust = 0.0; var fuel = 0.0; var windHere = Vec3d.zero; var ground = 0.0; var atm = Atmosphere.isa(altitude: 0) }
@@ -515,9 +554,12 @@ public final class CraftSim: CraftSimulation {
     func substep(_ h: Double, _ env: SimEnvironment) {
         // The core works on raw pointers into `parts` / `cornerFlat`: no SimPart copies (each copy used to
         // retain/release ~10 heap objects of `doc`), no bounds checks, no dictionary lookups.
+        fullActive = aeroModel == .full && aeroBackend != nil && prepareFull()
+        if fullActive { fullCollect() }
         let o: SubstepOut = parts.withUnsafeMutableBufferPointer { pb in
             cornerFlat.withUnsafeBufferPointer { cb in substepCore(pb.baseAddress!, pb.count, cb.baseAddress, h, env) }
         }
+        if fullActive { fullSubmit(h, env) }
         if o.massDirty && stepCounter % 10 == 0 { updateMassProperties(keepOrigin: true) }
         updateTelemetry(env: env, atm: o.atm, windHere: o.windHere, stalled: o.stalled, thrust: o.thrust, ground: o.ground, fuel: o.fuel)
     }
@@ -525,6 +567,10 @@ public final class CraftSim: CraftSimulation {
     // @inline(never): when inlined into `substep`, the optimiser boxes a closure context on the heap every substep.
     @inline(never) func substepCore(_ P: UnsafeMutablePointer<SimPart>, _ np: Int, _ CF: UnsafePointer<Vec3d>?, _ h: Double, _ env: SimEnvironment) -> SubstepOut {
         var out = SubstepOut()
+        // Equation capture (EQUATIONS panel): records are written only on a requested substep; never changes forces.
+        let cap = equationCapture, capOn = cap?.requested == true
+        if capOn { cap!.begin() }
+        let tg = fastToggles
         // --- servos (torque/speed limited, back-driven by the previous step's hinge load)
         for i in 0..<np where P[i].type == .servo {
             let tgt = clamp(P[i].out, -1, 1) * P[i].kRange * kDegF, cap = max(1e-3, P[i].kTorque), load = P[i].load
@@ -548,29 +594,40 @@ public final class CraftSim: CraftSimulation {
         @inline(__always) func apply(_ f: Vec3d, at pw: Vec3d) { F += f; T += simd_cross(pw - position, f) }
         @inline(__always) func pointVel(_ pw: Vec3d) -> Vec3d { velocity + simd_cross(wW, pw - position) }
         let air = rho > 1e-6 && aeroEnabled
+        // `.full`: the fast wing/body/panel aero runs only on an equation-capture substep (comparison rows) and its
+        // force is discarded; the CFD per-part forces are added instead (FullAero.swift).
+        let fullOn = air && fullActive, fastAero = air && (!fullOn || capOn)
+        let F0 = F, T0 = T
         // --- rotor wakes from the previous substep's disk state
         wakeCount = 0
         if air && slipstream {
             for i in 0..<np where P[i].type == .prop && P[i].vi > 1e-6 {
-                let dir = q.act(P[i].effQ.act([1, 0, 0])), pw = origin + q.act(P[i].basePos)
+                let dir = q.act(P[i].effQ.act(Vec3d(1, 0, 0))), pw = origin + q.act(P[i].basePos)
                 let rel = windHere - (velocity + simd_cross(wW, pw - position))   // air relative to the disk (inlined: keeps the pointVel context on the stack)
                 let axis = -dir, va = max(0, simd_dot(rel, axis))
                 let R = max(0.05, P[i].kD / 2)
                 if wakeCount < wakeCap { wakeBuf[wakeCount] = RotorWake(center: pw, axis: axis, radius: R, vi: P[i].vi, vAxial: va, cross: rel - axis * simd_dot(rel, axis),
-                                 swirl: (P[i].omega >= 0 ? 1 : -1) * P[i].wakeQ / (rho * Double.pi * R * R), ducted: P[i].kDucted, owner: i); wakeCount += 1 }
+                                 swirl: (P[i].omega >= 0 ? 1 : -1) * P[i].wakeQ / (rho * Double.pi * R * R), ducted: P[i].kDucted, owner: i)
+                    wakeBuf[wakeCount].swirl0 = wakeBuf[wakeCount].swirl; wakeCount += 1 }
             }
+            if tg.blockage && wakeCount > 0 { applyBlockage(P, np, q, origin, capOn ? cap : nil) }
         }
         let wakeView = WakeView(buf: wakeCount > 0 ? UnsafePointer(wakeBuf) : nil, count: wakeCount)
         var stalledCount = 0, thrustTotal = 0.0
+        // --- wing downwash: horseshoes from the previous substep's group lift
+        horseshoeCount = 0
+        let dwOn = air && slipstream && tg.downwash && !wingGroups.isEmpty
+        if dwOn { buildHorseshoes(q, origin, rho) }
+        let dwView = DownwashView(buf: horseshoeCount > 0 ? UnsafePointer(horseshoes) : nil, count: horseshoeCount)
 
         // --- wing strips
         let ns = strips.count
-        if air && ns > 0 {
+        if fastAero && ns > 0 {
             if stripCap < ns { stripBuf?.deallocate(); stripBuf = .allocate(capacity: ns); stripCap = ns }
             let buf = stripBuf!
             strips.withUnsafeBufferPointer { sb in
                 let job = StripJob(buf: buf, parts: P, strips: sb.baseAddress!, q: q, origin: origin, wW: wW, pos: position, vel: velocity,
-                                   sos: atm.speedOfSound, rho: rho, nu: nu, wind: WindField.Prepared(wind, time: env.time), wakes: wakeView)
+                                   sos: atm.speedOfSound, rho: rho, nu: nu, wind: WindField.Prepared(wind, time: env.time), wakes: wakeView, dw: dwView)
                 // Serial path calls the struct directly (no closure context allocation, and the terrain
                 // existential is passed borrowed: no retain/release of the shared terrain per substep).
                 if ns >= parallelThreshold { JobSystem.shared.parallelFor(ns, grain: 32, label: "physics.wings") { job.run($0, terrain: env.terrain) } }
@@ -581,10 +638,12 @@ public final class CraftSim: CraftSimulation {
                     if r.bigStall { stalledCount += 1 }
                 }
             }
+            if dwOn { accumulateGroupLift(stripBuf!, ns, P, q, origin, windHere, velocity, wW, wakeView) }
+            if capOn { captureStrips(stripBuf!, ns, P, rho: rho, sos: atm.speedOfSound, dw: dwView, cap: cap!) }
         }
 
         // --- bodies: projected-area drag, or mesh panels for CAD
-        if air {
+        if fastAero {
             // CAD panels first (they do not depend on the accumulated force), serial or one reusable parallel loop
             let pb = panels
             if pb.totalPanels > 0 {
@@ -597,6 +656,8 @@ public final class CraftSim: CraftSimulation {
                 }
                 pb.com = position; pb.linVel = velocity; pb.angVel = wW; pb.wind = windHere
                 pb.rho = rho; pb.nu = nu; pb.sos = atm.speedOfSound
+                pb.washOn = air && slipstream && tg.cadWash && (wakeCount > 0 || horseshoeCount > 0)
+                pb.wash = PanelWash(wakes: wakeView, downwash: dwView)
                 if pb.items.count > 1 && pb.totalPanels >= max(parallelThreshold, PanelBatch.parallelMinPanels) {
                     JobSystem.shared.run(pb.loop, count: pb.items.count, grain: 1)
                 } else {
@@ -609,6 +670,7 @@ public final class CraftSim: CraftSimulation {
                     var ft = pb.out[s0]
                     if nItems > 1 { ft = .zero; for k in s0..<(s0 + nItems) { ft = ft + pb.out[k] } }
                     F += ft.force; T += ft.torque
+                    if capOn { capturePanels(i, P, ft, pb, rho: rho, nu: nu, sos: atm.speedOfSound, cap: cap!) }
                 } else {
                     let pw = origin + q.act(P[i].basePos + P[i].effQ.act(P[i].ctr))
                     let v = pointVel(pw) - windHere - wakeView.velocity(at: pw), sp = simd_length(v); if sp < 0.1 { continue }
@@ -616,8 +678,19 @@ public final class CraftSim: CraftSimulation {
                     let A = abs(vl.x) * s.y * s.z + abs(vl.y) * s.x * s.z + abs(vl.z) * s.x * s.y
                     let cd = P[i].kCd * (sp / atm.speedOfSound > 0.8 ? 1 + 6 * pow(sp / atm.speedOfSound - 0.8, 2) : 1)
                     apply(v * (-0.5 * rho * sp * cd * A), at: pw)
+                    if fullOn { full!.fast[i] = ForceTorque(force: v * (-0.5 * rho * sp * cd * A), torque: simd_cross(pw - position, v * (-0.5 * rho * sp * cd * A))) }
+                    if capOn { captureBodyDrag(i, rho: rho, speed: sp, cd: cd, area: A, v: v, pw: pw, cap: cap!) }
                 }
             }
+        }
+
+        if fullOn {
+            if capOn { fullFastBreakdown(P, np, ns) }
+            F = F0; T = T0; stalledCount = 0
+            for i in 0..<np where P[i].type == .servo { P[i].load = 0 }
+            let fb = full!
+            for i in 0..<np { F += fb.forces[i].force; T += fb.forces[i].torque }
+            if capOn { fullCaptureRecords(P, np, cap!) }
         }
 
         // --- propulsion
@@ -628,7 +701,7 @@ public final class CraftSim: CraftSimulation {
             switch P[i].type {
             case .prop:
                 let thr: Double = P[i].autoMotor ? P[i].out : (P[i].motor.map { clamp(P[$0].out, -1, 1) } ?? 0)
-                let dir = q.act(P[i].effQ.act([1, 0, 0])), pw = origin + q.act(P[i].basePos)
+                let dir = q.act(P[i].effQ.act(Vec3d(1, 0, 0))), pw = origin + q.act(P[i].basePos)
                 let inflowWind = windHere + wakeView.velocity(at: pw, exclude: i)   // other rotors' wakes
                 let vax = simd_dot(pointVel(pw) - inflowWind, dir)
                 let P0 = P[i].kPropPower * abs(thr) * (rho / 1.225)
@@ -642,9 +715,22 @@ public final class CraftSim: CraftSimulation {
                     let Rd = max(0.05, P[i].kD / 2)
                     P[i].vi = WakeField.diskVelocity(thrust: Tn, rho: rho, area: Double.pi * Rd * Rd, axial: vax, ducted: P[i].kDucted)
                 } else { P[i].vi = 0 }
-                apply(dir * Tn, at: pw)
                 let targetOmega = 2 * Double.pi * r.rps * abs(thr) * (thr >= 0 ? 1 : -1) * P[i].kSpin  // spin: +1 / -1 rotation sense; flips reaction torque
                 P[i].omega += (targetOmega - P[i].omega) * min(1, h / 0.4)
+                if slip && tg.pFactor && Tn > 0 && abs(P[i].omega) > 1 {
+                    // P-factor: thrust centre shifts toward the blade advancing into the crossflow, plus the in-plane
+                    // (normal) force from turning the crossflow through the disk. See pFactorLoads.
+                    let rel = inflowWind - pointVel(pw)
+                    let pf = Self.pFactorLoads(dir: dir, rel: rel, thrust: Tn, omega: P[i].omega, radius: max(0.05, P[i].kD / 2),
+                                               rho: rho, axial: vax, vi: P[i].vi)
+                    apply(dir * Tn, at: pw + pf.offset)
+                    apply(pf.normal, at: pw)
+                    if capOn { capturePFactor(i, P, pf, dir: dir, pw: pw, thrust: Tn, cap: cap!) }
+                } else {
+                    apply(dir * Tn, at: pw)
+                }
+                if capOn { captureProp(i, P, dir: dir, pw: pw, P0: P0, vax: vax, thrust: Tn, dEff: dEff, targetOmega: targetOmega, rho: rho, slip: slip,
+                                       groundH: pw.y - groundHeight(env, pw.x, pw.z), inflow: wakeView.velocity(at: pw, exclude: i), cap: cap!) }
                 P[i].spinAngle = (P[i].spinAngle + P[i].omega * h).truncatingRemainder(dividingBy: 2 * Double.pi)
                 if abs(P[i].omega) > 1 {
                     // Full shaft reaction torque on the airframe when the wake swirl is modelled (surfaces in the
@@ -665,7 +751,7 @@ public final class CraftSim: CraftSimulation {
                 let cmd = liquid > 0 ? clamp(P[i].out, 0, 1) : 0
                 P[i].spool = Propulsion.spool(P[i].spool, command: cmd, dt: h)
                 if liquid > 0 && P[i].spool > 0.01 {
-                    let dir = q.act(P[i].effQ.act([1, 0, 0])), pw = origin + q.act(P[i].basePos)
+                    let dir = q.act(P[i].effQ.act(Vec3d(1, 0, 0))), pw = origin + q.act(P[i].basePos)
                     let M = simd_length(velocity - windHere) / atm.speedOfSound
                     let Tn = P[i].kThrust * P[i].spool * Propulsion.jetLapse(rho: rho, mach: M)
                     apply(dir * Tn, at: pw)
@@ -676,7 +762,7 @@ public final class CraftSim: CraftSimulation {
             case .solid:
                 if !P[i].burning && P[i].out > 0.5 && P[i].fuel > 0 { P[i].burning = true; P[i].ignitedAt = time }
                 if P[i].burning {
-                    let dir = q.act(P[i].effQ.act([1, 0, 0])), pw = origin + q.act(P[i].basePos)
+                    let dir = q.act(P[i].effQ.act(Vec3d(1, 0, 0))), pw = origin + q.act(P[i].basePos)
                     let frac = P[i].fuel / max(P[i].fuelCapacity, 1e-9)
                     let k = Propulsion.solidProfile(fuelFraction: frac, sinceIgnition: time - P[i].ignitedAt, ambientPressure: atm.pressure)
                     let Tn = P[i].kThrust * k
@@ -751,7 +837,7 @@ public final class CraftSim: CraftSimulation {
             for i in 0..<np where P[i].type == .wheel {
                 let r = max(0.02, P[i].kR), Iw = max(0.05, 0.5 * P[i].docMass * r * r)
                 let hub = origin + q.act(P[i].basePos)
-                let axle = q.act(P[i].effQ.act([0, 0, 1]))
+                let axle = q.act(P[i].effQ.act(Vec3d(0, 0, 1)))
                 var omega = P[i].omega
                 var contact = false
                 var motorT = 0.0
@@ -807,6 +893,9 @@ public final class CraftSim: CraftSimulation {
             groundContact = anyContact
         }
 
+        // --- gyroscopic coupling of spinning rotors / wheels: d(L_body)/dt = T − ω × h_r (h_r = I_r·Ω_r along the spin axis)
+        if slipstream && tg.gyro { T += gyroTorque(P, np, q, wW, capOn ? cap : nil) }
+
         // --- buoyancy / hydrodynamics
         if let water = env.water, let hull {
             let ws = water.sample(x: position.x, z: position.z, time: env.time)
@@ -833,6 +922,7 @@ public final class CraftSim: CraftSimulation {
         var fuel = 0.0; for i in 0..<np { fuel += P[i].fuel }
         out.massDirty = massDirty; out.stalled = stalledCount; out.thrust = thrustTotal; out.fuel = fuel
         out.windHere = windHere; out.ground = groundUnder; out.atm = atm
+        if capOn { cap!.finish() }
         return out
     }
 
@@ -853,7 +943,7 @@ public final class CraftSim: CraftSimulation {
         t.angleOfAttackDeg = t.airspeed > 0.5 ? atan2(-vb.y, vb.x) / kDeg : 0
         t.sideslipDeg = t.airspeed > 0.5 ? asin(clamp(vb.z / t.airspeed, -1, 1)) / kDeg : 0
         t.mach = t.airspeed / atm.speedOfSound
-        t.gLoad = simd_dot(lastForce / mass, orientation.act([0, 1, 0])) / kGravity
+        t.gLoad = simd_dot(lastForce / mass, orientation.act(Vec3d(0, 1, 0))) / kGravity
         t.fuelKg = fuel
         t.massKg = mass
         t.thrustN = thrust
@@ -864,7 +954,7 @@ public final class CraftSim: CraftSimulation {
     // MARK: introspection for UI / tests
     public func servoAngleDeg(_ id: String) -> Double? { parts.first { $0.doc.id == id }.map { $0.angle / kDeg } }
     public func partFuel(_ id: String) -> Double? { parts.first { $0.doc.id == id }?.fuel }
-    public var heading: Vec3d { orientation.act([1, 0, 0]) }
+    public var heading: Vec3d { orientation.act(Vec3d(1, 0, 0)) }
     /// Names of servos whose aerodynamic/tyre hinge load currently exceeds their torque (HUD warning). [integrator]
     public var overloadedServos: [String] { parts.filter { $0.overload }.map { $0.doc.name } }
     /// Total remaining fuel/propellant (kg) over all parts. [integrator]
@@ -887,6 +977,9 @@ extension CraftSim {
         c.cornerFlat = cornerFlat; c.contactRadius = contactRadius
         c.cornerTmp = .allocate(capacity: max(1, cornerFlat.count))
         c.allocWakes()
+        c.fastToggles = fastToggles; c.aeroModel = aeroModel
+        c.buildWingGroups()
+        for g in 0..<wingGroups.count { c.groupState[g] = groupState[g] }
         c.strips = strips; c.outputTargets = outputTargets; c.outputTargetCache = outputTargetCache
         c.mass = mass; c.comLocal = comLocal; c.inertia = inertia; c.inertiaInv = inertiaInv
         c.position = position; c.orientation = orientation; c.velocity = velocity; c.angularMomentum = angularMomentum
@@ -911,6 +1004,7 @@ struct StripJob {
     let sos: Double, rho: Double, nu: Double
     let wind: WindField.Prepared
     let wakes: WakeView
+    var dw = DownwashView.empty
 
     func run(_ range: Range<Int>, terrain: (any TerrainProvider)?) {
         // Per-part frame, reused by consecutive strips of the same wing (strips are part-ordered).
@@ -920,13 +1014,14 @@ struct StripJob {
         var chord = 0.0, span = 0.0, flapChord = 0.0, flapDelta = 0.0, hasServo = false
         var wing = Aero.WingConst.zero
         var geSpan = 0.0
+        var group = -1
         for si in range {
             let st = strips[si]
             if st.part != lastPart {
                 lastPart = st.part
                 let p = UnsafePointer(parts + st.part)
                 let qw = q * p.pointee.effQ
-                nrm = qw.act([0, 1, 0]); c = qw.act([1, 0, 0]); s = qw.act([0, 0, 1])
+                nrm = qw.act(Vec3d(0, 1, 0)); c = qw.act(Vec3d(1, 0, 0)); s = qw.act(Vec3d(0, 0, 1))
                 chord = p.pointee.kChord; span = p.pointee.kSpan
                 pacBase = origin + q.act(p.pointee.basePos) + c * (chord * 0.25)
                 flapChord = p.pointee.flapChord
@@ -935,11 +1030,13 @@ struct StripJob {
                 if flapChord > 0, let sv = servo { flapDelta = parts[sv].angle * (p.pointee.invert ? -1 : 1) }
                 wing = p.pointee.wing
                 geSpan = max(2 * span, chord)
+                group = p.pointee.wingGroup
             }
             let pac = pacBase + s * st.spanOffset
             let gh = terrain?.height(x: pac.x, z: pac.z) ?? 0
             var wl = wind.velocity(at: pac, heightAGL: pac.y - gh)
             if wakes.count > 0 { wl += wakes.velocity(at: pac) }
+            if dw.count > 0 { wl += dw.velocity(at: pac, excludeGroup: group) }
             var a3 = -(vel + simd_cross(wW, pac - pos) - wl)       // relative airflow
             a3 -= s * simd_dot(a3, s)
             let sp = simd_length(a3)
@@ -959,7 +1056,9 @@ struct StripJob {
                 else { hinge = simd_length(f) * 0.12 * chord + abs(co.cl) * qS * 0.02 }   // prototype hinge-load model
             }
             buf[si] = StripResult(ft: ForceTorque(force: f, torque: simd_cross(pcp - pos, f)), hinge: hinge,
-                                  stalled: co.stalled, bigStall: co.stalled && span * chord > 2)
+                                  stalled: co.stalled, bigStall: co.stalled && span * chord > 2,
+                                  lift: ld * (co.cl * qS), pac: pac, alpha: alpha, speed: sp, cl: co.cl, cd: co.cd, cp: co.centerOfPressure, ch: co.hingeCh,
+                                  re: sp * chord / nu, phi: ge.phi, gain: ge.liftGain, flap: flapDelta)
         }
     }
 }
@@ -973,4 +1072,14 @@ extension CraftSim {
     }
     /// CraftSimBatch support: mass properties recomputed by `updateMassProperties` read back by the batch.
     var batchMassProperties: (mass: Double, comLocal: Vec3d, inertiaInv: Mat3d) { (mass, comLocal, inertiaInv) }
+}
+
+extension CraftSim {
+    /// Pin the rigid-body state without resetting anything else (CFD domain, rotor spin, wakes): used to measure
+    /// steady aero forces at a fixed flight condition (`--aero-compare`, flow selftests). Position is the CoM.
+    public func holdState(position p: Vec3d, orientation q: Quatd, velocity v: Vec3d) {
+        position = p; orientation = q.normalized; velocity = v; angularMomentum = .zero
+    }
+    /// Spinning-rotor speed of part `i` (rad/s), for reports.
+    public func rotorOmega(part i: Int) -> Double { i >= 0 && i < parts.count ? parts[i].omega : 0 }
 }

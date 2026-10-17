@@ -79,6 +79,7 @@ public enum PhysicsPresets {
 
 public enum PhysicsSelfTests {
     public static func register() {
+        FastGapsSelfTests.register()
         SelfTestRegistry.register("physics", "trainer-takeoff-climb") { ctx in
             let sim = CraftSim()
             try sim.load(PhysicsPresets.trainer())
@@ -184,7 +185,7 @@ public enum PhysicsSelfTests {
                 try sim.load(try JSONDecoder().decode(CraftDocument.self, from: data))
                 sim.reset(spawn: sim.restingSpawn())
                 let env = SimEnvironment(), y0 = sim.position.y
-                for o in sim.outputs { sim.setOutput(id: o.id, value: 1) }
+                for o in sim.outputs { sim.setOutput(id: o.id, value: o.kind == .servo ? 0 : 1) }   // vanes neutral, lift motors full
                 for k in 0..<(4 * 60) {
                     sim.step(dt: 1.0 / 60, env: env)
                     if k % 60 == 59 {
@@ -342,7 +343,15 @@ public enum PhysicsSelfTests {
             ctx.expect(d == PhysicsSelfTests.expectedDigest, String(format: "trajectory digest %016llx matches reference %016llx", d, PhysicsSelfTests.expectedDigest))
             let ds = PhysicsSelfTests.trajectoryDigest(slipstream: true)
             ctx.log(String(format: "digest (slipstream on)  %016llx", ds))
+            // All new fast-model effects off (FastAeroToggles): must reproduce the pre-fidelity slipstream model bit-for-bit.
+            var none = FastAeroToggles(); none.gyro = false; none.pFactor = false; none.downwash = false; none.blockage = false; none.cadWash = false
+            let d0 = PhysicsSelfTests.trajectoryDigest(slipstream: true, toggles: none)
+            ctx.log(String(format: "digest (slipstream on, new effects off) %016llx", d0))
+            for (name, t) in PhysicsSelfTests.singleToggles() {
+                ctx.log(String(format: "digest (slipstream on, only %@) %016llx", name, PhysicsSelfTests.trajectoryDigest(slipstream: true, toggles: t)))
+            }
             #if !DEBUG
+            ctx.expect(d0 == PhysicsSelfTests.expectedDigestSlipstreamLegacy, String(format: "effects-off digest %016llx matches pre-fidelity reference %016llx", d0, PhysicsSelfTests.expectedDigestSlipstreamLegacy))
             ctx.expect(ds == PhysicsSelfTests.expectedDigestSlipstream, String(format: "slipstream digest %016llx matches reference %016llx", ds, PhysicsSelfTests.expectedDigestSlipstream))
             #endif
         }
@@ -359,13 +368,24 @@ extension PhysicsSelfTests {
     static let expectedDigest: UInt64 = 0x77acda15065ef25b
     #endif
     /// Release reference with the rotor slipstream model on (debug builds only log it).
-    static let expectedDigestSlipstream: UInt64 = 0x574c741598910e2d
-    static func trajectoryDigest(slipstream: Bool = CraftSim.slipstreamDefault) -> UInt64 {
+    /// Updated for the fidelity pass: gyroscopic rotor/wheel coupling, P-factor, wing downwash, wake blockage and
+    /// CAD per-panel wash are on by default (FastAeroToggles). With all of them off the digest is still
+    /// `expectedDigestSlipstreamLegacy` (the previous reference), checked above.
+    static let expectedDigestSlipstream: UInt64 = 0xb99e6b32309ca982
+    static let expectedDigestSlipstreamLegacy: UInt64 = 0x574c741598910e2d
+    static func singleToggles() -> [(String, FastAeroToggles)] {
+        var base = FastAeroToggles(); base.gyro = false; base.pFactor = false; base.downwash = false; base.blockage = false; base.cadWash = false
+        var g = base; g.gyro = true; var p = base; p.pFactor = true; var d = base; d.downwash = true
+        var b = base; b.blockage = true; var c = base; c.cadWash = true
+        return [("gyro", g), ("pFactor", p), ("downwash", d), ("blockage", b), ("cadWash", c)]
+    }
+    static func trajectoryDigest(slipstream: Bool = CraftSim.slipstreamDefault, toggles: FastAeroToggles = FastAeroToggles()) -> UInt64 {
         var h: UInt64 = 0xcbf29ce484222325
         func mix(_ x: Double) { var b = x.bitPattern; for _ in 0..<8 { h = (h ^ (b & 0xff)) &* 0x100000001b3; b >>= 8 } }
         func mix(_ v: Vec3d) { mix(v.x); mix(v.y); mix(v.z) }
         func run(_ doc: CraftDocument, air: Bool, mesh: [Vec3d]? = nil, cmd: (CraftOutput) -> Double) {
             let s = CraftSim(); s.slipstream = slipstream
+            s.fastToggles = toggles
             guard (try? s.load(doc)) != nil else { h ^= 0xdead; return }
             if let mesh { s.setPartMesh(partID: "cad", soup: mesh) }
             s.turbulence = 0.3

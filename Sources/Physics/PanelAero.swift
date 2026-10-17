@@ -124,6 +124,91 @@ public final class PanelMesh {
     }
 }
 
+/// Local wash sampled per panel (FastAeroToggles.cadWash): rotor wakes plus wing horseshoe downwash.
+struct PanelWash {
+    var wakes = WakeView.empty
+    var downwash = DownwashView.empty
+    @inline(__always) func velocity(at p: Vec3d) -> Vec3d { wakes.velocity(at: p) + downwash.velocity(at: p, excludeGroup: -1) }
+}
+
+/// Pressure / friction split of a panel evaluation (equation capture only, never on the hot path).
+struct PanelBreakdown {
+    var pressure = Vec3d.zero, friction = Vec3d.zero
+    var windward = 0, shadowedWindward = 0, panels = 0
+    var maxQ = 0.0, meanRe = 0.0, meanCf = 0.0
+    var washMean = 0.0, washMax = 0.0
+}
+
+extension PanelMesh {
+    /// `evaluate` with the air velocity sampled per panel: wind + rotor wakes + wing downwash at the panel centre.
+    /// Same arithmetic as `evaluate` otherwise (the unwashed path is untouched so slipstream-off stays bit-identical).
+    func evaluate(range: Range<Int>, toWorld q: Quatd, origin: Vec3d, com: Vec3d, linVel: Vec3d, angVel: Vec3d,
+                  wind: Vec3d, wash: PanelWash, rho: Double, nu: Double, speedOfSound: Double) -> ForceTorque {
+        var F = Vec3d.zero, T = Vec3d.zero
+        let refL = referenceLength
+        centers.withUnsafeBufferPointer { C in orientedNormals.withUnsafeBufferPointer { N in areas.withUnsafeBufferPointer { AR in
+        shadowed.withUnsafeBufferPointer { SH in
+        for k in range {
+            let pw = origin + q.act(C[k])
+            let r = pw - com
+            let vrel = linVel + simd_cross(angVel, r) - (wind + wash.velocity(at: pw))
+            let sp = simd_length(vrel); if sp < 0.05 { continue }
+            let u = -vrel / sp
+            let n = q.act(N[k])
+            let qdyn = 0.5 * rho * sp * sp, A = AR[k]
+            let c = simd_dot(n, u)
+            var f = Vec3d.zero
+            if c < 0 {
+                if !SH[k] {
+                    let M = sp / speedOfSound
+                    let cpmax = 1 + M * M / 4
+                    f -= n * (cpmax * c * c * qdyn * A)
+                }
+            } else {
+                f += n * (0.25 * c * qdyn * A)
+            }
+            let tang = u - n * c, tl = simd_length(tang)
+            if tl > 1e-6 {
+                let re = max(1e4, sp * refL / nu)
+                let cf = 0.455 / pow(log10(re), 2.58)
+                f += tang / tl * (cf * qdyn * A * tl)
+            }
+            F += f; T += simd_cross(r, f)
+        }
+        } } } }
+        return ForceTorque(force: F, torque: T)
+    }
+
+    /// Pressure/friction breakdown for the EQUATIONS panel (same formulas as `evaluate`; capture steps only).
+    func breakdown(toWorld q: Quatd, origin: Vec3d, com: Vec3d, linVel: Vec3d, angVel: Vec3d, wind: Vec3d, wash: PanelWash?,
+                   rho: Double, nu: Double, speedOfSound: Double) -> PanelBreakdown {
+        var b = PanelBreakdown(); b.panels = count
+        var nRe = 0
+        for k in 0..<count {
+            let pw = origin + q.act(centers[k])
+            let ws = wash?.velocity(at: pw) ?? .zero
+            let wl = simd_length(ws); b.washMean += wl; b.washMax = max(b.washMax, wl)
+            let vrel = linVel + simd_cross(angVel, pw - com) - (wind + ws)
+            let sp = simd_length(vrel); if sp < 0.05 { continue }
+            let u = -vrel / sp, n = q.act(orientedNormals[k])
+            let qdyn = 0.5 * rho * sp * sp, A = areas[k], c = simd_dot(n, u)
+            b.maxQ = max(b.maxQ, qdyn)
+            if c < 0 {
+                b.windward += 1
+                if !shadowed[k] { let M = sp / speedOfSound; b.pressure -= n * ((1 + M * M / 4) * c * c * qdyn * A) } else { b.shadowedWindward += 1 }
+            } else { b.pressure += n * (0.25 * c * qdyn * A) }
+            let tang = u - n * c, tl = simd_length(tang)
+            if tl > 1e-6 {
+                let re = max(1e4, sp * referenceLength / nu), cf = 0.455 / pow(log10(re), 2.58)
+                b.friction += tang / tl * (cf * qdyn * A * tl); b.meanRe += re; b.meanCf += cf; nRe += 1
+            }
+        }
+        if nRe > 0 { b.meanRe /= Double(nRe); b.meanCf /= Double(nRe) }
+        if count > 0 { b.washMean /= Double(count) }
+        return b
+    }
+}
+
 public extension PanelMesh {
     /// Decode the prototype's `cad` field: base64 little-endian Float32 xyz triangle soup.
     static func decodePrototypeCAD(_ b64: String, scale: Double) -> [Vec3d]? {
