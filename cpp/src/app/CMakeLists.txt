@@ -1,7 +1,10 @@
 find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2)
 qt_standard_project_setup(REQUIRES 6.8)
 
-qt_add_executable(pwapp MACOSX_BUNDLE WIN32 main.cpp gpuviewport.cpp gpuviewport.h)
+# Sources and QML are globbed so the BUILD / FLY (P5a) and WORLD / EVOLVE (P5b) work can add files independently.
+file(GLOB PW_APP_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
+file(GLOB PW_APP_QML RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/*.qml)
+qt_add_executable(pwapp MACOSX_BUNDLE WIN32 ${PW_APP_SOURCES})
 if(APPLE)
   target_sources(pwapp PRIVATE gpuviewport_metal.mm)
   set_source_files_properties(gpuviewport_metal.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
@@ -17,14 +20,7 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(pwapp
   URI PlaneWorld
   VERSION 1.0
-  QML_FILES
-    qml/Main.qml
-    qml/Theme.qml
-    qml/TabPage.qml
-    qml/Inspector.qml
-    qml/CommandPalette.qml
-    qml/KeyHint.qml
-    qml/ViewportHud.qml
+  QML_FILES ${PW_APP_QML}
 )
 target_link_libraries(pwapp PRIVATE Qt6::Quick Qt6::QuickControls2 pwcore pwgpu pwrender pwflow pwflow_render)
 
