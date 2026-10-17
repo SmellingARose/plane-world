@@ -370,3 +370,24 @@ Release `--selftest all`: 92/92 pass.
 A seeded 3-generation training run gives identical `history.csv` (timing columns excluded) for K=1 with 1 worker, K=1 with 10 workers and K=2 with 10 workers.
 
 **Verdict: the default is `batchLanes = 1` (batching off); larger values are opt-in per experiment.** Each sim is branch-heavy Double work: stall, contact and servo saturation diverge across lanes, so masked execution wastes lanes. A NEON register holds only 2 Doubles. Running all 10 cores also pushes memory bandwidth and the shared power budget, so the losses get larger at high worker counts. Training throughput is already close to the M4 ceiling (about 4×P + 6×E ≈ 1350 sim-s/s). Further gains need cheaper sims (lower fidelity, two-tier evaluation), not wider ones.
+
+## C++ port (cpp/, branch cpp-port): physics substep against Swift
+
+Same machine (Apple M4), same session, same setup: craft through addStandardSensors + prepareForFlight, 1 kHz,
+flat world, wind (2,0,1), turbulence 0.3, motors 0.8 / other outputs 0.1, single thread, fast.plus profile.
+Swift: `.build/release/PlaneWorld --bench physics.substep` (median of 7). C++: `cpp/build-*/src/cli/pwcli --bench
+physics.substep.<name> --reps 7` (best of 3 medians of 7; two runs gave the same numbers to ±0.04 µs).
+The Swift numbers are lower than the baseline table above because the Swift substep has been optimised since.
+
+| craft | Swift µs/substep | C++ µs/substep | C++ speed-up | allocs/substep (Swift / C++) |
+|---|---|---|---|---|
+| Trainer, in air | 3.92 | 3.86 | 1.02x | 0 / 0 |
+| Trainer, runway | 4.95 | 4.30 | 1.15x | 0 / 0 |
+| Jet trainer, in air | 3.46 | 3.35 | 1.03x | 0 / 0 |
+| Rover, ground | 0.83 | 0.55 | 1.52x | 0 / 0 |
+| Sounding rocket | 2.14 | 1.91 | 1.12x | 0 / 0 |
+
+C++ is at least as fast on every craft; the Trainer in the air is within noise of Swift (the substep is dominated by
+the same libm calls in both). The CAD craft variants (cad60, cad60big) are not in the C++ bench yet: the C++ side has no
+sphere-mesh CAD part builder for the bench. The step allocates nothing in C++ (also enforced in pwtests for every
+craft × profile with sensors and equation capture on).

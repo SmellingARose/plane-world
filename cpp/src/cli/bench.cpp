@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 #include "pw/aero.h"
@@ -17,10 +18,74 @@
 #include "pw/simd_kernels.h"
 #include "pw/sim/craft_sim.h"
 #include "pw/sim/physics_selftests.h"
+#include "pw/craft/library.h"
+#include "pw/craft/outputs.h"
+#include "pw/sim/craft_spec.h"
+#include "pw/sim/environment.h"
+
+namespace pwcli { std::size_t allocations(); }
 
 namespace {
-struct Bench { std::string name, unit; std::function<double(int reps)> run; };   // returns items/s
+struct Bench { std::string name, unit; std::function<double(int reps)> run; bool lowerIsBetter = false; std::shared_ptr<std::string> note = {}; };
 volatile double sink = 0;
+
+
+// physics.substep.*: same setup as the Swift app's BenchCLI.physicsSubstep (docs/PERF.md): the craft passes through
+// addStandardSensors + prepareForFlight, 1 kHz, flat world, wind (2,0,1), turbulence 0.3, motors 0.8, other outputs 0.1;
+// air = spawn at 300 m with 45 m/s forward, ground = resting spawn. Reported as µs per substep (median of reps) and
+// operator-new calls per substep over 100 substeps.
+pw::craft::CraftDocument flightCraft(const std::string& name) {
+    auto d = pw::craft::presets::load(name);
+    if (!d) return {};
+    bool hasSensor = false;
+    for (auto& p : d->parts) hasSensor |= p.partType() == pw::craft::PartType::Sensor;
+    if (!hasSensor) {
+        const char* s[6][3] = {{"sn-alt", "alt", "altitudeAGL"}, {"sn-att", "att", "attitude"}, {"sn-rate", "rate", "angularRate"},
+                               {"sn-air", "air", "airspeed"}, {"sn-vs", "vs", "verticalSpeed"}, {"sn-aero", "aero", "aero"}};
+        for (auto& e : s) { auto p = pw::craft::CraftPart::make(e[0], pw::craft::PartType::Sensor, e[1]); p.setParam("kind", std::string(e[2])); d->parts.push_back(std::move(p)); }
+    }
+    return pw::craft::outputs::prepareForFlight(*d);
+}
+
+void addSubstepBenches(std::vector<Bench>& b) {
+    struct V { const char* label; const char* craft; bool air; };
+    for (V v : {V{"trainer.air", "Trainer", true}, V{"trainer.runway", "Trainer", false}, V{"jet.air", "Jet trainer", true},
+                V{"rover.ground", "Rover", false}, V{"rocket.air", "Sounding rocket", true}}) {
+        auto allocNote = std::make_shared<std::string>();
+        Bench be{std::string("physics.substep.") + v.label, "us/substep", nullptr, true};
+        be.run = [v, allocNote](int reps) {
+            static pw::sim::FlatTerrain flat(0);
+            pw::sim::CraftSim sim;
+            sim.load(pw::sim::CraftSpec::fromDocument(flightCraft(v.craft)));
+            sim.substepHz = 1000;
+            pw::sim::SimEnvironment env0; env0.terrain = &flat; env0.wind = {2, 0, 1};
+            auto resetSim = [&] {
+                if (v.air) { sim.reset({0, 300, 0}); sim.setVelocity({45, 0, 0}, {}); }
+                else sim.reset(sim.restingSpawn(0));
+                sim.turbulence = 0.3;
+                for (int i = 0; i < int(sim.outputs().size()); ++i)
+                    sim.setOutput(i, sim.outputs()[std::size_t(i)].kind == pw::sim::OutputKind::Motor ? 0.8 : 0.1);
+            };
+            std::vector<double> us;
+            const int n = 10000;
+            for (int r = 0; r < std::max(3, reps); ++r) {
+                resetSim();
+                auto env = env0;
+                auto t0 = std::chrono::steady_clock::now();
+                for (int k = 0; k < n / 20; ++k) { sim.step(0.02, env); env.time += 0.02; }
+                us.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count() / n);
+                std::size_t a0 = pwcli::allocations();
+                for (int k = 0; k < 5; ++k) { sim.step(0.02, env); env.time += 0.02; }
+                *allocNote = "allocs/substep " + std::to_string(double(pwcli::allocations() - a0) / 100);
+            }
+            sink = sim.position().y;
+            std::sort(us.begin(), us.end());
+            return us[us.size() / 2];
+        };
+        be.note = allocNote;
+        b.push_back(std::move(be));
+    }
+}
 
 std::vector<Bench> benches() {
     std::vector<Bench> b;
@@ -117,6 +182,7 @@ std::vector<Bench> benches() {
         sink = acc[0];
         return double(n) / std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 1e3;
     }});
+    addSubstepBenches(b);
     return b;
 }
 }
@@ -135,9 +201,9 @@ int runBench(const std::vector<std::string>& args) {
     int n = 0;
     for (auto& b : all) {
         if (which != "all" && b.name != which) continue;
-        double best = 0;
-        for (int r = 0; r < 3; ++r) best = std::max(best, b.run(reps));
-        std::printf("%-24s %10.2f %s\n", b.name.c_str(), best, b.unit.c_str());
+        double best = b.lowerIsBetter ? 1e300 : 0;
+        for (int r = 0; r < 3; ++r) { double x = b.run(reps); best = b.lowerIsBetter ? std::min(best, x) : std::max(best, x); }
+        std::printf("%-30s %10.2f %s  %s\n", b.name.c_str(), best, b.unit.c_str(), b.note ? b.note->c_str() : "");
         pw::json::Value e = pw::json::Value::object();
         e.set("name", pw::json::Value::string(b.name)); e.set("value", pw::json::Value::number(best)); e.set("unit", pw::json::Value::string(b.unit));
         arr.push(std::move(e)); ++n;
