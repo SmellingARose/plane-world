@@ -10,6 +10,7 @@ add_library(pwcore STATIC
   src/atmosphere.cpp
   src/jobs.cpp
   src/sim/craft_spec.cpp
+  src/sim/craft_spec_doc.cpp
   src/sim/fidelity.cpp
   src/sim/panel_aero.cpp
   src/sim/craft_sim.cpp

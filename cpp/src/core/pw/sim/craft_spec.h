@@ -13,6 +13,8 @@
 #include "pw/json.h"
 #include "pw/math.h"
 
+namespace pw::craft { struct CraftDocument; }
+
 namespace pw::sim {
 
 enum class PartType : int { Box, Cylinder, Cone, Sphere, Wing, Servo, Wheel, Motor, Prop, Jet, Tank, Solid, Cad, Sensor };
@@ -62,6 +64,8 @@ struct CraftSpec {
     /// Tolerant decode of a craft document (same defaults as Swift). Returns false (and err) only on schema errors.
     static bool fromJson(const json::Value& doc, CraftSpec& out, std::string& err);
     static bool fromFile(const std::string& path, CraftSpec& out, std::string& err);
+    /// From the editable craft document (pw/craft, P1b). Pass it through craft::outputs::prepareForFlight first, as FLY does.
+    static CraftSpec fromDocument(const craft::CraftDocument& doc);
     const PartSpec* part(const std::string& id) const;
 };
 

@@ -10,6 +10,8 @@
 #include "pw/jobs.h"
 #include "pw/parity.h"
 #include "pw/sim/craft_sim.h"
+#include "pw/craft/library.h"
+#include "pw/craft/outputs.h"
 
 using namespace pw;
 using namespace pw::sim;
@@ -24,10 +26,11 @@ struct RunResult {
 };
 
 /// Replays one reference trajectory; returns per-run error stats.
-RunResult replay(const parity::Trajectory& t, const std::string& dir, bool& ok, std::string& err) {
+RunResult replay(const parity::Trajectory& t, const std::string& dir, bool& ok, std::string& err, const CraftSpec* override = nullptr) {
     RunResult rr;
     CraftSpec spec;
-    ok = CraftSpec::fromFile(dir + "/" + t.craftFile, spec, err);
+    if (override) { spec = *override; ok = true; }
+    else ok = CraftSpec::fromFile(dir + "/" + t.craftFile, spec, err);
     if (!ok) return rr;
     CraftSim sim;
     const AeroProfile* prof = fastAeroProfile(t.profile);
@@ -119,4 +122,30 @@ TEST_CASE("sim: CraftSim reproduces every Swift reference trajectory") {
     // Same CPU + same libm as the reference machine: everything must be bit-identical.
     CHECK(exactRuns == int(idx.size()));
 #endif
+}
+
+TEST_CASE("sim: built-in craft documents (pw/craft) fly the reference trajectories through CraftSpec::fromDocument") {
+    std::vector<parity::IndexEntry> idx; std::string err;
+    std::string dir = parity::defaultDir();
+    REQUIRE(parity::loadIndex(dir, idx, err));
+    int checked = 0;
+    for (auto& e : idx) {
+        if (e.profile != "fast.plus") continue;
+        auto doc = pw::craft::presets::load(e.craft);
+        REQUIRE_MESSAGE(doc.has_value(), e.craft);
+        CraftSpec spec = CraftSpec::fromDocument(pw::craft::outputs::prepareForFlight(*doc));
+        REQUIRE(!spec.parts.empty());
+        parity::Trajectory t;
+        REQUIRE(parity::loadTrajectory(dir + "/" + e.file, t, err));
+        bool ok = false;
+        RunResult r = replay(t, dir, ok, err, &spec);
+        REQUIRE_MESSAGE(ok, e.file << ": " << err);
+#if defined(__APPLE__) && defined(__aarch64__)
+        CHECK_MESSAGE(r.exactSamples == r.samples, e.file);
+#else
+        CHECK_MESSAGE(std::isfinite(r.worstRel), e.file);
+#endif
+        ++checked;
+    }
+    CHECK(checked == 10);
 }

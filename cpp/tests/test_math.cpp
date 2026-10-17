@@ -75,3 +75,30 @@ TEST_CASE("math: Swift min/max/clamp semantics") {
     CHECK(std::signbit(pw::smax(0.0, -0.0)));       // y >= x ? y : x
     CHECK(pw::clamp(-3, -1, 1) == -1);
 }
+
+#include "pw/render_math.h"
+TEST_CASE("render math: view / projection / camera-relative model matrices") {
+    using pw::Float3; using pw::Float4; using pw::Float4x4;
+    Float4x4 V = Float4x4::lookAt({0, 2, 10}, {0, 2, 0}, {0, 1, 0});
+    Float4 p = V * Float4{0, 2, 0, 1};
+    CHECK(p.x == doctest::Approx(0)); CHECK(p.y == doctest::Approx(0)); CHECK(p.z == doctest::Approx(-10));   // target ahead on -z
+    Float4x4 P = Float4x4::perspectiveReverseZInfinite(1.0f, 16.0f / 9.0f, 0.1f);
+    Float4 nearClip = P * Float4{0, 0, -0.1f, 1}, farClip = P * Float4{0, 0, -1e6f, 1};
+    CHECK(nearClip.z / nearClip.w == doctest::Approx(1));        // reverse-Z: near = 1
+    CHECK(farClip.z / farClip.w == doctest::Approx(0).epsilon(1e-6));
+    Float4x4 O = Float4x4::orthographic(-1, 1, -1, 1, 0, 10);
+    CHECK((O * Float4{0, 0, 0, 1}).z == doctest::Approx(0));
+    CHECK((O * Float4{0, 0, -10, 1}).z == doctest::Approx(1));
+    // rotation matrix agrees with the double quaternion action
+    pw::Quatd q = pw::Quatd::eulerXYZDegrees({20, -35, 60});
+    Float4 r = Float4x4::rotation(pw::Quatf(q)) * Float4{1, 2, 3, 0};
+    pw::Vec3d rd = q.act({1, 2, 3});
+    CHECK(r.x == doctest::Approx(rd.x).epsilon(1e-5)); CHECK(r.y == doctest::Approx(rd.y).epsilon(1e-5)); CHECK(r.z == doctest::Approx(rd.z).epsilon(1e-5));
+    // camera-relative: a part 120 km out, 1 mm from the camera, stays exact in float
+    pw::Vec3d cam{120000.0, 50.0, -80000.0};
+    Float4x4 M = pw::matrixRelativeTo(cam + pw::Vec3d{0.001, 0, 0}, pw::Quatd::identity(), cam);
+    CHECK(M.c[3].x == doctest::Approx(0.001f).epsilon(1e-6));
+    Float4x4 I = Float4x4::translation({1, 2, 3}) * Float4x4::scale({2, 2, 2});
+    Float4 t = I * Float4{1, 1, 1, 1};
+    CHECK(t.x == 3); CHECK(t.y == 4); CHECK(t.z == 5);
+}

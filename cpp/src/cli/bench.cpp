@@ -12,6 +12,10 @@
 #include "pw/json.h"
 #include "pw/reduce.h"
 #include "pw/rng.h"
+#include "pw/jobs.h"
+#include "pw/simd_kernels.h"
+#include "pw/sim/craft_sim.h"
+#include "pw/sim/physics_selftests.h"
 
 namespace {
 struct Bench { std::string name, unit; std::function<double(int reps)> run; };   // returns items/s
@@ -41,6 +45,54 @@ std::vector<Bench> benches() {
             for (int i = 0; i < 1000000; ++i, ++n) { auto c = pw::aero::wing((i % 61 - 30) * pw::kDeg, 0.2, 2e6, k, (i % 7 - 3) * 0.05); s += c.cl + c.cd; }
         sink = s;
         return double(n) / std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 1e6;
+    }});
+    // P1a: craft simulation, panel-aero SIMD kernel per ISA, job system overhead.
+    for (const char* prof : {"fast.classic", "fast.plus"}) {
+        b.push_back({std::string("sim.trainer.") + prof, "ksubsteps/s", [prof](int reps) {
+            pw::sim::CraftSim sim;
+            sim.setProfile(*pw::sim::fastAeroProfile(prof));
+            sim.load(pw::sim::PhysicsPresets::trainer());
+            sim.reset({0, 500, 0}); sim.setVelocity({45, 0, 0}, {});
+            sim.setOutput("eng", 1);
+            pw::sim::SimEnvironment env;
+            auto t0 = std::chrono::steady_clock::now();
+            int n = reps * 2000;
+            for (int k = 0; k < n; ++k) sim.step(0.001, env);
+            sink = sim.position().y;
+            return double(n) / std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 1e3;
+        }});
+    }
+    for (auto lv : {pw::cpu::Level::Scalar, pw::cpu::Level::NEON, pw::cpu::Level::AVX2, pw::cpu::Level::AVX512}) {
+        if (lv != pw::cpu::Level::Scalar && pw::simdk::lanes(lv) == 1) continue;
+        if (lv == pw::cpu::Level::AVX512 && pw::simdk::lanes(lv) != 8) continue;
+        b.push_back({std::string("panels.") + pw::cpu::name(lv), "Mpanels/s", [lv](int reps) {
+            const int n = 8192;
+            std::vector<double> c[6], area(n);
+            std::vector<uint8_t> sh(n, 0);
+            pw::SplitMix r(3);
+            for (auto& v : c) { v.resize(n); for (auto& x : v) x = r.next() - 0.5; }
+            for (auto& a : area) a = r.next() * 0.01;
+            pw::simdk::PanelSoA m{c[0].data(), c[1].data(), c[2].data(), c[3].data(), c[4].data(), c[5].data(), area.data(), sh.data()};
+            pw::simdk::PanelParams p{};
+            p.qw = 1; p.vx = 40; p.vy = -2; p.wz = 0.3; p.rho = 1.2; p.nu = 1.5e-5; p.sos = 340; p.refL = 2;
+            std::vector<double> out(7 * n);
+            auto k = pw::simdk::panelKernel(lv);
+            auto t0 = std::chrono::steady_clock::now();
+            int iters = reps * 50;
+            for (int it = 0; it < iters; ++it) k(m, p, 0, n, out.data());
+            sink = out[7];
+            return double(iters) * n / std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 1e6;
+        }});
+    }
+    b.push_back({"jobs.parallelFor.empty", "kloops/s", [](int reps) {
+        auto& js = pw::jobs::JobSystem::shared();
+        std::vector<double> acc(1024, 0.0);
+        auto body = [&](int lo, int hi) { for (int i = lo; i < hi; ++i) acc[std::size_t(i)] += 1; };
+        auto t0 = std::chrono::steady_clock::now();
+        int n = reps * 2000;
+        for (int k = 0; k < n; ++k) js.parallelFor(1024, 64, body);
+        sink = acc[0];
+        return double(n) / std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 1e3;
     }});
     return b;
 }
