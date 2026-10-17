@@ -1,6 +1,6 @@
-# Script runtime (C++ port, phase 2b)
+# Script runtime
 
-The JS API is unchanged from docs/EVOLUTION.md §4. Code: `src/core/pw/script/runtime.h` (contract),
+The JS API is in [EVOLUTION.md §3](EVOLUTION.md#3-javascript-api). Code: `src/core/pw/script/runtime.h` (contract),
 `src/core/src/script/` (engine-neutral runtime, prelude, JavaScriptCore and QuickJS engines, presets, self-tests).
 
 ## Engines
@@ -45,22 +45,21 @@ What is the same, and tested (`pwcli --selftest evolution-js.`):
 Within one build, results are deterministic for any number of workers. Across engines (or across macOS and
 Windows), a script that uses transcendental functions in its reward can drift in the last bits.
 
-## Measured (Apple M4, release, `evolution-js.throughput`)
+## Measured (Apple M4, release build, `pwcli --selftest evolution-js.throughput --verbose`, 2026-10-17)
 
 | per control tick | JavaScriptCore | QuickJS |
 |---|---|---|
-| trivial `control()` | 0.25 µs | 0.13 µs |
-| neural preset (control + reward + terminate) | 0.79 µs | 0.82 µs |
-| JS `control()` with native `nn.mlp` 9-12-4 | 0.85 µs | 0.58 µs |
-| design preset PID autopilot | 1.16 µs | 1.02 µs |
+| trivial `control()` | 0.26 µs | 0.12 µs |
+| neural preset (control + reward + terminate) | 0.76 µs | 0.79 µs |
+| JS `control()` with native `nn.mlp` 9-12-4 | 0.82 µs | 0.56 µs |
+| design preset PID autopilot | 1.10 µs | 0.97 µs |
 
 The tick path is one call into JS with no arguments (`__tick`); C++ makes no allocation (pwtests checks this
 for both engines, and that QuickJS's own heap gets none either).
 
 ## CLI
 
-`pwcli --make-experiment "<preset>" out.json [--craft name]` writes the same document as the Swift app (the
-presets are the Swift app's own output, in `cpp/data/experiments/`). `pwcli --train` takes the Swift flags
-(`--generations --population --workers --seed --out --resume --current-as-flat --aero --cfd-preset`), applies them
-to the document with the same rules and messages, and hands the request to the evolution core through
-`pw::train::setHandler` (P2a).
+`pwcli --make-experiment "<preset>" out.json [--craft name]` writes a preset (`src/cli/train_cli.cpp:98`); the
+preset documents are in `data/experiments/`. `pwcli --train` accepts `--generations --population --workers --seed
+--out --resume --current-as-flat --aero --cfd-preset --script-engine` (`src/cli/train_cli.cpp:114-179`) and hands
+the request to the evolution core (`src/core/src/evo/train.cpp`).

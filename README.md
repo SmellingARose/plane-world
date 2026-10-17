@@ -1,99 +1,94 @@
 # Plane World
 
-Native macOS flight and vehicle physics sandbox. Built with Swift 6, Metal, AppKit and SwiftPM only. Metal shaders compile at runtime, so no Xcode or `metal` CLI is needed.
+A flight and vehicle physics sandbox: build crafts from parts or CAD, fly them over procedural or real terrain, and
+evolve controllers and designs. Two aero models: fast analytic models (strip-theory wings, momentum props,
+actuator-disk slipstream) that run far above real time, and full GPU lattice-Boltzmann CFD around the craft.
+C++20 core, Qt 6 Quick UI, Metal and Direct3D 12 renderers with shaders written once in Slang.
 
-## Overview
-- **Four tabs:** BUILD (make crafts), FLY (fly them), WORLD (make terrain and weather), EVOLVE (train controllers and designs).
-- **Two aero models**, selectable per flight and per experiment:
-  - **fast** (default): per-strip wing aero, momentum-theory props, actuator-disk slipstream with ducts and rotor ground effect, Newtonian + friction panels for CAD bodies. Runs well above real time, so it is what training normally uses. Equations, code locations and typical error: `docs/PHYSICS.md (interactive explainer with quiz: docs/explainer.html)`.
-  - **full**: GPU lattice-Boltzmann CFD (Metal) in a craft-following domain, with per-part forces fed back into the rigid body. Resolution, domain, collision and turbulence models, and Draft/Medium/High/Ultra presets are all adjustable, with grid-convergence and mass diagnostics. Guide: `docs/CFD.md`. Status of the solver in this pass: `docs/FIDELITY.md`.
-- **EQUATIONS panel** in FLY: the fast-model equations for the selected part with live values, and the CFD force for comparison when full is on.
-
-## Docs
-| File | Contents |
+| BUILD | FLY |
 |---|---|
-| `docs/ARCHITECTURE.md` | Modules, threading, rendering, slipstream overview |
-| `docs/PHYSICS.md` | Every fast-model equation with file:line, validity, research error table and sources |
-| `docs/CFD.md` | Full-flow method, settings guide, presets, diagnostics, training in full mode |
-| `docs/FIDELITY.md` | Contract between the fast and full models (types, invariants, threading) |
-| `docs/CRAFTS.md` | Bundled crafts and the ducted-rocket design rationale |
-| `docs/EVOLUTION.md` | EVOLVE, JS API, algorithms, experiments, hover reward-shaping lesson |
-| `docs/PERF.md` | Performance measurements |
-
-## Build and run
-```sh
-swift build -c release --scratch-path /tmp/pw-build
-/tmp/pw-build/release/PlaneWorld                    # launch the app
-/tmp/pw-build/release/PlaneWorld --tab fly          # start on a tab (build|fly|world|evolve)
-/tmp/pw-build/release/PlaneWorld --selftest all     # headless tests (or: core, physics, collision, terrain, vegetation, water, craft, evolution, evolution-js, evolution-algo, app)
-/tmp/pw-build/release/PlaneWorld --quit-after 10    # smoke test
-/tmp/pw-build/release/PlaneWorld --train examples/experiments/hold100-ga.json --generations 40 --out /tmp/run   # headless training
-/tmp/pw-build/release/PlaneWorld --train examples/experiments/hover-ducted-rocket.json --out /tmp/hover   # ducted-rocket hover (CMA-ES)
-/tmp/pw-build/release/PlaneWorld --make-experiment "Neural controller" my.json  # preset -> editable experiment
-swift test --scratch-path /tmp/pw-build
-```
-Use release builds when you judge performance. The physics, collision and terrain generation are 10–200x slower in debug.
-
-## C++ / Qt 6 app (macOS + Windows)
-
-A cross-platform port lives in [`cpp/`](cpp/README.md) (C++20 core, Qt 6 Quick UI with native styles, Metal on macOS,
-Direct3D 12 on Windows, Slang shaders). Plan and status: [docs/PORT_PLAN.md](docs/PORT_PLAN.md); installers:
-[docs/PACKAGING.md](docs/PACKAGING.md).
-
-macOS (Apple silicon, Command Line Tools are enough):
-
-    brew install cmake ninja qt
-    # Slang: official release from github.com/shader-slang/slang, unpacked to ~/.local/slang-<ver> (or set SLANG_DIR)
-    cmake -S cpp -B cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$(brew --prefix qt)
-    cmake --build cpp/build
-    cpp/build/tests/pwtests && cpp/build/src/cli/pwcli --selftest all
-    open "cpp/build/src/app/Plane World.app"
-    cpp/packaging/macos/make_dmg.sh cpp/build            # -> cpp/build/dist/PlaneWorld-<ver>-macos-arm64.dmg
-
-Windows x64 (Visual Studio 2022 with the C++ workload, Qt 6.8 MSVC 2022 64-bit, Slang release, Ninja), from a
-"x64 Native Tools" prompt:
-
-    cmake -S cpp -B cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64 -DSLANG_DIR=C:/slang
-    cmake --build cpp/build
-    cpp\build\tests\pwtests.exe && cpp\build\src\cli\pwcli.exe --selftest all
-    cmake --build cpp/build --target pwapp_deploy       # self-contained folder in cpp/build/deploy
-    bash cpp/packaging/windows/make_msi.sh cpp/build     # needs: dotnet tool install --global wix --version 5.0.2
-
-CI (`.github/workflows/cpp.yml`) builds, tests and packages both platforms on every push to `cpp-port`; pushing a `v*`
-tag also drafts a GitHub release with the .dmg, .msi and zips.
-
-## Tabs
-- **BUILD**: craft library (presets, plus user crafts in `~/Library/Application Support/PlaneWorld/crafts`), JSON import and export (prototype format), add primitives, and CAD import (STL/OBJ/glTF/GLB/USD/USDZ) with auto-rig on import. You also get an auto-rig button, a mesh-cut tool (plane plus offset), and a properties inspector (transform, params, servo/motor links, invert). Duplicate and mirror are there too, plus mass and CoM, and renamable auto outputs.
-  - Viewport: click to select a part, ⇧-drag to move it, ⌘-drag to rotate it, ⌫ to delete it.
-- **FLY**: spawns the craft on the current world's runway. Every output (servo, motor, jet, solid, and an auto motor for unlinked wheels and props) is its own slider. The HUD shows IAS, TAS, altitude, VS, AoA, mass, fuel, stall and servo-stall warnings.
-  - Keys: R reset, P pause, C to cycle the camera (chase, orbit, cockpit).
-- **WORLD**: terrain from a real place (AWS terrarium tiles, by lat/lon and zoom), procedural terrain (seed plus GPU erosion), or a heightmap (PNG or R16).
-  - Tools: sculpt (raise, lower, smooth, flatten), material paint, tree paint and erase, grass paint, props and breakables (crate, wall, tower, glass, pillar, or an imported mesh), lakes, and river splines.
-  - Also here: ocean level and wind, FLIP fluid zones, sky, wind and render settings, and world save/load as JSON.
-
-Mouse: left-drag orbits, right- or ⌥-drag pans, scroll zooms, WASD/QE moves. When a WORLD tool is active, left-drag applies the tool and right-drag orbits.
-
-- **EVOLVE**: evolutionary optimisation of neural controllers (MLP or NEAT), craft designs, or both. You write the genome, controller, named reward points, termination and descriptor in JavaScript. Algorithms: GA, CMA-ES (full and separable), simple ES, OpenAI-ES, NEAT, MAP-Elites, novelty search, or a custom JS algorithm. Candidates run headless on all cores, with live charts, checkpoint and resume, 3D replay, and export to a craft. In FLY, "Autopilot from evolved controller" then flies the exported craft. Sensor parts (`sensor` type in BUILD) provide the named inputs controllers read. Docs: `docs/EVOLUTION.md`, including the reward tutorial in §11. Example experiments are in `examples/experiments/`.
-
-### Example training results
-Release build, Apple M4 (10 cores), CLI `--train`, flat world, Trainer craft, 1 kHz physics, 50 Hz controller.
-
-| Run | Algorithm | Result |
-|---|---|---|
-| Take off and hold 100 m (`hold100-ga.json`, 64 × 150 gens) | GA | Best fitness 4.6 → 79.4. Takeoff learned by gen 18. Time within ±10 m of 100 m: 0 → 25 s of the 60 s window. Not yet a full 60 s hold. |
-| Same task (`hold100-neat.json`, 96 × 40 gens) | NEAT | Best fitness 5.0 → 92.2. Takes off at gen 5; holds 32 s within ±10 m at gen 39. |
-| Glide distance (`glide-cmaes.json`, 24 × 30 gens) | CMA-ES | Best 2067 → 2525 m (+22%), mean 1676 → 2522 m. Converged to the span and chord upper bounds. |
-| Descriptor (final x, final AGL) (`hold100-mapelites.json`, 64 × 30 gens) | MAP-Elites | Archive coverage 2.3% → 19.7% (59 of 300 cells) |
-
-Throughput (JS-scored neural controller): 67–69 sim-s per wall-second on 1 worker and 218–222 on 10 workers, a 3.2× speedup. The 10-worker run gives identical fitness. `evolution.bench-headless` measures 67 sim-s/s on 1 core and 240 on 10 cores (3.6×). The M4's 6 efficiency cores bound the scaling.
-
-## Architecture
-See `docs/ARCHITECTURE.md`. The App wires TerrainSystem, WaterSystem, ProceduralVegetation and VegetationRenderable, RigidWorld and CraftSim through `SimulationServices`. Physics runs at 1 kHz substeps and the collision world at 240 Hz. The craft is coupled to the collision world through a kinematic proxy box, so it pushes props and breaks breakables. Craft-tree contacts and grass flattening go through the vegetation `interact` API. Screenshots are in `docs/screens/`:
-
-| FLY (fast model) | FLY (full CFD, speed slice + particles) |
-|---|---|
-| ![FLY](docs/screens/fly.jpg) | ![FLY full CFD](docs/screens/fly-full.jpg) |
-| **EQUATIONS (live values, fast vs CFD)** | **BUILD** |
-| ![EQUATIONS](docs/screens/equations.jpg) | ![BUILD](docs/screens/build.jpg) |
+| ![BUILD](docs/screens/build.jpg) | ![FLY](docs/screens/fly.jpg) |
 | **WORLD** | **EVOLVE** |
 | ![WORLD](docs/screens/world.jpg) | ![EVOLVE](docs/screens/evolve.jpg) |
+| **FLY, Full CFD with a speed slice** | **FLY, live EQUATIONS** |
+| ![FLY full CFD](docs/screens/fly-full.jpg) | ![EQUATIONS](docs/screens/equations.jpg) |
+
+- **BUILD:** parts (wings, servos, props, motors, jets, solids, tanks, wheels, sensors, primitives), CAD import
+  (STL / OBJ / glTF / GLB; USD / USDZ on macOS) with auto-rig, mesh cut, outputs with key bindings, undo / redo.
+- **FLY:** 1 kHz physics, chase / orbit / cockpit cameras, per-output sliders, HUD, aero model picker, CFD settings
+  and diagnostics, flow slice overlay, and the EQUATIONS panel (every fast-model equation with live values).
+- **WORLD:** flat, procedural (GPU erosion), heightmap or real-world terrain; sculpt and paint; ocean, lakes, rivers,
+  vegetation, props and breakables; sky and wind.
+- **EVOLVE:** GA, CMA-ES, sep-CMA-ES, OpenAI-ES, NEAT, MAP-Elites, novelty search or your own algorithm in JavaScript;
+  neural controllers, craft designs or both; headless parallel training, charts, replays in the viewport.
+
+## Platforms
+
+| OS | GPU API | Tested on |
+|---|---|---|
+| macOS 14+ (Apple silicon) | Metal | Apple M4; CI on macOS 15 arm64 |
+| Windows 10 / 11 x64 | Direct3D 12 (WARP software fallback) | CI on `windows-latest` (WARP) |
+
+Any Direct3D 12 GPU (feature level 11_0+; NVIDIA, AMD, Intel) or Apple silicon GPU. Per-vendor tuning lives in `pwgpu`.
+
+## Build and run
+
+Requirements: CMake 3.24+, Ninja, Qt 6.8, and the [Slang](https://github.com/shader-slang/slang/releases) release
+unpacked to `~/.local/slang-<version>` or pointed at by `SLANG_DIR`.
+
+**macOS** (Command Line Tools are enough):
+
+```sh
+brew install cmake ninja qt
+cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt && cmake --build build
+open "build/src/app/Plane World.app"
+```
+
+**Windows** (Visual Studio 2022 C++ workload, Qt 6.8 MSVC 2022 64-bit), from an "x64 Native Tools" prompt:
+
+```bat
+cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64 -DSLANG_DIR=C:/slang
+cmake --build build
+cmake --build build --target pwapp_deploy
+build\deploy\"Plane World.exe"
+```
+
+Tests:
+
+```sh
+build/tests/pwtests                                       # unit, parity, GPU and renderer tests
+QT_QPA_PLATFORM=offscreen build/src/app/pwuitests         # WORLD / EVOLVE view models
+build/src/cli/pwcli --selftest all                        # self-test registry (--selftest list)
+```
+
+Installers: `packaging/macos/make_dmg.sh build` and `packaging/windows/make_msi.sh build`
+([docs/PACKAGING.md](docs/PACKAGING.md)). CI (`.github/workflows/ci.yml`) builds, tests and packages both platforms
+on every push to `main`; a `v*` tag drafts a GitHub release.
+
+## Command line
+
+```sh
+pwcli --train examples/experiments/hover-pid.json --generations 10 --out /tmp/hover   # headless training, all cores
+pwcli --train my.json --resume --out /tmp/hover            # continue from the checkpoint in --out
+pwcli --make-experiment "Neural controller" my.json        # preset -> editable experiment
+pwcli --aero-compare Trainer --speed 25 --alpha 4          # fast model vs CFD, per part
+pwcli --bench all                                          # benchmarks (--bench list)
+pwcli --info                                               # CPU features, GPU backend
+```
+
+`--train` also takes `--workers`, `--population`, `--seed`, `--aero fast|full`, `--cfd-preset`, `--script-engine`.
+The app takes `--tab`, `--color-scheme`, `--size WxH`, `--command "<palette entry>"` and
+`--screenshot out.png --quit-after <s>` (how the screenshots above were made).
+
+## Docs
+
+| File | Contents |
+|---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Targets, threading, determinism, GPU backends and shaders, tests |
+| [PHYSICS.md](docs/PHYSICS.md) | Every fast-model equation with code location, validity and sources ([interactive explainer](docs/explainer.html)) |
+| [CFD.md](docs/CFD.md) | Lattice-Boltzmann method, settings, presets, diagnostics, training with CFD |
+| [EVOLUTION.md](docs/EVOLUTION.md) | EVOLVE, experiment format, JavaScript API, algorithms, reward shaping |
+| [SCRIPTING.md](docs/SCRIPTING.md) | JavaScript engines (JavaScriptCore, QuickJS) and their differences |
+| [CRAFTS.md](docs/CRAFTS.md) | Bundled crafts and the ducted-rocket design |
+| [PERF.md](docs/PERF.md) | Benchmarks and methodology |
+| [PACKAGING.md](docs/PACKAGING.md) | .dmg / .msi, signing, CI release |

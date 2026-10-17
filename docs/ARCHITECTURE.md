@@ -1,67 +1,82 @@
-# Plane World: Architecture
+# Architecture
 
-Native macOS app. Swift 6 compiler (modules in Swift 5 language mode), Metal, AppKit with SwiftUI panels, built only with SwiftPM.
-Shaders are MSL source strings compiled at runtime (`ShaderLibrary`, with `ShaderCommon.header` prepended).
+C++20 core with no Qt dependency, a thin explicit GPU layer over Metal and Direct3D 12, Slang shaders compiled to
+MSL / DXIL at build time, and a Qt 6 Quick app on top. One CMake project at the repository root.
 
-## Build / run / test
-    swift build --scratch-path <scratch>
-    <scratch>/debug/PlaneWorld                      # app
-    <scratch>/debug/PlaneWorld --selftest all|list|<group>|<group.name>   # headless, exit 0/1
-    <scratch>/debug/PlaneWorld --quit-after 8       # smoke test
-    PW_SELFTEST_OUT=dir ... --selftest render       # writes offscreen PNGs
-    swift test --scratch-path <scratch>             # swift-testing wrapper over core self-tests
+## Layout
 
-## Modules (target, directory, owner)
-| Target | Dir | Owner | Contents |
-|---|---|---|---|
-| PWCore | Core/ | architect | Math (Double world, Float render), JobSystem, EventBus, SimulationClock, JSON docs (Craft/World), **Interfaces.swift**, SelfTestRegistry |
-| PWRender | Render/ | architect | GPU, ShaderLibrary, Renderer, StandardPipelines, Renderable/RenderRegistry, MeshBuilder/GPUMesh, InstancedMeshRenderable, DebugDraw |
-| PWCollision | Collision/ | collision builder | implements `CollisionWorld` |
-| PWPhysics | Physics/ | aero/physics builder | implements `CraftSimulation` (depends on Collision) |
-| PWTerrain | Terrain/ | terrain builder | implements `TerrainProvider` + Renderable |
-| PWVegetation | Vegetation/ | vegetation builder | implements `VegetationSystem` + Renderable |
-| PWWater | Water/ | water builder | implements `WaterProvider` + Renderable (transparent pass) |
-| PWCraft | Craft/ | import builder | CAD import, auto-rig, mesh cut, PartMeshFactory, CraftLibrary |
-| PWEvolution | Evolution/ | architect + script / ga-es / neat-qd builders | EVOLVE: headless world, parallel evaluator, algorithms (ask/tell), JavaScriptCore scripting, run/checkpoint/replay — see docs/EVOLUTION.md |
-| PlaneWorld | App/ | architect, then integrator (App/Evolve/: evolve-ui builder) | window, tabs, panels, input, main loop, wiring |
+| Path | Target | Contents |
+|---|---|---|
+| `src/core` | `pwcore` (static, no Qt) | math (`pw/math.h`, double world / float render), JSON, job system (`pw/jobs.h`), CPU feature dispatch + SIMD kernels, craft documents / CAD import / auto-rig (`pw/craft`), collision (`pw/collision`), craft physics `CraftSim` + aero profiles + equation capture (`pw/sim`), worlds (`pw/world`), evolution (`pw/evo`), JavaScript scripting (`pw/script`), self-test registry |
+| `src/gpu` | `pwgpu` | device, buffers, textures, graphics + compute pipelines, graphics and async-compute queues, fences, triple-buffered frames, GPU timestamps (`pw/gpu.h`); GPGPU layer for simulation kernels (`pw/compute.h`). Metal in Objective-C++, Direct3D 12 with a WARP fallback |
+| `src/render` | `pwrender` | frame graph, sky / aerial-perspective LUTs, cascaded shadows, PBR meshes, TAA, bloom, ACES, debug lines, `CraftRenderable` |
+| `src/env` | `pwenv`, `pwenv_render` | terrain (flat / procedural + GPU erosion / heightmap / real-world DEM tiles, sculpt + paint), FFT ocean, lakes, rivers, buoyancy, FLIP fluid zones, vegetation, grass; their renderables |
+| `src/flow` | `pwflow`, `pwflow_render` | lattice-Boltzmann CFD (`pw/flow/lbm.h`, see [CFD.md](CFD.md)) and the flow slice / tracer overlay |
+| `src/app` | `pwapp` ("Plane World"), `pwuitests` | Qt Quick UI (`qml/`), `AppController` (BUILD / FLY), `WorldModel`, `EvolveModel`, `GpuViewport` / `WorldViewport` |
+| `src/cli` | `pwcli` | headless `--selftest`, `--train`, `--bench`, `--aero-compare`, `--gpu-smoke`, `--render-shot`, `--info` |
+| `shaders` | `pw_shaders` | Slang sources (`scene.slang`, `env/`, `flow/`), embedded per backend by `cmake/PWSlang*.cmake` |
+| `data`, `examples` | | bundled crafts and experiment presets (embedded at build time), example crafts and experiments |
+| `tests` | `pwtests` | doctest suite; `tests/parity` (reference trajectories, unit samples, training histories) and `tests/render_ref` |
+| `packaging` | | `.dmg` and `.msi` scripts ([PACKAGING.md](PACKAGING.md)) |
 
-Dependency rule: everything depends on Core. Render-facing modules depend on Render. Modules never import each other, except Physics→Collision, Craft→Physics and Evolution→{Physics, Collision, Terrain, Water}. Only App wires concrete types together, through `SimulationServices`.
-Each stub file is headed `OWNED BY <x> builder` and every unfinished piece is marked `TODO(<owner>)`. Each module exposes `<Module>SelfTests.register()`, and App/main.swift calls it.
+Dependencies point downward only: `pwcore` ← `pwgpu` ← `pwrender` ← `pwenv_render` / `pwflow_render` ← `pwapp`;
+`pwflow` and `pwenv` need `pwcore` + `pwgpu`. The CFD backend reaches `CraftSim` through
+`sim::AeroBackendRegistry` (`src/core/pw/sim/cfd.h`), so the core has no link-time dependency on the GPU.
 
-## Key interfaces (Core/Interfaces.swift)
-- `TerrainProvider`: height, normal, material and raycast (thread-safe); `update(cameraPosition:)`; load/save `TerrainSpec`.
-- `WaterProvider`: `sample` (height, normal, velocity, depth), `flow`, `submergedForces(hull:state:time:)`, `step`.
-- `CollisionWorld`: add/remove bodies (`RigidBodyDesc`, `CollisionShape`), state, forces, `registerBreakable`, `addBreakableJoint`, `step`, contacts, raycast. Breaks publish `BreakEvent`.
-- `VegetationSystem`: `generate`, `interact`, `step(wind)`, `collisionProxies`.
-- `CraftSimulation`: `load(CraftDocument)`, `outputs` (one slider each), `setOutput`, `reset`, `step(dt, env: SimEnvironment)`, `bodyState`, `partPoses`, `telemetry`. `CraftSim` adds sensor `inputs` (`CraftInput`, from `sensor` parts), `readSensors(env:into:)`, `setOutput(index:value:)`, crash/contact flags and `clone()`.
-- `WorldDocument` / `JSONWorldDocumentStore`: JSON world save/load.
-- `Renderable` (Render/RenderCore.swift): `prepare`, `drawShadow(cascade)`, `drawOpaque`, `drawTransparent`, with a `FrameContext`. Register it with `RenderRegistry.shared.add`.
+## UI
 
-`CraftDocument` is compatible with the prototype's JSON. Unknown keys are kept in `extra`, and `p` is a `[String: JSONValue]` with defaults merged in.
+`src/app/qml/Main.qml` holds four tabs (BUILD, FLY, WORLD, EVOLVE), each a `TabPage` with a GPU viewport and an
+inspector panel. Controls come from the native Qt Quick Controls style (macOS / Windows) plus a small design system:
+`Theme.qml` (4 px spacing grid, type scale, colors for light and dark) and the `Pw*` components (`PwSection`, `PwCard`,
+`PwPropertyRow`, `PwSlider`, `PwSegmented`, ...). `AeroModelPicker.qml` is the aero model list shared by FLY and EVOLVE.
+Every action is in the command palette (Ctrl/⌘+K, `AppCommands.qml`) with its shortcut.
 
-## Threading model
-- Main thread: AppKit, SwiftUI, and the MTKView draw callback, which is the main loop: `model.tick(dt)` → `SimulationClock.advance` runs fixed substeps (default 600 Hz, clamp 60–2000) → craft.step, collision.step, water.step. After that come vegetation, terrain streaming, and the render.
-- `JobSystem.shared`: work-stealing pool with cores−1 workers plus the caller. Use `parallelFor(count, grain:, label:)`. It nests safely, and the label records an EMA timing. Job bodies must write only disjoint memory. Measured speedup is 7.6× on the 10-core M4.
-- Thread-safe queries (terrain and water sampling) may be called from inside `parallelFor`.
-- GPU: 3 frames in flight. `FrameContext.transientBuffer` gives per-frame ring memory.
+`pwapp` flags: `--tab build|fly|world|evolve`, `--color-scheme dark|light`, `--size WxH`, `--command "<palette entry>"`
+(repeatable, runs 1 s after launch), `--screenshot file.png --quit-after <s>`.
 
-## Rendering
-Camera-relative rendering: world positions are Double, and GPU positions are Float relative to the camera. Depth is reverse-Z with an infinite far plane (clear 0, compare greaterEqual).
-Passes: sky-view LUT (compute, Hillaire-style single scattering plus an approximate multiple-scattering term, ozone) → 4 stabilised shadow cascades (2048², texel-snapped, PCF) → HDR rgba16f (sky with sun disk, opaque PBR GGX with sky IBL-lite and aerial perspective, debug lines, transparent) → TAA (YCoCg clamp, reprojection from depth) or 4x MSAA → bloom mip chain → ACES fitted tonemap + dither.
-Modules write their own shaders with `ShaderLibrary.shared.library(named:source:device:)`. They get `FrameUniforms`, the atmosphere functions, `shadeSurface` and `applyAerial` from the header. Bind frame data with `FrameContext.bindFrame` (buffer 2, textures 0/1).
-Known TODOs: TAA uses camera-only reprojection (no per-object motion vectors, so moving objects can ghost). IBL is an approximation (no prefiltered cubemap).
+## Threading
 
-## Rotor slipstream (induced flow)
+- **GUI thread:** `AppController`, `WorldModel` and `EvolveModel` live here. FLY steps `CraftSim` from a display-rate
+  timer with 1 kHz substeps. Viewports read their render snapshot (document revision, part poses, flow solver) in
+  `updatePaintNode`, which Qt runs while the GUI thread is blocked, then record on Qt Quick's own Metal / D3D12 device
+  and queue and composite the output texture without a copy.
+- **Job system** (`pw/jobs.h`): work-stealing, topology aware (Apple P/E clusters, Ryzen CCDs, Intel P/E). Used for
+  CAD panel aero, terrain bakes and the training evaluator.
+- **Training:** `EvolutionRun` runs generations on a background thread; `SimEvaluator` spreads episodes over the job
+  system, one `EvalWorker` per thread with a zero-allocation episode loop. Full-CFD training uses one domain pool per
+  worker.
+- **GPU:** async compute for the sky LUTs and simulation kernels, joined to graphics by fences. CFD `submit` /
+  `collect` overlap GPU work with CPU physics, so CFD forces lag one update.
+- **World I/O:** real-world DEM tiles download on I/O threads into a disk cache.
 
-`Sources/Physics/Slipstream.swift`. Each propeller is an actuator disk (momentum theory). Its wake follows the vortex-cylinder axial profile `Δv(s) = v_i(1 + s/√(s²+R²))`, contracts by continuity, drifts with the crossflow, carries swirl in the rotor's rotation sense (prop param `spin` = ±1), and decays by mixing over about 14 radii. Every wing strip, body and *other* propeller adds the wakes to the air it sees. The wake state lags one substep, so the model stays explicit and deterministic.
+## Determinism
 
-- **Ducts** are detected automatically: structure covering at least 9 of 12 sectors at 1.0–1.7 R around the disk. Override with prop param `duct` (0 or 1). A ducted rotor gets the σ = 1 duct thrust (same power as an open rotor of √2 times the diameter) and an uncontracted wake.
-- **Rotor ground effect** uses the Cheeseman–Bennett model, limited to z/R ≥ 0.5.
-- **Torque:** the full shaft torque at the operating speed reacts on the airframe. The old model applied a fixed 25 %.
-- **Switching it off:** `PW_SLIPSTREAM=0` or `CraftSim.slipstream = false` gives the isolated-part model, bit-identical to before (trajectory digest 77acda15065ef25b).
-- **Batched lanes** implement only the isolated-part model. Crafts with props and slipstream on use the scalar path (`CraftSimBatch.unsupportedFeatures`).
-- **Not modelled:**
-  - blockage or deflection of the flow by bodies (the wake passes through them; they only feel drag from it)
-  - wakes and downwash from wings
-  - wake reflection off the ground
-  - CAD-panel bodies sampling the wake per panel (they use the craft-level wind)
+- The physics step is deterministic and allocation-free after `load()` (tested for every craft and aero profile).
+  Serial, parallel and every SIMD level (scalar / NEON / AVX2 / AVX-512) give identical bits: reductions run in a fixed
+  order, and FMAs are explicit (`std::fma`); the build uses `-ffp-contract=off` / `/fp:precise`
+  (`cmake/PWCompilerFlags.cmake`).
+- `tests/parity` holds reference data recorded with the original Swift implementation: 30 trajectories (5 crafts ×
+  3 fast profiles × ground / air), 19k unit samples, simd results, evolution runs and training histories. On macOS
+  arm64 all of it is reproduced bit for bit. On Windows the platform libm differs in the last ulp, so trajectories are
+  compared with tolerances (1e-9 for the first second, 1e-6 over 3 s) and training generation 0 within 5 %.
+- Training results do not depend on the worker count: each episode seed derives from (run seed, generation,
+  candidate, episode) via `EvoRNG::derive` (`src/core/src/evo/evaluator.cpp:288`), and results are written by index. `tools/train_parity.sh` checks 1 vs 4 workers.
+- GPU reductions in the CFD solver are 64-bit fixed point accumulated with integer atomics, so pooled domains equal a
+  single domain bit for bit on both APIs.
+
+## GPU backends and shaders
+
+Shaders are written once in Slang (`shaders/`). At build time `slangc` produces MSL (macOS) or HLSL that the Windows
+SDK `dxc` turns into DXIL; the blobs are embedded in the binaries (`cmake/PWSlang.cmake`, `PWSlangLib.cmake`), and
+Slang's reflection JSON remaps Metal storage-texture indices so both APIs share one binding model (b0-3 constants,
+t0-7 textures, t8-11 / u8-11 buffers, s0-3 static samplers). A per-vendor tuning table picks the TAA tile, wave size,
+async compute and shadow resolution. CI runs the Direct3D 12 path on WARP.
+
+## Tests
+
+| Command | Covers |
+|---|---|
+| `build/tests/pwtests` | doctest: math, JSON, parity, physics, collision, environment, evolution, scripting, flow, GPU readback, renderer vs `tests/render_ref` |
+| `build/src/app/pwuitests` (`QT_QPA_PLATFORM=offscreen`) | WORLD and EVOLVE view models |
+| `build/src/cli/pwcli --selftest all` | the self-test registry (`--selftest list` for groups) |
+| `bash tools/train_parity.sh build/src/cli/pwcli` | example experiments vs recorded histories, 1 and 4 workers |

@@ -93,7 +93,7 @@ code{font-family:var(--mono);font-size:.92em}
   b.w = mul(b.Iinv_world, b.L);           // ω from angular momentum
   b.q = integrateQuat(b.q, b.w, h);       // rotate orientation by ω·h
 }</pre>
-  <p class="where">CraftSim.swift · substepCore (kept @inline(never) so it allocates nothing)</p>
+  <p class="where">src/core/src/sim/craft_sim.cpp:584 · CraftSim::substepCore, integration at :940 (position uses the mean of old and new v; allocation-free)</p>
 </section>
 
 <!-- 2 -->
@@ -144,7 +144,7 @@ code{font-family:var(--mono);font-size:.92em}
   const q = 0.5*rho*V*V;
   return { lift: q*S*cl, drag: q*S*cd };                    // ⟂ and ∥ to the local flow
 }</pre>
-  <p class="where">Aerodynamics.swift · Aero.wing · called per strip from CraftSim</p>
+  <p class="where">src/core/src/aero.cpp:77 · aero::wing · called per strip from CraftSim::runStrips (src/core/src/sim/craft_sim.cpp:565)</p>
 </section>
 
 <!-- 4 -->
@@ -165,7 +165,7 @@ code{font-family:var(--mono);font-size:.92em}
   const c = -dot(tri.normal, flowDir);                      // cos θ (facing the flow?)
   if (c > 0 && !tri.shadowed) force = add(force, scale(tri.normal, -cpMax*c*c*q*tri.area));
 }</pre>
-  <p class="where">PanelAero.swift</p>
+  <p class="where">src/core/src/sim/panel_aero.cpp:157 · PanelMesh::evaluate (shadows: updateShadows at :51)</p>
 </section>
 
 <!-- 5 -->
@@ -204,7 +204,7 @@ code{font-family:var(--mono);font-size:.92em}
   }
   return T;
 }</pre>
-  <p class="where">Propulsion.swift · propThrust</p>
+  <p class="where">src/core/src/aero.cpp:126 · aero::propThrust</p>
 </section>
 
 <!-- 6 -->
@@ -234,7 +234,7 @@ code{font-family:var(--mono);font-size:.92em}
   const inside = r < Rs ? 1 : 0;                            // (code uses a smooth edge)
   return scale(disk.axis, dv * inside * Math.exp(-Math.max(s,0)/(14*disk.R)));
 }</pre>
-  <p class="where">Slipstream.swift · WakeField.induced (wake state lags one substep, so it stays deterministic)</p>
+  <p class="where">src/core/src/aero.cpp:172 · aero::wakeInduced (wake state lags one substep, so it stays deterministic)</p>
 </section>
 
 <!-- 7 -->

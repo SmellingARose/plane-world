@@ -1,7 +1,9 @@
 # Plane World: Crafts
 
-Bundled presets live in `Sources/Craft/CraftPresetData.swift` (prototype JSON). Example crafts live in
-`examples/crafts/`. User crafts are saved to `~/Library/Application Support/PlaneWorld/crafts`. Every craft is a
+Bundled presets are `data/crafts/*.json`; they and the example crafts in `examples/crafts/` are embedded in the
+binary at build time (`src/core/src/craft/library.cpp:51`). User crafts are saved to `<library root>/crafts`:
+`~/Library/Application Support/PlaneWorld` on macOS, `%APPDATA%\PlaneWorld` on Windows, `PW_DATA_DIR` overrides
+(`src/core/pw/craft/library.h:4`). Every craft is a
 list of parts (`box`, `cylinder`, `cone`, `wing`, `prop`, `motor`, `jet`, `solid`, `tank`, `servo`, `wheel`,
 `sensor`, CAD meshes) with a position, rotation, mass and type parameters. Servos and motors are linked by id.
 Every servo, motor, jet and solid becomes an output (a FLY slider, or a controller output in EVOLVE).
@@ -14,8 +16,6 @@ Every servo, motor, jet and solid becomes an output (a FLY slider, or a controll
 | **Jet trainer** | boxes, wings, jet, tank, servos, wheels | Turbojet with spool lag and fuel burn |
 | **Rover** | boxes, motor, servos, wheels | Ground vehicle: suspension and Pacejka-lite tyres, servo steering |
 | **Sounding rocket** | cone, cylinders, solid motor, fins | Unguided solid rocket with passive fin stability |
-
-All four are kept. None were removed in the fidelity pass.
 
 ## Ducted rocket (`examples/crafts/ducted-rocket.json`)
 
@@ -47,13 +47,11 @@ vanes below them. Total mass is about 13.8 kg (135 N weight). Static thrust is 2
 - **Why fins outside the duct cannot steer at hover.** A fin produces force ∝ ½ρV²: at hover the free-stream V
   is about 0, so an external fin produces nothing until the craft is already moving. The slipstream model only
   gives a surface wake velocity if it lies inside the wake tube (radius about R behind the disk). Fins outside
-  the duct are outside that tube, so they are useless for hover control. That is why the earlier external-fin
-  design could not be stabilised and the vanes were moved into the exhaust.
+  the duct are outside that tube, so they are useless for hover control, and the
+  craft needs vanes in the exhaust.
 
-### Known issue (fixed)
+### Tests
 
-`physics.prop-counter-rotation` failed on HEAD at the start of this pass. Causes: the test drove every output to 1,
-so the vanes sat at full deflection and the rocket tipped over, and coaxial swirl was not recovered by the lower
-rotor. Both are fixed (see `docs/FIDELITY.md`); it now climbs 44.5 m in 4 s and yaws at 2e-5 rad/s. A separate
-training-only blow-up (crossed vanes feeding each other through the downwash horseshoes, ending in NaN) was fixed
-by the integrator with a near-field fade on the induced velocity.
+`pwcli --selftest physics.prop-counter-rotation` checks that the coaxial pair climbs and cancels yaw torque.
+`examples/experiments/hover-ducted-rocket.json` and `hover-pid.json` train controllers for it
+([EVOLUTION.md §9](EVOLUTION.md#9-headless-training-cli)).

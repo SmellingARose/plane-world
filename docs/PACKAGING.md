@@ -2,14 +2,14 @@
 
 | Platform | Artefact | Made by | Signed |
 |---|---|---|---|
-| macOS arm64 | `PlaneWorld-<ver>-macos-arm64.dmg` (drag to Applications; `pwcli` inside `Contents/MacOS`) | `cpp/packaging/macos/make_dmg.sh` | ad-hoc (`codesign -s -`) by default |
-| Windows x64 | `PlaneWorld-<ver>-windows-x64.msi` (per-machine, Program Files, Start menu shortcut, major-upgrade aware) | `cpp/packaging/windows/make_msi.sh` + `PlaneWorld.wxs` (WiX v5) | unsigned |
+| macOS arm64 | `PlaneWorld-<ver>-macos-arm64.dmg` (drag to Applications; `pwcli` inside `Contents/MacOS`) | `packaging/macos/make_dmg.sh` | ad-hoc (`codesign -s -`) by default |
+| Windows x64 | `PlaneWorld-<ver>-windows-x64.msi` (per-machine, Program Files, Start menu shortcut, major-upgrade aware) | `packaging/windows/make_msi.sh` + `PlaneWorld.wxs` (WiX v5) | unsigned |
 
-The version comes from `project(PlaneWorld VERSION ...)` in `cpp/CMakeLists.txt`.
+The version comes from `project(PlaneWorld VERSION ...)` in `CMakeLists.txt`.
 
 ## CI
 
-Every push to `cpp-port` builds both installers and smoke-tests them: the .dmg is mounted, the app copied out and
+`.github/workflows/ci.yml`: every push to `main` builds both installers and smoke-tests them: the .dmg is mounted, the app copied out and
 launched (screenshot `installed-macos-arm64.png`); the .msi is installed silently with `msiexec /qn`, the installed
 `pwcli --info` and app launch are run (screenshot), then it is uninstalled and the removal checked. Pushing a tag
 `v*` runs the same jobs plus `release`, which drafts a GitHub release with the installers attached. Publishing the
@@ -24,12 +24,12 @@ Ad-hoc signed apps open on the build Mac, but on other Macs Gatekeeper blocks a 
    and install it in your login keychain (`security find-identity -v -p codesigning` shows it).
 2. Create an app-specific password at appleid.apple.com and store notary credentials once:
    `xcrun notarytool store-credentials planeworld --apple-id you@example.com --team-id TEAMID --password <app-specific>`
-3. Build signed with the hardened runtime (entitlements: `cpp/packaging/macos/entitlements.plist`, JIT for JavaScriptCore):
-   `PW_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" cpp/packaging/macos/make_dmg.sh cpp/build`
+3. Build signed with the hardened runtime (entitlements: `packaging/macos/entitlements.plist`, JIT for JavaScriptCore):
+   `PW_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" packaging/macos/make_dmg.sh build`
 4. Notarize and staple:
-   `xcrun notarytool submit cpp/build/dist/PlaneWorld-*.dmg --keychain-profile planeworld --wait`
-   `xcrun stapler staple cpp/build/dist/PlaneWorld-*.dmg`
-5. Check: `spctl -a -t open --context context:primary-signature -v cpp/build/dist/PlaneWorld-*.dmg`.
+   `xcrun notarytool submit build/dist/PlaneWorld-*.dmg --keychain-profile planeworld --wait`
+   `xcrun stapler staple build/dist/PlaneWorld-*.dmg`
+5. Check: `spctl -a -t open --context context:primary-signature -v build/dist/PlaneWorld-*.dmg`.
 
 To do this in CI, export the certificate as .p12 into repository secrets, import it into a temporary keychain in the
 macOS job, and pass the notarytool credentials as secrets (not set up: it needs your account).
@@ -42,4 +42,4 @@ Signing. MSIX was not chosen: it needs a trusted signature even to install local
 
 ## Not done yet
 
-Auto-update and crash reporting (PORT_PLAN phase 6 stretch items) are not implemented.
+Auto-update and crash reporting are not implemented.

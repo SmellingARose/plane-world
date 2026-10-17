@@ -1,13 +1,16 @@
 # Plane World: Full-flow model (GPU CFD)
 
 The aero model is a switch: **fast** (strip wings, momentum props, actuator-disk slipstream, Newtonian panels;
-see `docs/PHYSICS.md`) or **full** (a lattice-Boltzmann CFD solver on Metal). Both FLY and training
-(`--train`, EVOLVE) can use either. Settings type: `AeroRunSettings` / `CFDSettings` in
-`Sources/Core/Fidelity.swift`. Solver: `Sources/Flow/`. Contract and threading: `docs/FIDELITY.md`.
+see `docs/PHYSICS.md`) or **full** (a lattice-Boltzmann CFD solver on the GPU: Metal on macOS, D3D12 on
+Windows; Slang shaders in `shaders/flow`). Both FLY and training (`pwcli --train`, EVOLVE) can use either.
+Settings: `CFDSettings` (`src/core/pw/sim/cfd.h:45`), presets in `CFDSettings::fromPreset`
+(`src/core/src/sim/cfd.cpp:31`), diagnostics `CFDDiagnostics` (`cfd.h:70`). Backend interface `AeroBackend`
+(`cfd.h:116`); solver `pw::flow::LBMSolver` (`src/flow/pw/flow/lbm.h:56`, `src/flow/src/lbm.cpp`). CraftSim glue:
+`src/core/pw/sim/full_aero.h`, `src/core/src/sim/full_aero.cpp`.
 
-> **Status (measured, this build).** The Metal solver is live and wired end to end: FLY (Fast/Full switch, CFD
-> inspector, live diagnostics, slice + particle overlay), `--train --aero full`, EVOLVE, and
-> `--aero-compare` (per-part fast vs CFD table). Selftests `flow.*` and `fidelity.*` cover it.
+> **Status.** The GPU solver is wired end to end: FLY (aero model list, CFD settings
+> panel, live diagnostics, slice + particle overlay), `--train --aero full`, EVOLVE, and
+> `pwcli --aero-compare` (per-part fast vs CFD table). Selftests `flow.*` and `fidelity.*` cover it.
 > **Accuracy is poor at the grids that run at usable speed** (see §6): treat full-mode forces as qualitative
 > unless the convergence readouts are small. If the backend is unavailable, **full** falls back to **fast** and
 > the UI says why.
@@ -17,7 +20,7 @@ see `docs/PHYSICS.md`) or **full** (a lattice-Boltzmann CFD solver on Metal). Bo
 - **Lattice-Boltzmann**, D3Q19 (default) or D3Q27 velocities, on a uniform grid of spacing dx.
 - **Collision:** BGK, MRT (Hermite-basis: stress modes at ω, higher modes at 1.2) or regularized.
   **Cumulant is not implemented:** selecting it (the settings default) runs the regularized operator, and
-  `LBMSolver.effectiveCollision` reports that. BGK is the cheapest and the least stable.
+  `LBMSolver::effectiveCollision()` (`lbm.h:75`) reports that. BGK is the cheapest and the least stable.
 - **Turbulence (LES):** none, Smagorinsky (C_s default 0.17) or WALE. A real craft's Reynolds number is far too
   high to resolve, so leave LES on.
 - **Moving, craft-following domain.** A **world-axis-aligned** box that translates with the craft's centre of
@@ -38,11 +41,28 @@ see `docs/PHYSICS.md`) or **full** (a lattice-Boltzmann CFD solver on Metal). Bo
   with thrust and torque from the fast momentum-theory model. So prop thrust is the same in both models; what CFD
   changes is how that wake interacts with the airframe.
 - **Ground:** a moving-wall boundary at the ground's relative velocity when the domain reaches terrain.
-- **Training:** each evaluation worker owns one CFD domain (`EvalWorker.applyAero`), on the scalar CraftSim
-  (the SIMD-lane batch sim has no CFD call site, so `batchLanes` is forced to 1). `LBMDomainPool` (several domains
-  in one command buffer) exists and is selftested, but the trainer does not use it yet.
-- **Lag:** update k submits poses at substep k·N and collects at substep (k+1)·N (N = `updateEvery`), so the GPU
-  runs while the CPU integrates; CFD forces are one update old.
+- **Training:** each evaluation worker owns one private CFD backend (`EvalWorker::fullBackend_`,
+  `src/core/pw/evo/evaluator.h:120`; configured in `EvalWorker::loadSim`, `src/core/src/evo/evaluator.cpp:235`)
+  on the scalar CraftSim (the C++ evaluator is scalar; `batchLanes` is ignored). `LBMDomainPool` (several domains
+  in one command buffer, `lbm.h:141`) exists, is registered and selftested, but the trainer does not use it yet,
+  so "one domain pool per worker" is today "one domain per worker".
+- **Lag:** update k submits poses at substep k·N and collects at substep (k+1)·N (N = `updateEvery`). `submit`
+  records and commits GPU work without waiting; `collect` waits for it, so the GPU runs while the CPU integrates
+  and CFD forces are one update old (`CraftSim::substep`, `src/core/src/sim/craft_sim.cpp:512`: `fullCollect`
+  before `substepCore`, `fullSubmit` after).
+
+### Contract
+
+- **Fast path untouched when the model is fast.** The full path is one branch around `substepCore`
+  (`craft_sim.cpp:512`); with `AeroModel::Fast` nothing changes, and the trajectory digests in
+  `physics.trajectory-digest` (`src/core/src/sim/physics_selftests.cpp:430`) stay bit-exact. In full mode the fast
+  wing/body/panel aero runs only on an equation-capture substep, for the comparison rows (`craft_sim.cpp:619`).
+- **No per-substep allocation in the full path.** Pose, rotor and force buffers are sized in `enableFull` /
+  `prepareFull` (`full_aero.cpp:29`, `:43`); `submit`/`collect` do not allocate after the first submit of a layout
+  (`cfd.h:114`, `lbm.h:20`), unless a diverged domain is re-laid out.
+- **One backend per CraftSim**, called only from that sim's thread (`CraftSim::aeroBackend`,
+  `src/core/pw/sim/craft_sim.h:131`; not owned).
+- If the backend is missing or `configure` fails, full falls back to fast and the error is shown.
 - **Not wired:** the sampled flow velocity per part does not yet feed servo hinge loads or sensors; in full mode
   the servo hinge load is 0 and sensors use the free stream. The slice plane is in world axes, not craft axes.
 
@@ -78,6 +98,13 @@ so keep it at 0.05–0.15. Above `maxMach` (default 0.3) the run is flagged.
 
 ### Presets
 
+Defined in `CFDSettings::fromPreset` (`src/core/src/sim/cfd.cpp:31`). In the UI they are picked from the aero
+model list, which FLY and EVOLVE share (`AeroModelPicker.qml`, built in `src/app/appcontroller.cpp:953`): entries
+"Full CFD · Draft", "Full CFD · Medium", "Full CFD · High", "Full CFD · Ultra" next to the fast profiles. The
+"CFD settings" section of the aero panel (`src/app/qml/AeroPanel.qml:61`) has the sliders for every field. Palette
+commands (`src/app/qml/AppCommands.qml:68`): "Aero: toggle flow slice", "Aero: flow slice horizontal",
+"Aero: flow slice vertical".
+
 | Preset | cellsPerMeter | maxCellsPerAxis | Other |
 |---|---|---|---|
 | Draft | 8 | 96 | regularized collision, updateEvery 8 |
@@ -89,7 +116,7 @@ Changing any field switches the preset to Custom.
 
 ## 3. Reading the diagnostics ("how good is it")
 
-`CFDDiagnostics`, shown in the FLY CFD inspector:
+`CFDDiagnostics` (`cfd.h:70`), shown in the "CFD quality (live)" section of the aero panel:
 
 | Field | Meaning | Healthy |
 |---|---|---|
@@ -113,7 +140,7 @@ In the experiment JSON:
 "aero": { "model": "full", "cfd": { "preset": "draft" }, "toggles": { "gyro": true } }
 ```
 
-or override from the CLI with `--aero fast|full`. In EVOLVE, use the aero-model switch. Missing keys fall back
+or override from the CLI with `pwcli --train exp.json --aero fast|full`. In EVOLVE, pick it from the aero model list. Missing keys fall back
 to the defaults, so old experiments load unchanged (as fast).
 
 Full mode is about **3000× slower** than fast (measured below). Extra CLI flag: `--cfd-preset draft|medium|high|ultra`. A practical workflow:
@@ -132,9 +159,9 @@ Full mode is about **3000× slower** than fast (measured below). Extra CLI flag:
 | Bluff CAD bodies at low speed | full (Newtonian panels have no good error bound here) |
 | Long evolutionary runs | fast |
 
-## 6. Measured results (Apple M4, this build)
+## 6. Measured results (Apple M4; measured on the earlier Swift build of the same solver, not re-run on C++)
 
-**Solver validation** (`PW_FLOW_VALIDATE=1 --selftest flow.validate`, CFD builder's runs; GPU shared, timings noisy):
+**Solver validation** (`PW_FLOW_VALIDATE=1 pwcli --selftest flow.validate`, CFD builder's runs; GPU shared, timings noisy):
 
 | Case | Grid | Result | Reference |
 |---|---|---|---|
@@ -150,7 +177,7 @@ Full mode is about **3000× slower** than fast (measured below). Extra CLI flag:
 Drag converges toward experiment as the grid is refined; lift is badly under-predicted because the boundary layer
 is not resolved (no wall model yet).
 
-**Fast vs CFD per part** (`PlaneWorld --aero-compare Trainer --speed 30 --alpha 4 --seconds 1 --cfd-preset P`;
+**Fast vs CFD per part** (`pwcli --aero-compare Trainer --speed 30 --alpha 4 --seconds 1 --cfd-preset P`;
 craft pinned, throttle 0; totals over non-rotor parts; Fx = −drag, Fy = lift):
 
 | Preset | grid (effective dx) | CFD total Fx / Fy (N) | fast Fx / Fy (N) | coarseΔ / Richardson | wall time for 1 s |
@@ -165,7 +192,7 @@ bodies, and the fast model gives wheels no drag at all). High is not better than
 developed (the convergence readouts say so). **Conclusion: at these grids CFD is not more accurate than the fast
 model for an attached-flow trainer**; it is a qualitative interaction model (wakes, blockage, ground).
 
-Ducted rocket at hover (`--aero-compare examples/crafts/ducted-rocket.json --throttle 0.7 --alt 20 --cfd-preset
+Ducted rocket at hover (`pwcli --aero-compare examples/crafts/ducted-rocket.json --throttle 0.7 --alt 20 --cfd-preset
 medium`, 91×125×91 at 6.25 cm): total non-rotor force fast −94.8 N (down) vs CFD −66.5 N (−30 %): the two lift
 motors (bodies in the jet) −36.9/−54.5 N fast vs −19.4/−25.4 N CFD; the 8 duct shell panels carry 2.6–6.9 N each in
 CFD (radial loads that mostly cancel) vs ≤ 0.33 N fast; the fixed vanes 0.87 N fast vs 0.85–1.09 N CFD. It ran at
@@ -176,11 +203,8 @@ fast 790–1170 sim-s/s; full/Draft 0.3 sim-s/s (405 s wall in total). The full 
 (population 48, 2 × 20 s episodes) runs at 1000–1750 sim-s/s in fast (about 1 s for 5 generations) and would take
 about 3.5 h per generation in full/Draft.
 
-## Screenshot / debug flags
+## Screenshots
 
-`--tab fly --aero full --cfd-preset draft --flow-viz` opens FLY on Draft CFD with the slice and particles on.
-`--air-start <m/s>` launches the craft 120 m above its spawn along body +x at that speed with all motors at 0.7
-(a launch condition, not a trim). `--select-part <id>` selects a part for the EQUATIONS panel, and
-`--show-equations` scrolls the sidebar to it. `docs/screens/fly-full.jpg` and `equations.jpg` were taken with
-`--air-start 30 --select-part p8` on the Trainer (Draft: 96×71×71 grid, dx 38 cm, ~35 ms GPU per CFD step on the M4;
-fast-vs-CFD |F| difference on the left wing was 33.6 % in that frame).
+The app takes `--tab <name>`, `--command "<palette entry>"` (repeatable), `--size WxH`, `--screenshot <file>` and
+`--quit-after <s>` (`src/app/main.cpp`), e.g. `--tab fly --command "Aero: toggle flow slice"`. The Swift-era
+`--air-start`, `--select-part`, `--show-equations` and `--flow-viz` flags do not exist in the C++ app.
