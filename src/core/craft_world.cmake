@@ -4,7 +4,8 @@ set(_pw_presets
   "Trainer=${PROJECT_SOURCE_DIR}/data/crafts/trainer.json"
   "Jet trainer=${PROJECT_SOURCE_DIR}/data/crafts/jet-trainer.json"
   "Rover=${PROJECT_SOURCE_DIR}/data/crafts/rover.json"
-  "Sounding rocket=${PROJECT_SOURCE_DIR}/data/crafts/sounding-rocket.json")
+  "Sounding rocket=${PROJECT_SOURCE_DIR}/data/crafts/sounding-rocket.json"
+  "Racer quad=${PROJECT_SOURCE_DIR}/data/crafts/racer-quad.json")
 set(_pw_examples "Ducted rocket=${PROJECT_SOURCE_DIR}/examples/crafts/ducted-rocket.json")
 set(_pw_craft_files)
 foreach(pair IN LISTS _pw_presets _pw_examples)
