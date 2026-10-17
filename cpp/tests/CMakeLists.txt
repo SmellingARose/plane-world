@@ -12,3 +12,4 @@ target_include_directories(pwtests PRIVATE ${doctest_SOURCE_DIR})
 target_link_libraries(pwtests PRIVATE pwcore pwgpu)
 add_test(NAME pwtests COMMAND pwtests)
 add_test(NAME pwcli-selftest COMMAND pwcli --selftest all)
+target_sources(pwtests PRIVATE test_craft_world.cpp)   # P1b: craft / world / collision

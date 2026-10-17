@@ -1,0 +1,198 @@
+{
+ "name": "Rover",
+ "parts": [
+  {
+   "id": "p1",
+   "type": "motor",
+   "name": "Drive",
+   "color": "#5a6270",
+   "mass": 30,
+   "pos": [
+    0,
+    0,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "torque": 180,
+    "vmax": 20,
+    "reversible": 1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null,
+   "keys": {
+    "pos": "w",
+    "neg": "s",
+    "mode": "spring",
+    "rate": 2
+   }
+  },
+  {
+   "id": "p2",
+   "type": "servo",
+   "name": "Steering",
+   "color": "#ffb020",
+   "mass": 0.5,
+   "pos": [
+    0.9,
+    0,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "axis": "y",
+    "range": 30,
+    "torque": 200,
+    "speed": 60
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null,
+   "keys": {
+    "pos": "d",
+    "neg": "a",
+    "mode": "spring",
+    "rate": 2
+   }
+  },
+  {
+   "id": "p3",
+   "type": "box",
+   "name": "Chassis",
+   "color": "#d8dce2",
+   "mass": 150,
+   "pos": [
+    0,
+    0.1,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "sx": 2.4,
+    "sy": 0.4,
+    "sz": 1.3,
+    "cd": 0.6
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p4",
+   "type": "wheel",
+   "name": "Front L",
+   "color": "#222428",
+   "mass": 8,
+   "pos": [
+    0.9,
+    -0.15,
+    -0.85
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.35,
+    "width": 0.2,
+    "grip": 1,
+    "roll": 0.02
+   },
+   "servo": "p2",
+   "invert": true,
+   "motor": "p1"
+  },
+  {
+   "id": "p5",
+   "type": "wheel",
+   "name": "Front R",
+   "color": "#222428",
+   "mass": 8,
+   "pos": [
+    0.9,
+    -0.15,
+    0.85
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.35,
+    "width": 0.2,
+    "grip": 1,
+    "roll": 0.02
+   },
+   "servo": "p2",
+   "invert": true,
+   "motor": "p1"
+  },
+  {
+   "id": "p6",
+   "type": "wheel",
+   "name": "Rear L",
+   "color": "#222428",
+   "mass": 8,
+   "pos": [
+    -0.9,
+    -0.15,
+    -0.85
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.35,
+    "width": 0.2,
+    "grip": 1,
+    "roll": 0.02
+   },
+   "servo": null,
+   "invert": true,
+   "motor": "p1"
+  },
+  {
+   "id": "p7",
+   "type": "wheel",
+   "name": "Rear R",
+   "color": "#222428",
+   "mass": 8,
+   "pos": [
+    -0.9,
+    -0.15,
+    0.85
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.35,
+    "width": 0.2,
+    "grip": 1,
+    "roll": 0.02
+   },
+   "servo": null,
+   "invert": true,
+   "motor": "p1"
+  }
+ ]
+}

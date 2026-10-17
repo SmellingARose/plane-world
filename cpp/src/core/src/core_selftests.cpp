@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <vector>
 #include "pw/aero.h"
+#include "pw/craft/selftests.h"
 #include "pw/cpu.h"
 #include "pw/json.h"
 #include "pw/parity.h"
@@ -15,6 +16,7 @@ void registerCoreTests() {
     static bool done = false;
     if (done) return;
     done = true;
+    registerCraftWorldCollisionTests();
 
     add("core.json-roundtrip", [](Context& c) {
         const char* src = R"({"a":[1,2.5,-3e-300,0.1],"s":"hé\"llo","n":null,"t":true,"o":{}})";
