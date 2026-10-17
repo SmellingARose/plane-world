@@ -134,6 +134,9 @@ ApplicationWindow {
         title: "Plane World"
         standardButtons: Dialog.Ok
         modal: true
-        Label { text: "C++ / Qt 6 port, version " + pwVersion + "\n" + pwCpu + "\nRenderer: " + (work.viewport.backendName || "?") + " — " + work.viewport.adapterName }
+        width: Math.min(460, win.width - Theme.s6 * 2)
+        Label {
+            width: parent.width
+            wrapMode: Text.WordWrap text: "C++ / Qt 6 port, version " + pwVersion + "\n" + pwCpu + "\nRenderer: " + (work.viewport.backendName || "?") + " — " + work.viewport.adapterName }
     }
 }

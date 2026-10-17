@@ -34,8 +34,13 @@ if(WIN32)
   get_filename_component(_qtbin ${_qmake} DIRECTORY)
   find_program(PW_WINDEPLOYQT windeployqt HINTS ${_qtbin})
   if(PW_WINDEPLOYQT)
+    # Self-contained folder: ${CMAKE_BINARY_DIR}/deploy/Plane World.exe + Qt runtime (no build intermediates).
+    set(_dep ${CMAKE_BINARY_DIR}/deploy)
     add_custom_target(pwapp_deploy
-      COMMAND ${PW_WINDEPLOYQT} --qmldir ${CMAKE_CURRENT_SOURCE_DIR}/qml --no-translations --no-compiler-runtime $<TARGET_FILE:pwapp>
+      COMMAND ${CMAKE_COMMAND} -E rm -rf ${_dep}
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${_dep}
+      COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:pwapp> ${_dep}/
+      COMMAND ${PW_WINDEPLOYQT} --qmldir ${CMAKE_CURRENT_SOURCE_DIR}/qml --no-translations "${_dep}/$<TARGET_FILE_NAME:pwapp>"
       DEPENDS pwapp VERBATIM)
   endif()
 elseif(APPLE)
