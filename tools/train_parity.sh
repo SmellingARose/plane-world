@@ -16,7 +16,7 @@ export PW_SCRIPT_BUDGET_SCALE="${PW_SCRIPT_BUDGET_SCALE:-20}"
 fail=0
 for e in hold100-ga hover-pid hover-ducted-rocket glide-cmaes; do
   for w in 1 4; do
-    "$PWCLI" --train "$ROOT/examples/experiments/$e.json" --generations 3 --workers $w --out "$OUT/$e-w$w" > "$OUT/$e-w$w.log" 2>&1 \
+    "$PWCLI" --train "$ROOT/examples/experiments/$e.json" --swift-legacy --generations 3 --workers $w --out "$OUT/$e-w$w" > "$OUT/$e-w$w.log" 2>&1 \
       || { echo "FAIL $e (workers $w): pwcli exited $?"; tail -20 "$OUT/$e-w$w.log"; fail=1; continue; }
     REF="$ROOT/tests/parity/training/$e.history.csv"; ARGS=(--rtol 0)
     [[ "$MODE" == loose ]] && ARGS=(--rtol 0.05 --rows 1 --cols best,mean,median,worst)

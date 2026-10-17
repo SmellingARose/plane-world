@@ -153,7 +153,14 @@ int runTrain(const std::vector<std::string>& args) {
         }
         aero = with(aero, "cfd", cfdPreset(pr, aero["cfd"]));
     }
-    if (has(args, "--aero") || has(args, "--cfd-preset")) e = with(e, "aero", aero);
+    // --swift-legacy: the pre-validation mechanics (legacy hinge load, viscous-only friction, no spin reaction,
+    // 2-D stall angle, lagged mass) used by the Swift reference runs in tools/train_parity.sh.
+    if (has(args, "--swift-legacy")) {
+        Value t = aero["toggles"].isObject() ? aero["toggles"] : Value::object();
+        for (const char* k : {"hingeAtAC", "staticFriction", "spinReaction", "finiteWingStall", "exactMass"}) t = with(t, k, Value::fromBool(false));
+        aero = with(aero, "toggles", t);
+    }
+    if (has(args, "--aero") || has(args, "--cfd-preset") || has(args, "--swift-legacy")) e = with(e, "aero", aero);
 
     pw::script::Engine engine = pw::script::Engine::Auto;
     if (const char* se = value(args, "--script-engine")) {
