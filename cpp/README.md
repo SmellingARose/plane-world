@@ -70,3 +70,18 @@ the GA, NEAT controller, MAP-Elites) give bit-identical fitness histories, hall 
 1, 4 or all workers, with the native preset runtime and on both JavaScript engines. Checkpoint → resume continues
 bit-identically for every algorithm; the episode loop allocates nothing per control tick. On Windows (different libm in the
 last ulp) the same criteria as the Swift tests are checked, and generation 0 of the parity runs must agree within 1e-6.
+
+## GPU layer + renderer (phase 3a)
+
+| Target | What |
+|---|---|
+| `pwgpu` (`pw/gpu.h`) | thin explicit backend over Metal and Direct3D 12: buffers (device / upload / readback), textures (2D, 2D array, 3D, mips, views), graphics + compute pipelines from the Slang library, command lists on the graphics and async compute queues, cross-queue fences, triple-buffered frames with a per-frame upload ring, per-pass GPU timestamps, a per-vendor tuning table (TAA tile, wave size, async compute, shadow resolution). One binding model on both APIs (b0-3 / t0-7 / t8-11 buffers / u8-11 / s0-3 static samplers); D3D12 states tracked per subresource; Slang's Metal storage-texture indices remapped from its reflection JSON |
+| `pwrender` (`pw/render/*.h`) | port of Sources/Render: frame graph (culling, transient aliasing, queue switches joined by fences), sky-view + aerial-perspective LUTs (async compute), 4 cascaded shadow maps with far-cascade caching, PBR mesh pipeline, sky + sun disk, tiled TAA, bloom mip chain, ACES tonemap, debug lines, instanced meshes and craft part meshes (`CraftRenderable`) |
+
+The Qt viewport (`GpuViewport`) runs the renderer on Qt Quick's own Metal / D3D12 device and queue and composites its
+output texture without copies (orbit camera: drag / scroll / arrows+WASD / F / Home, `[` `]` time of day, G per-pass GPU times).
+
+Verification: `pwtests -tc="gpu*,render*"` (compute + readback, async compute fence, instanced indexed draws with depth,
+timestamps, ring overflow, frame-graph culling / aliasing, async vs. graphics-queue LUTs identical, craft parts visible)
+and a screenshot test against the Swift renderer's image (`tests/render_ref`, same scene): 47 dB PSNR on Apple M4.
+`pwcli --render-shot out.png [--warp]` writes the test scene; CI runs it on WARP and uploads the screenshots.

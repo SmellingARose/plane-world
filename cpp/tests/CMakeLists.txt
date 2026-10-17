@@ -14,3 +14,6 @@ add_test(NAME pwtests COMMAND pwtests)
 add_test(NAME pwcli-selftest COMMAND pwcli --selftest all)
 target_sources(pwtests PRIVATE test_craft_world.cpp)   # P1b: craft / world / collision
 target_sources(pwtests PRIVATE test_evolution.cpp)   # P2a: evolution
+target_sources(pwtests PRIVATE test_render.cpp)   # P3a: renderer
+target_link_libraries(pwtests PRIVATE pwrender)
+target_compile_definitions(pwtests PRIVATE PW_RENDER_REF_DIR="${PROJECT_SOURCE_DIR}/tests/render_ref")

@@ -16,13 +16,15 @@ SplitView {
         GpuViewport {
             id: vp
             anchors.fill: parent
-            clearColor: Theme.viewportClear
-            skyColor: Theme.viewportSky
             visible: page.visible
+            focus: true
         }
         ViewportHud {
             anchors.fill: parent
-            backend: vp.backendName; adapter: vp.adapterName; fps: vp.fps; error: vp.error; tab: page.tab
+            backend: vp.backendName; adapter: vp.adapterName; fps: vp.fps; gpuMs: vp.gpuMs; passes: vp.passTimings
+            asyncCompute: vp.asyncCompute; showStats: vp.showStats; timeOfDay: vp.timeOfDay; craft: vp.craftName
+            error: vp.error; tab: page.tab
+            interacting: vp.interacting
         }
     }
     Inspector {

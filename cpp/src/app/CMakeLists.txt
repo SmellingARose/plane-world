@@ -26,7 +26,7 @@ qt_add_qml_module(pwapp
     qml/KeyHint.qml
     qml/ViewportHud.qml
 )
-target_link_libraries(pwapp PRIVATE Qt6::Quick Qt6::QuickControls2 pwcore pwgpu)
+target_link_libraries(pwapp PRIVATE Qt6::Quick Qt6::QuickControls2 pwcore pwgpu pwrender)
 
 if(WIN32)
   # Deploy Qt next to the exe for CI artefacts (windeployqt from the same Qt install).

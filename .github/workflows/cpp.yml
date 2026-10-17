@@ -67,7 +67,8 @@ jobs:
       - name: Unit + parity tests (pwtests)
         env:
           PW_GPU_WARP: ${{ runner.os == 'Windows' && '1' || '' }}
-        run: cpp/build/tests/pwtests
+          PW_SHOT_DIR: ${{ github.workspace }}/shots
+        run: mkdir -p shots && cpp/build/tests/pwtests
 
       - name: Self-tests (pwcli --selftest all)
         run: cpp/build/src/cli/pwcli --selftest all --verbose
@@ -78,6 +79,10 @@ jobs:
       - name: Direct3D 12 WARP smoke test
         if: runner.os == 'Windows'
         run: cpp/build/src/cli/pwcli --gpu-smoke --warp
+
+      - name: Renderer screenshot (WARP Direct3D 12)
+        if: runner.os == 'Windows'
+        run: cpp/build/src/cli/pwcli --render-shot shots/pwcli-warp-640x360.png --warp
 
       - name: Metal smoke test
         if: runner.os == 'macOS'
@@ -112,6 +117,7 @@ jobs:
           fi
           cp cpp/build/bench.json dist/bench-${{ matrix.name }}.json
           cp app-${{ matrix.name }}.png dist/ 2>/dev/null || true
+          cp shots/*.png dist/ 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:

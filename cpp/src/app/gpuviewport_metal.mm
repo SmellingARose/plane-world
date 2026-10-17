@@ -4,6 +4,6 @@
 #include "gpuviewport.h"
 #include "pw/gpu.h"
 
-QSGTexture* pwWrapNativeTexture(QQuickWindow* w, const pw::gpu::NativeTarget& t) {
-    return QNativeInterface::QSGMetalTexture::fromNative((__bridge id<MTLTexture>)t.texture, w, QSize(t.width, t.height));
+QSGTexture* pwWrapNativeTexture(QQuickWindow* w, pw::gpu::Texture* t) {
+    return QNativeInterface::QSGMetalTexture::fromNative((__bridge id<MTLTexture>)t->native(), w, QSize(t->width(), t->height()));
 }

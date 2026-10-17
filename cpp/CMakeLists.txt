@@ -1,6 +1,7 @@
 # Plane World C++ port (docs/PORT_PLAN.md). Targets:
 #   pwcore  - static lib, C++20, no Qt: math, determinism, CPU feature dispatch, JSON, self-tests
 #   pwgpu   - GPU backend abstraction: Metal (Objective-C++) on Apple, Direct3D 12 on Windows; Slang shaders
+#   pwrender - renderer core on pwgpu (frame graph, sky / aerial LUTs, shadows, PBR, TAA, bloom, ACES)
 #   pwapp   - Qt 6 Quick application (native Qt Quick Controls style, embedded GPU viewport)
 #   pwtests - doctest unit + parity tests
 #   pwcli   - headless --selftest / --train / --bench / --gpu-smoke
@@ -29,6 +30,7 @@ include(PWSlang)
 add_subdirectory(src/core)
 add_subdirectory(shaders)
 add_subdirectory(src/gpu)
+add_subdirectory(src/render)
 add_subdirectory(src/cli)
 if(PW_BUILD_APP)
   add_subdirectory(src/app)
