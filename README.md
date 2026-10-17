@@ -5,7 +5,7 @@ Native macOS flight and vehicle physics sandbox. Built with Swift 6, Metal, AppK
 ## Overview
 - **Four tabs:** BUILD (make crafts), FLY (fly them), WORLD (make terrain and weather), EVOLVE (train controllers and designs).
 - **Two aero models**, selectable per flight and per experiment:
-  - **fast** (default): per-strip wing aero, momentum-theory props, actuator-disk slipstream with ducts and rotor ground effect, Newtonian + friction panels for CAD bodies. Runs well above real time, so it is what training normally uses. Equations, code locations and typical error: `docs/PHYSICS.md`.
+  - **fast** (default): per-strip wing aero, momentum-theory props, actuator-disk slipstream with ducts and rotor ground effect, Newtonian + friction panels for CAD bodies. Runs well above real time, so it is what training normally uses. Equations, code locations and typical error: `docs/PHYSICS.md (interactive explainer with quiz: docs/explainer.html)`.
   - **full**: GPU lattice-Boltzmann CFD (Metal) in a craft-following domain, with per-part forces fed back into the rigid body. Resolution, domain, collision and turbulence models, and Draft/Medium/High/Ultra presets are all adjustable, with grid-convergence and mass diagnostics. Guide: `docs/CFD.md`. Status of the solver in this pass: `docs/FIDELITY.md`.
 - **EQUATIONS panel** in FLY: the fast-model equations for the selected part with live values, and the CFD force for comparison when full is on.
 

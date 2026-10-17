@@ -1,0 +1,348 @@
+<title>Plane World Fast Physics</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (~68ch) with full-width figure rows; sections follow the order of one physics substep. */
+:root{
+  --bg:#F2F5F7; --panel:#FFFFFF; --ink:#132029; --muted:#5A6B77; --rule:#D5DEE4;
+  --accent:#2453D6; --force:#C9701C; --good:#1F8A5B; --bad:#C2413A; --codebg:#E9EEF2;
+  --display:"Newsreader", Georgia, serif; --body:"Instrument Sans", system-ui, sans-serif; --mono:"JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E151B; --panel:#152029; --ink:#E3EAEF; --muted:#94A6B3; --rule:#263642;
+  --accent:#7EA2FF; --force:#F0A35A; --good:#5BC896; --bad:#F07A72; --codebg:#1B2833; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E151B; --panel:#152029; --ink:#E3EAEF; --muted:#94A6B3; --rule:#263642;
+  --accent:#7EA2FF; --force:#F0A35A; --good:#5BC896; --bad:#F07A72; --codebg:#1B2833; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.6 var(--body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 64px}
+main{max-width:880px;margin:0 auto;display:flex;flex-direction:column;gap:56px}
+.col{max-width:68ch}
+h1,h2,h3{font-family:var(--display);font-weight:600;text-wrap:balance;line-height:1.15;margin:0}
+h1{font-size:clamp(34px,6vw,52px)}
+h2{font-size:30px}
+h3{font-size:18px;font-family:var(--body);font-weight:600}
+p{margin:0}
+.lede{color:var(--muted);font-size:18px}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+section{display:flex;flex-direction:column;gap:18px;scroll-margin-top:16px}
+nav ol{display:flex;flex-wrap:wrap;gap:6px 14px;padding:0;margin:0;list-style:none;font:14px var(--body)}
+nav a{color:var(--accent);text-decoration:none}nav a:hover{text-decoration:underline}
+.eq{font:500 16px/1.5 var(--mono);background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px 14px;overflow-x:auto;white-space:nowrap}
+.eq small{display:block;font:13px var(--body);color:var(--muted);white-space:normal;margin-top:4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media (max-width:720px){.grid2{grid-template-columns:1fr}}
+.grid2>*{min-width:0}
+.fig{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.fig canvas{width:100%;height:220px;display:block}
+.ctl{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:13px;color:var(--muted)}
+.ctl label{display:flex;gap:8px;align-items:center}
+.ctl input[type=range]{width:140px;accent-color:var(--accent)}
+.ctl output{font:500 13px var(--mono);color:var(--ink);min-width:5ch}
+details{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:10px 14px}
+details>summary{cursor:pointer;font-weight:600;color:var(--ink)}
+details[open]>summary{margin-bottom:8px}
+ol.steps{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:6px}
+pre{margin:0;background:var(--codebg);border-radius:8px;padding:12px 14px;overflow-x:auto;font:13px/1.55 var(--mono)}
+code{font-family:var(--mono);font-size:.92em}
+.note{font-size:14px;color:var(--muted)}
+.where{font:12px var(--mono);color:var(--muted)}
+.tag{display:inline-block;font:500 11px var(--mono);padding:2px 6px;border-radius:4px;background:var(--codebg);color:var(--muted)}
+/* quiz */
+.q{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.q .opts{display:flex;flex-direction:column;gap:6px}
+.q button{all:unset;cursor:pointer;border:1px solid var(--rule);border-radius:7px;padding:8px 12px;font:15px var(--body)}
+.q button:hover{border-color:var(--accent)}
+.q button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.q button.right{border-color:var(--good);background:color-mix(in srgb,var(--good) 14%,transparent)}
+.q button.wrong{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,transparent)}
+.q .why{font-size:14px;color:var(--muted)}
+.score{position:sticky;top:env(safe-area-inset-top,0px);align-self:flex-start;background:var(--panel);border:1px solid var(--rule);border-radius:999px;padding:6px 14px;font:500 14px var(--mono);z-index:2}
+@media (prefers-reduced-motion:no-preference){.q button{transition:background .15s,border-color .15s}}
+</style>
+
+<main>
+<header class="col" style="display:flex;flex-direction:column;gap:14px">
+  <span class="eyebrow">Plane World · fast aero model</span>
+  <h1>How the fast physics works</h1>
+  <p class="lede">Every substep (1,000 per second) the sim adds up forces from formulas, one part at a time, then moves the craft. This page derives each formula, shows a minimal implementation, and ends with a quiz.</p>
+  <nav aria-label="Sections"><ol>
+    <li><a href="#rigid">Rigid body</a></li><li><a href="#air">Air</a></li><li><a href="#wing">Wings</a></li>
+    <li><a href="#body">Bodies</a></li><li><a href="#prop">Propellers</a></li><li><a href="#wake">Slipstream</a></li>
+    <li><a href="#extra">Fast+ effects</a></li><li><a href="#ground">Ground</a></li><li><a href="#quiz">Quiz</a></li></ol></nav>
+</header>
+
+<!-- 1 -->
+<section id="rigid">
+  <span class="eyebrow">Step 1 of a substep · and the last</span>
+  <h2>Rigid body: forces in, motion out</h2>
+  <p class="col">The whole craft is one rigid body. Each substep sums every force <b>F</b> and torque <b>T</b> from all parts, then updates velocity and spin. The step is tiny (h = 1 ms), which keeps stiff things like tyres stable.</p>
+  <div class="eq">v ← v + (F/m)·h &nbsp;&nbsp; x ← x + v·h &nbsp;&nbsp; L ← L + T·h &nbsp;&nbsp; ω = I⁻¹L
+    <small>Symplectic (semi-implicit) Euler: update velocity first, then use the new velocity for position. Angular momentum L is integrated, not ω, so spinning objects keep their energy.</small></div>
+  <details><summary>Derivation</summary><ol class="steps">
+    <li>Newton: m·dv/dt = F. Over a short step h, dv ≈ (F/m)·h.</li>
+    <li>Plain (explicit) Euler uses the old v for position and slowly gains energy in oscillations. Using the <i>new</i> v (symplectic Euler) keeps energy bounded, which is why orbits and springs don't blow up.</li>
+    <li>Rotation: dL/dt = T (torques change angular momentum). The angular velocity follows from ω = I⁻¹L, with I the inertia tensor rotated into world space.</li>
+  </ol></details>
+  <pre>function step(b, F, T, h) {
+  b.v = add(b.v, scale(F, h / b.m));      // velocity first
+  b.x = add(b.x, scale(b.v, h));          // then position with the NEW velocity
+  b.L = add(b.L, scale(T, h));
+  b.w = mul(b.Iinv_world, b.L);           // ω from angular momentum
+  b.q = integrateQuat(b.q, b.w, h);       // rotate orientation by ω·h
+}</pre>
+  <p class="where">CraftSim.swift · substepCore (kept @inline(never) so it allocates nothing)</p>
+</section>
+
+<!-- 2 -->
+<section id="air">
+  <span class="eyebrow">Air properties</span>
+  <h2>Air: density, viscosity, wind</h2>
+  <div class="grid2">
+    <div class="eq">q = ½ρV²<small>Dynamic pressure. Every aerodynamic force below is q × area × a coefficient.</small></div>
+    <div class="eq">μ = 1.458·10⁻⁶·T^1.5 / (T + 110.4)<small>Sutherland's law: viscosity rises with temperature. Gives the Reynolds number Re = ρVc/μ.</small></div>
+  </div>
+  <p class="col">Density ρ falls with altitude (standard atmosphere), so the same speed gives less lift high up. Wind grows with height like a log profile, plus frozen turbulence that the craft flies through.</p>
+</section>
+
+<!-- 3 -->
+<section id="wing">
+  <span class="eyebrow">Biggest force on a plane</span>
+  <h2>Wings: strip theory</h2>
+  <p class="col">Each wing is cut into narrow spanwise strips. Each strip measures the air it actually feels (craft speed, its own rotation, wind and prop wash), finds its angle of attack α, and looks up lift and drag coefficients.</p>
+  <div class="grid2">
+    <div class="eq">C_L = a·(α − α₀)<br>a = 2πA / (2 + √(A²β²/κ² + 4))<small>Lift slope a shrinks for short wings (aspect ratio A) because tip vortices bleed lift. β = √(1−M²) adds compressibility.</small></div>
+    <div class="eq">C_D = C_D0 + C_L²/(πAe) + …<small>Profile drag plus induced drag. Induced drag is the price of lift, and it falls as wings get longer.</small></div>
+  </div>
+  <div class="fig">
+    <h3>Lift curve</h3>
+    <canvas id="cLift" aria-label="Lift coefficient versus angle of attack"></canvas>
+    <div class="ctl">
+      <label>Aspect ratio A <input id="sA" type="range" min="1" max="20" step="0.5" value="7"><output id="oA">7</output></label>
+      <label>Camber C_L0 <input id="sC" type="range" min="0" max="0.6" step="0.05" value="0.25"><output id="oC">0.25</output></label>
+      <span>Slope a = <output id="oSlope"></output>/rad</span>
+    </div>
+    <p class="note">Linear until the stall angle, then it blends over 12° toward a flat plate (C_L = 2 sin α cos α). Short wings have gentler slopes.</p>
+  </div>
+  <details><summary>Derivation of the lift slope</summary><ol class="steps">
+    <li>Thin-airfoil theory (infinitely long wing): C_L = 2π·α. A 2D section gains 2π per radian.</li>
+    <li>A finite wing sheds tip vortices that push air down (downwash). The wing sees a smaller effective angle: α_eff = α − C_L/(πA) (lifting-line, elliptic loading).</li>
+    <li>Substitute: C_L = 2π(α − C_L/(πA)) → C_L = 2π·α / (1 + 2/A). This is the classic Prandtl result.</li>
+    <li>Helmbold's formula fixes it for short and swept wings, and the β term adds compressibility (Prandtl–Glauert). That's the a used here.</li>
+  </ol></details>
+  <pre>function wingStrip(alpha, V, rho, S, A, cl0, cd0, e = 0.8) {
+  const a = 2*Math.PI*A / (2 + Math.sqrt(A*A + 4));        // lift slope (M≈0)
+  const stall = 15 * Math.PI/180;
+  let cl = cl0 + a*alpha;                                   // attached flow
+  if (Math.abs(alpha) > stall) {                            // blend toward flat plate
+    const t = Math.min(1, (Math.abs(alpha)-stall) / (12*Math.PI/180));
+    cl = (1-t)*(cl0 + a*stall*Math.sign(alpha)) + t*2*Math.sin(alpha)*Math.cos(alpha);
+  }
+  const cd = cd0 + cl*cl/(Math.PI*A*e);                     // + induced drag
+  const q = 0.5*rho*V*V;
+  return { lift: q*S*cl, drag: q*S*cd };                    // ⟂ and ∥ to the local flow
+}</pre>
+  <p class="where">Aerodynamics.swift · Aero.wing · called per strip from CraftSim</p>
+</section>
+
+<!-- 4 -->
+<section id="body">
+  <span class="eyebrow">Fuselages, boxes, imported CAD</span>
+  <h2>Bodies: drag and Newtonian panels</h2>
+  <div class="grid2">
+    <div class="eq">D = ½ρV²·C_D·S_proj<small>Primitive parts: a drag coefficient times the area they show to the flow.</small></div>
+    <div class="eq">C_p = C_p,max·cos²θ<small>CAD meshes: every triangle facing the wind gets pressure from its angle θ to the flow (modified Newtonian). Hidden triangles are shadowed.</small></div>
+  </div>
+  <p class="col">Newton's own idea: air is a stream of particles that hit a surface and lose their normal momentum. It's exact at hypersonic speed and only roughly right at low speed, which is why the docs flag it as the least accurate fast model.</p>
+  <details><summary>Derivation of the Newtonian pressure</summary><ol class="steps">
+    <li>Mass flow hitting a panel of area A tilted θ from the flow: ṁ = ρV·A·cos θ.</li>
+    <li>Each particle loses its normal velocity V·cos θ. Force = ṁ·V cos θ = ρV²A cos²θ.</li>
+    <li>Divide by qA: C_p = 2cos²θ. The "modified" version swaps 2 for C_p,max (≈1 + M²/4 at low speed).</li>
+  </ol></details>
+  <pre>for (const tri of mesh) {
+  const c = -dot(tri.normal, flowDir);                      // cos θ (facing the flow?)
+  if (c > 0 && !tri.shadowed) force = add(force, scale(tri.normal, -cpMax*c*c*q*tri.area));
+}</pre>
+  <p class="where">PanelAero.swift</p>
+</section>
+
+<!-- 5 -->
+<section id="prop">
+  <span class="eyebrow">Turning power into thrust</span>
+  <h2>Propellers: momentum theory</h2>
+  <p class="col">The propeller is a disk that speeds up the air passing through it. Push air backward and the air pushes you forward. Given engine power P, the disk settles where the power going into the air matches the power available.</p>
+  <div class="grid2">
+    <div class="eq">T·(V + v_i) = η·P<small>Power into the air = thrust × air speed at the disk. η ≈ 0.75 for losses.</small></div>
+    <div class="eq">v_i = −V/2 + √(V²/4 + T/(2ρA))<small>Induced velocity at the disk. Solved together with the line on the left (Newton iteration).</small></div>
+  </div>
+  <div class="fig">
+    <h3>Thrust vs airspeed (same engine power)</h3>
+    <canvas id="cProp" aria-label="Thrust versus airspeed"></canvas>
+    <div class="ctl">
+      <label>Power P <input id="sP" type="range" min="10" max="150" step="5" value="75"><output id="oP">75</output> kW</label>
+      <label>Diameter <input id="sD" type="range" min="0.6" max="3" step="0.1" value="1.9"><output id="oD">1.9</output> m</label>
+      <span>Static thrust = <output id="oT0"></output></span>
+    </div>
+    <p class="note">Thrust is highest at zero speed and falls as you fly faster, since the same power pushes less force at higher speed. A bigger disk gives more static thrust for the same power.</p>
+  </div>
+  <details><summary>Derivation (actuator disk)</summary><ol class="steps">
+    <li>Air enters at V, passes the disk at V + v_i, leaves far behind at V + 2v_i (Bernoulli on each side of the disk gives the factor 2).</li>
+    <li>Mass flow through the disk: ṁ = ρA(V + v_i). Thrust = ṁ × change in speed = ρA(V + v_i)·2v_i.</li>
+    <li>Solve that quadratic for v_i: v_i = −V/2 + √(V²/4 + T/(2ρA)).</li>
+    <li>Ideal power = T·(V + v_i). Real power is larger by 1/η.</li>
+  </ol></details>
+  <pre>function propThrust(P, D, rho, V, eta = 0.75) {
+  const A = Math.PI*D*D/4;
+  let T = Math.cbrt(2*rho*A*(eta*P)**2);                    // static guess
+  for (let k = 0; k < 8; k++) {                             // Newton on f(T) = T(V+vi) − ηP
+    const vi = -V/2 + Math.sqrt(V*V/4 + T/(2*rho*A));
+    const f = T*(V+vi) - eta*P;
+    const dvi = 1/(4*rho*A*Math.sqrt(V*V/4 + T/(2*rho*A)));
+    T -= f / (V + vi + T*dvi);
+  }
+  return T;
+}</pre>
+  <p class="where">Propulsion.swift · propThrust</p>
+</section>
+
+<!-- 6 -->
+<section id="wake">
+  <span class="eyebrow">Parts feeling each other's air</span>
+  <h2>Slipstream: the wake behind a rotor</h2>
+  <p class="col">The air a propeller accelerates keeps going. Anything behind it, like a tail, a second propeller or a duct, feels that extra flow. The wake speeds up, narrows, swirls in the direction the prop spins, and slowly mixes out.</p>
+  <div class="eq">Δv(s) = v_i·(1 + s/√(s² + R²))<small>s = distance downstream of the disk. Upstream (s→−∞): 0. At the disk: v_i. Far downstream: 2v_i. That's the same factor 2 as in momentum theory.</small></div>
+  <div class="fig">
+    <h3>Axial speed-up along the wake</h3>
+    <canvas id="cWake" aria-label="Wake speed-up versus distance"></canvas>
+    <div class="ctl">
+      <label>Mixing decay <input id="sMix" type="checkbox" checked> on</label>
+      <label>Ducted <input id="sDuct" type="checkbox"></label>
+    </div>
+    <p class="note">Ducted rotors don't contract their wake, and their exit speed equals the disk speed. That's why a duct gives more thrust for the same power: it acts like a bigger open rotor.</p>
+  </div>
+  <div class="grid2">
+    <div class="eq">R_s = R·√((V + v_i)/(V + Δv))<small>Wake contraction from continuity: faster air needs a narrower tube.</small></div>
+    <div class="eq">T_IGE/T_OGE = 1/(1 − (R/4z)²)<small>Rotor ground effect (Cheeseman–Bennett): near the ground, the same power gives more thrust.</small></div>
+  </div>
+  <pre>function wakeSpeedUp(p, disk) {                            // induced velocity at point p
+  const d = sub(p, disk.center), s = dot(d, disk.axis);     // distance along the wake
+  const dv = disk.vi * (1 + s / Math.hypot(s, disk.R));     // vortex-cylinder profile
+  const r  = len(sub(d, scale(disk.axis, s)));              // distance from the wake axis
+  const Rs = disk.R * Math.sqrt((disk.V+disk.vi)/(disk.V+dv));
+  const inside = r < Rs ? 1 : 0;                            // (code uses a smooth edge)
+  return scale(disk.axis, dv * inside * Math.exp(-Math.max(s,0)/(14*disk.R)));
+}</pre>
+  <p class="where">Slipstream.swift · WakeField.induced (wake state lags one substep, so it stays deterministic)</p>
+</section>
+
+<!-- 7 -->
+<section id="extra">
+  <span class="eyebrow">Fast+ profile · each one switchable</span>
+  <h2>The extra effects</h2>
+  <div class="grid2">
+    <div class="eq">T_gyro = −ω_body × (I_r·Ω)<small><b>Gyroscopic rotors.</b> A spinning prop resists being tilted. Pitch the nose and the craft yaws instead.</small></div>
+    <div class="eq">ε ≈ 2C_L/(πA)<small><b>Wing downwash.</b> The main wing bends the air down, so the tail sees a smaller angle of attack. Modelled with horseshoe vortices and Biot–Savart.</small></div>
+    <div class="eq">N ≈ T·k_N·sin α_p<small><b>P-factor.</b> At a high angle, the descending blade takes a bigger bite: a sideways force plus a yawing moment.</small></div>
+    <div class="eq">wake × attenuation(body)<small><b>Blockage.</b> A body sitting in a wake shadows what's behind it. <b>CAD wash:</b> each mesh triangle feels the prop wash too.</small></div>
+  </div>
+</section>
+
+<!-- 8 -->
+<section id="ground">
+  <span class="eyebrow">Touching things</span>
+  <h2>Ground and tyres</h2>
+  <div class="grid2">
+    <div class="eq">F_n = k·depth − c·v_n<small>Penalty contact: a stiff spring-damper pushes corners out of the ground. Friction μ·F_n opposes sliding.</small></div>
+    <div class="eq">F_x = D·sin(C·atan(B·κ))<small>Tyre grip (Pacejka "magic formula" lite) from slip ratio κ = (ωr − v)/|v|. Same shape sideways with slip angle.</small></div>
+  </div>
+</section>
+
+<!-- Quiz -->
+<section id="quiz">
+  <span class="eyebrow">Check yourself</span>
+  <h2>Quiz</h2>
+  <div class="score" id="score" aria-live="polite">0 / 0</div>
+  <div id="quizList" style="display:flex;flex-direction:column;gap:14px"></div>
+</section>
+
+<footer class="note col">Source: github.com/SmellingARose/plane-world · docs/PHYSICS.md lists every equation with code locations and the error research table.</footer>
+</main>
+
+<script>
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function setup(cv){ const r = cv.getBoundingClientRect(), d = devicePixelRatio||1; cv.width = r.width*d; cv.height = r.height*d;
+  const g = cv.getContext('2d'); g.setTransform(d,0,0,d,0,0); return {g, w:r.width, h:r.height}; }
+function axes(g,w,h,pad,xr,yr,xl,yl){
+  g.strokeStyle = css('--rule'); g.fillStyle = css('--muted'); g.lineWidth = 1; g.font = '11px ' + css('--mono');
+  const X = x => pad.l + (x-xr[0])/(xr[1]-xr[0])*(w-pad.l-pad.r), Y = y => h-pad.b - (y-yr[0])/(yr[1]-yr[0])*(h-pad.t-pad.b);
+  g.beginPath(); g.moveTo(pad.l,Y(0)); g.lineTo(w-pad.r,Y(0)); g.moveTo(X(Math.max(0,xr[0])),pad.t); g.lineTo(X(Math.max(0,xr[0])),h-pad.b); g.stroke();
+  g.fillText(xl, w-pad.r-g.measureText(xl).width, h-6); g.fillText(yl, pad.l+4, pad.t+10);
+  return {X,Y};
+}
+function line(g,pts,col,wd=2,dash=[]){ g.strokeStyle=col; g.lineWidth=wd; g.setLineDash(dash); g.beginPath(); pts.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y)); g.stroke(); g.setLineDash([]); }
+
+function drawLift(){
+  const A = +sA.value, cl0 = +sC.value; oA.textContent = A; oC.textContent = cl0.toFixed(2);
+  const a = 2*Math.PI*A/(2+Math.sqrt(A*A+4)); oSlope.textContent = a.toFixed(2);
+  const {g,w,h} = setup(cLift); g.clearRect(0,0,w,h);
+  const {X,Y} = axes(g,w,h,{l:28,r:10,t:10,b:22},[-30,30],[-1.6,1.8],'α (deg)','C_L');
+  const cl = deg => { const al = deg*Math.PI/180, st = 15*Math.PI/180; let c = cl0 + a*al;
+    if (Math.abs(al) > st){ const t=Math.min(1,(Math.abs(al)-st)/(12*Math.PI/180)); c=(1-t)*(cl0+a*st*Math.sign(al))+t*2*Math.sin(al)*Math.cos(al);} return c; };
+  const pts=[]; for(let d=-30; d<=30; d+=0.5) pts.push([X(d),Y(cl(d))]); line(g,pts,css('--accent'),2.2);
+  const ip=[]; for(let d=-30; d<=30; d+=0.5) ip.push([X(d),Y(2*Math.PI*d*Math.PI/180)]); line(g,ip,css('--muted'),1,[4,4]);
+  g.fillStyle=css('--muted'); g.fillText('2πα (thin airfoil, infinite span)', X(-29), Y(1.65));
+}
+function propT(P,D,rho,V){ const eta=.75, A=Math.PI*D*D/4; let T=Math.cbrt(2*rho*A*(eta*P)**2);
+  for(let k=0;k<12;k++){ const s=Math.sqrt(V*V/4+T/(2*rho*A)), vi=-V/2+s, f=T*(V+vi)-eta*P, dvi=1/(4*rho*A*s); T-=f/(V+vi+T*dvi);} return T; }
+function drawProp(){
+  const P=+sP.value*1000, D=+sD.value; oP.textContent=sP.value; oD.textContent=D.toFixed(1);
+  const T0=propT(P,D,1.225,0); oT0.textContent=Math.round(T0)+' N';
+  const {g,w,h}=setup(cProp); g.clearRect(0,0,w,h);
+  const top=Math.max(500, Math.ceil(T0/1000)*1000);
+  const {X,Y}=axes(g,w,h,{l:36,r:10,t:10,b:22},[0,80],[0,top],'V (m/s)','T (N)');
+  const pts=[]; for(let V=0;V<=80;V+=1) pts.push([X(V),Y(propT(P,D,1.225,V))]); line(g,pts,css('--force'),2.2);
+  g.fillStyle=css('--muted'); g.fillText(top+' N', 2, Y(top)+10);
+}
+function drawWake(){
+  const mix=sMix.checked, duct=sDuct.checked, {g,w,h}=setup(cWake); g.clearRect(0,0,w,h);
+  const {X,Y}=axes(g,w,h,{l:28,r:10,t:10,b:22},[-3,12],[0,2.2],'s / R (downstream →)','Δv / v_i');
+  const f=s=>{ let v = duct ? (s>=0?1:1+s/Math.hypot(s,1)) : 1+s/Math.hypot(s,1); if(mix&&s>0) v*=Math.exp(-s/14); return v; };
+  const pts=[]; for(let s=-3;s<=12;s+=0.05) pts.push([X(s),Y(f(s))]); line(g,pts,css('--accent'),2.2);
+  line(g,[[X(0),Y(0)],[X(0),Y(2.1)]],css('--force'),1.5,[3,3]); g.fillStyle=css('--force'); g.fillText('disk',X(0)+4,Y(2.0));
+  line(g,[[X(-3),Y(2)],[X(12),Y(2)]],css('--rule'),1,[2,4]); g.fillStyle=css('--muted'); g.fillText('2·v_i (far wake, open rotor)',X(3),Y(2)-4);
+}
+[sA,sC].forEach(e=>e.addEventListener('input',drawLift)); [sP,sD].forEach(e=>e.addEventListener('input',drawProp)); [sMix,sDuct].forEach(e=>e.addEventListener('change',drawWake));
+const redraw=()=>{drawLift();drawProp();drawWake();}; addEventListener('resize',redraw);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',redraw); new MutationObserver(redraw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+redraw();
+
+const Q=[
+ ["Why does the sim use symplectic (semi-implicit) Euler instead of plain Euler?", ["It is more accurate per step","It keeps energy bounded in oscillations, so springs and spins don't blow up","It needs no mass","It runs on the GPU"],1,"Using the new velocity for the position update keeps energy from creeping up in oscillating systems like tyres and contacts."],
+ ["Doubling airspeed changes every aerodynamic force by roughly…", ["×2","×4","×√2","No change"],1,"Forces scale with dynamic pressure q = ½ρV². Twice the speed gives four times the force (same coefficients)."],
+ ["Why does a short wing (low aspect ratio) have a smaller lift slope than 2π?", ["Higher Reynolds number","Tip vortices create downwash that lowers the effective angle of attack","Compressibility","Skin friction"],1,"Lifting-line theory gives α_eff = α − C_L/(πA), hence C_L = 2πα/(1+2/A)."],
+ ["Induced drag C_L²/(πAe) gets smaller when…", ["The wing is longer and slimmer (higher A)","The wing is shorter","Speed is lower","Air is denser"],0,"Induced drag falls with aspect ratio, which is why gliders have long, thin wings."],
+ ["In momentum theory, far behind an open propeller the air has sped up by…", ["v_i","2·v_i","v_i/2","Nothing"],1,"Bernoulli on each side of the disk splits the speed-up evenly: half before the disk, half after, for 2·v_i total."],
+ ["For the same engine power, a propeller's thrust is highest…", ["At top speed","At zero airspeed","At its pitch speed","It is constant"],1,"T(V+v_i) = ηP: as V rises, the same power buys less force."],
+ ["Why does a duct around a rotor give more thrust for the same power?", ["It's heavier","Its wake doesn't contract, so it acts like a bigger open rotor","It adds fuel","It reduces swirl only"],1,"With exit area equal to disk area (σ = 1), the static thrust matches an open rotor of √2× the diameter."],
+ ["In the vortex-cylinder wake Δv(s) = v_i(1 + s/√(s²+R²)), what is Δv exactly at the disk (s = 0)?", ["0","v_i","2v_i","R"],1,"s = 0 makes the fraction zero, so Δv = v_i: half of the final speed-up."],
+ ["Newtonian panel pressure C_p ∝ cos²θ is most accurate at…", ["Low subsonic speed","Hypersonic speed","Hover","Inside ducts"],1,"It models air as particles hitting the surface, which is a hypersonic picture. At low speed it is only an order-of-magnitude estimate."],
+ ["A spinning propeller and the craft pitches nose-up. The gyroscopic effect makes it…", ["Speed up","Yaw","Lose lift","Stall"],1,"T = −ω × h: torque is perpendicular to both the pitch rate and the spin axis, so the result is yaw."],
+ ["Rotor ground effect T_IGE/T_OGE = 1/(1−(R/4z)²) says thrust near the ground is…", ["Lower","Higher","Unchanged","Zero"],1,"The ground slows the wake, so the same power produces more thrust. It matters within about one rotor diameter."],
+ ["Why does the tail see a smaller angle of attack than the main wing?", ["P-factor","Wing downwash ε ≈ 2C_L/(πA)","Ground effect","Swirl"],1,"The main wing deflects air downward, and the tail sits in that flow."],
+];
+let answered=0, right=0; const list=document.getElementById('quizList'), score=document.getElementById('score');
+Q.forEach(([q,opts,ok,why],i)=>{
+  const d=document.createElement('div'); d.className='q';
+  d.innerHTML=`<h3>${i+1}. ${q}</h3><div class="opts"></div><p class="why" hidden></p>`;
+  const o=d.querySelector('.opts'), w=d.querySelector('.why');
+  opts.forEach((t,j)=>{ const b=document.createElement('button'); b.type='button'; b.id=`q${i}o${j}`; b.textContent=t;
+    b.addEventListener('click',()=>{ if(d.dataset.done) return; d.dataset.done=1; answered++; if(j===ok) right++;
+      b.classList.add(j===ok?'right':'wrong'); o.children[ok].classList.add('right');
+      w.textContent=(j===ok?'Correct. ':'Not quite. ')+why; w.hidden=false; score.textContent=`${right} / ${answered} of ${Q.length}`; });
+    o.appendChild(b); });
+  list.appendChild(d);
+});
+score.textContent=`0 / 0 of ${Q.length}`;
+</script>
