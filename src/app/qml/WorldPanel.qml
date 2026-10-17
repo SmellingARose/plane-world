@@ -26,7 +26,7 @@ Rectangle {
         id: openDlg
         title: "Open world"
         nameFilters: ["World (*.json)"]
-        currentFolder: "file://" + WorldModel.libraryDir
+        currentFolder: (Qt.platform.os === "windows" ? "file:///" : "file://") + WorldModel.libraryDir
         onAccepted: WorldModel.open(selectedFile)
     }
     FileDialog {
@@ -34,7 +34,7 @@ Rectangle {
         title: "Save world as"
         fileMode: FileDialog.SaveFile
         nameFilters: ["World (*.json)"]
-        currentFolder: "file://" + WorldModel.libraryDir
+        currentFolder: (Qt.platform.os === "windows" ? "file:///" : "file://") + WorldModel.libraryDir
         onAccepted: WorldModel.saveAs(selectedFile)
     }
     FileDialog {

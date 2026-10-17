@@ -20,8 +20,8 @@ Rectangle {
 
     Rectangle { anchors.left: parent.left; width: 1; height: parent.height; color: Theme.separator }
 
-    FileDialog { id: openDlg; title: qsTr("Open experiment"); nameFilters: [qsTr("Experiments (*.json)")]; currentFolder: "file://" + ev.libraryDir; onAccepted: ev.open(selectedFile) }
-    FileDialog { id: saveDlg; title: qsTr("Save experiment as"); fileMode: FileDialog.SaveFile; nameFilters: [qsTr("Experiments (*.json)")]; currentFolder: "file://" + ev.libraryDir; onAccepted: ev.saveAs(selectedFile) }
+    FileDialog { id: openDlg; title: qsTr("Open experiment"); nameFilters: [qsTr("Experiments (*.json)")]; currentFolder: (Qt.platform.os === "windows" ? "file:///" : "file://") + ev.libraryDir; onAccepted: ev.open(selectedFile) }
+    FileDialog { id: saveDlg; title: qsTr("Save experiment as"); fileMode: FileDialog.SaveFile; nameFilters: [qsTr("Experiments (*.json)")]; currentFolder: (Qt.platform.os === "windows" ? "file:///" : "file://") + ev.libraryDir; onAccepted: ev.saveAs(selectedFile) }
     function openFile() { openDlg.open() }
     function saveFileAs() { saveDlg.open() }
 

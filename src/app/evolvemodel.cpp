@@ -828,5 +828,5 @@ void EvolveModel::flyWithAutopilot() {
     stopReplay();
     if (auto c = candidate(m_selected.isEmpty() ? QStringLiteral("best") : m_selected); c && autopilotSink)
         autopilotSink(m_run->context(), c->genome, m_run->runtimeFactory());
-    emit flyRequested(p);
+    emit flyRequested(QUrl::fromLocalFile(p).toString());   // a file URL that is valid on Windows too (C:/…)
 }

@@ -145,7 +145,7 @@ ApplicationWindow {
         visible: win.currentTab === 3
         sourceComponent: EvolvePage {
             inspectorVisible: win.inspectorVisible
-            onFlyRequested: (path) => { App.openFile("file://" + path); win.selectTab(1); App.autopilot = true }
+            onFlyRequested: (path) => { App.openFile(path); win.selectTab(1); App.autopilot = true }
         }
     }
     readonly property var activeViewport: win.currentTab === 2 && worldLoader.item ? worldLoader.item.viewport
