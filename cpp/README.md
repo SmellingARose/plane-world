@@ -85,3 +85,24 @@ Verification: `pwtests -tc="gpu*,render*"` (compute + readback, async compute fe
 timestamps, ring overflow, frame-graph culling / aliasing, async vs. graphics-queue LUTs identical, craft parts visible)
 and a screenshot test against the Swift renderer's image (`tests/render_ref`, same scene): 47 dB PSNR on Apple M4.
 `pwcli --render-shot out.png [--warp]` writes the test scene; CI runs it on WARP and uploads the screenshots.
+
+## Terrain, water, vegetation (phase 3b)
+
+| Target / header | What |
+|---|---|
+| `pwgpu` `pw/compute.h` | GPGPU layer for simulation kernels (read-write storage buffers + atomics, which the renderer's binding model leaves out): b0 root constants, u1..u8 buffers on Metal and Direct3D 12 (WARP on CI). Kernels: `shaders/env/{erosion,ocean,fluid}.slang` (`cmake/PWSlangLib.cmake`) |
+| `pwenv` `pw/env/terrain.h` | `TerrainSystem` (the app's `TerrainProvider`): flat / procedural (fBm, ridged, warp) / heightmap (PNG 8/16-bit, JPEG, .r16) / real-world DEM (AWS terrarium tiles, I/O threads, disk cache in the user cache dir); hydraulic + thermal erosion on the GPU with a CPU implementation of the same kernels (bit-identical on every platform, used for headless bakes); sculpt (raise / lower / smooth / flatten) and paint, persisted as raw-DEFLATE Float16 deltas byte-compatible with the Swift app; min/max pyramid, dirty chunks, CDLOD node selection |
+| `pwenv` `pw/env/water.h` | `WaterSystem` (`WaterProvider`): JONSWAP spectrum, 3-cascade FFT ocean on the CPU (deterministic) or GPU, lock-free sampling with choppy inversion; lakes / rivers; exact clipped buoyancy + drag / skin friction / radiation damping (zero allocations in steady state); splashes; GPU FLIP fluid zones with two-way box coupling (integer atomics: deterministic) |
+| `pwenv` `pw/env/vegetation.h` | space-colonisation trees + palms (LOD0 / LOD1 / shadow proxy), octahedral impostor mapping, habitat scatter with groves, tree / erase / grass brushes, breakable trees (rigid bodies in `collision::RigidWorld` or a pivot integrator), grass density maps |
+| `pwenv_render` `pw/env/render.h` | Renderables for `pwrender`: CDLOD terrain with shadows, FFT water with terrain depth absorption and shore foam, trees by distance with GPU-baked impostor atlases, GPU grass (`shaders/env/{terrain,water,vegetation,grass}.slang`) |
+
+`pw::env::install()` plugs the terrain builder into `world::bake` (pwcli does this at start), so headless training
+worlds get eroded terrain, PNG heightmaps and sculpt edits.
+
+Verification: `pwcli --selftest terrain.` / `water.` / `vegetation.` / `env.` / `envrender.` (also in `pwtests`): the Swift
+self-tests ported (continuity, raycast, sculpt + paint + persistence, DEM decode / fetch / mosaic, buoyancy = rho g V,
+Archimedes draft, FFT vs. direct sum, floating box in a seaway, FLIP dam break and coupling, species / 200k-tree
+placement / brushes / breaking) plus GPU-vs-CPU erosion (max deviation 1e-4 m), GPU-vs-CPU ocean (5e-7 m), a stream
+written by the Swift app's codec, CDLOD tiling, and an offscreen coast scene through the renderer
+(`PW_SELFTEST_OUT=dir` keeps the PNGs). On Apple M4, 1920x1080 terrain + ocean + 57k trees + 77k grass blades render in
+about 12.5 ms of GPU time (`envrender.perf-1080p`).
