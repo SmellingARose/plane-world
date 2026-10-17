@@ -16,6 +16,7 @@ Item {
     property string error
     property string tab
     property bool interacting: false
+    property bool compact: false     // FLY: the flight HUD owns the bottom edge
 
     function clock(h) {
         const hh = Math.floor(h), mm = Math.round((h - hh) * 60)
@@ -91,7 +92,7 @@ Item {
         anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: Theme.s3 }
         radius: Theme.radius
         color: Theme.hud
-        visible: backend !== "" && error === ""
+        visible: backend !== "" && error === "" && !compact
         opacity: interacting ? 0.0 : 0.9
         Behavior on opacity { NumberAnimation { duration: Theme.normal; easing.type: Theme.easing } }
         width: hints.implicitWidth + Theme.s3 * 2

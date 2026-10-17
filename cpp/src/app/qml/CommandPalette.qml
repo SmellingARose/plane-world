@@ -7,6 +7,8 @@ Popup {
     id: pal
     property var commands: []          // [{ name, shortcut, run: function }]
     property var filtered: []
+    property string initialText: ""     // e.g. "add " to open pre-filtered (A in BUILD)
+    function openWith(t) { initialText = t; open() }
     modal: true
     focus: true
     dim: true
@@ -24,7 +26,9 @@ Popup {
 
     function refilter() {
         const q = field.text.toLowerCase().trim()
-        filtered = commands.filter(c => q === "" || fuzzy(c.name.toLowerCase(), q))
+        // prefix / word matches first, then fuzzy subsequence matches
+        const words = commands.filter(c => q === "" || c.name.toLowerCase().indexOf(q) >= 0)
+        filtered = q === "" ? commands : words.concat(commands.filter(c => words.indexOf(c) < 0 && fuzzy(c.name.toLowerCase(), q)))
         list.currentIndex = filtered.length > 0 ? 0 : -1
     }
     function fuzzy(s, q) { let i = 0; for (const ch of s) { if (ch === q[i]) i++; if (i === q.length) return true } return i === q.length }
@@ -34,7 +38,7 @@ Popup {
         close()
         c.run()
     }
-    onAboutToShow: { field.text = ""; refilter(); field.forceActiveFocus() }
+    onAboutToShow: { field.text = initialText; initialText = ""; refilter(); field.forceActiveFocus() }
 
     background: Rectangle {
         radius: Theme.radius + 2

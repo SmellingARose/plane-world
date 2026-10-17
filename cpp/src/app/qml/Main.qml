@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 ApplicationWindow {
     id: win
@@ -35,7 +36,8 @@ ApplicationWindow {
 
     function selectTab(i) { currentTab = i }
 
-    readonly property var commands: [
+    readonly property var commands: baseCommands.concat(appCommands.commands)
+    readonly property var baseCommands: [
         { name: "Go to BUILD", shortcut: "Ctrl+1", run: () => selectTab(0) },
         { name: "Go to FLY", shortcut: "Ctrl+2", run: () => selectTab(1) },
         { name: "Go to WORLD", shortcut: "Ctrl+3", run: () => selectTab(2) },
@@ -80,6 +82,8 @@ ApplicationWindow {
                 }
             }
             Item { Layout.fillWidth: true }
+            PwIconButton { text: "↶"; font.pixelSize: Theme.title; enabled: App.canUndo; tip: App.canUndo ? "Undo " + App.undoText : "Nothing to undo"; shortcut: "Ctrl+Z"; onClicked: App.undo() }
+            PwIconButton { text: "↷"; font.pixelSize: Theme.title; enabled: App.canRedo; tip: App.canRedo ? "Redo " + App.redoText : "Nothing to redo"; shortcut: "Ctrl+Shift+Z"; onClicked: App.redo() }
             ToolButton {
                 text: "Commands  " + Theme.shortcutText("Ctrl+K")
                 onClicked: cmdPalette.open()
@@ -110,19 +114,71 @@ ApplicationWindow {
         inspectorVisible: win.inspectorVisible
     }
 
-    footer: Rectangle {
-        height: footRow.implicitHeight + Theme.s1 * 2
-        color: Theme.surface
-        Rectangle { width: parent.width; height: 1; color: Theme.separator }
-        RowLayout {
-            id: footRow
-            anchors.fill: parent
-            anchors.leftMargin: Theme.s3; anchors.rightMargin: Theme.s3
-            Label { text: win.tabs[win.currentTab] + " · ready"; color: Theme.textMuted; font.pixelSize: Theme.caption }
-            Item { Layout.fillWidth: true }
-            Label { text: (work.viewport.backendName || "GPU") + " · " + pwCpu; color: Theme.textFaint; font.pixelSize: Theme.caption; elide: Text.ElideMiddle }
-            Label { text: "v" + pwVersion; color: Theme.textFaint; font.pixelSize: Theme.caption }
-        }
+    footer: StatusBar { tab: win.tabs[win.currentTab]; viewport: work.viewport }
+
+    AppCommands {
+        id: appCommands
+        tab: win.tabs[win.currentTab]
+        viewport: work.viewport
+        onOpenRequested: openDialog.open()
+        onSaveAsRequested: saveDialog.open()
+        onImportRequested: (into) => { cadDialog.intoCurrent = into; cadDialog.open() }
+        onAddPartRequested: cmdPalette.openWith("add ")
+        onFocusPartName: if (work.inspector.panel && work.inspector.panel.focusPartName) work.inspector.panel.focusPartName()
+    }
+    Connections {
+        target: work.inspector.panel
+        ignoreUnknownSignals: true
+        function onOpenRequested() { openDialog.open() }
+        function onSaveAsRequested() { saveDialog.open() }
+        function onImportRequested(into) { cadDialog.intoCurrent = into; cadDialog.open() }
+    }
+
+    FileDialog {
+        id: openDialog
+        title: "Open craft or CAD file"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Crafts and CAD (*.json " + App.cadExtensions.map(e => "*." + e).join(" ") + ")", "Craft JSON (*.json)", "All files (*)"]
+        onAccepted: { App.openFile(selectedFile); win.currentTab = 0 }
+    }
+    FileDialog {
+        id: saveDialog
+        title: "Save craft"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "json"
+        nameFilters: ["Craft JSON (*.json)"]
+        onAccepted: App.saveFile(selectedFile)
+    }
+    FileDialog {
+        id: cadDialog
+        property bool intoCurrent: false
+        title: intoCurrent ? "Add CAD parts to " + App.craftName : "Import CAD as a new craft"
+        fileMode: FileDialog.OpenFiles
+        nameFilters: ["CAD (" + App.cadExtensions.map(e => "*." + e).join(" ") + ")", "All files (*)"]
+        onAccepted: { App.importFiles(selectedFiles, intoCurrent); win.currentTab = 0 }
+    }
+
+    CadDropOverlay {
+        parent: Overlay.overlay
+        anchors.fill: parent
+        onFileDropped: win.currentTab = 0
+    }
+    PwToast { id: toast; parent: Overlay.overlay }
+    Connections { target: App; function onNotify(text, kind) { toast.show(text, kind) } }
+
+    // Unsaved edits: ask before quitting.
+    property bool closeConfirmed: false
+    onClosing: (close) => { if (App.dirty && !closeConfirmed) { close.accepted = false; unsaved.open() } }
+    Dialog {
+        id: unsaved
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        title: "Save changes to \u201c" + App.craftName + "\u201d?"
+        standardButtons: Dialog.Save | Dialog.Discard | Dialog.Cancel
+        Label { text: "Your edits will be lost if you don't save them."; wrapMode: Text.WordWrap }
+        onAccepted: { if (App.filePath !== "" ? App.saveFile("") : (App.saveToLibrary(), true)) { win.closeConfirmed = true; win.close() } }
+        onDiscarded: { win.closeConfirmed = true; win.close() }
     }
 
     CommandPalette { id: cmdPalette; parent: Overlay.overlay; commands: win.commands }

@@ -337,8 +337,8 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
             n->craft->setCraft(app->document());
             n->revision = app->revision();
             if (m_craft != app->craftName())
-                QMetaObject::invokeMethod(this, "setInfo", Qt::QueuedConnection, Q_ARG(QString, m_backend), Q_ARG(QString, m_adapter),
-                                          Q_ARG(QString, m_error), Q_ARG(QString, app->craftName()));
+                QMetaObject::invokeMethod(this, "setInfo", Qt::QueuedConnection, Q_ARG(QString, QString::fromUtf8(pw::gpu::backendName(n->dev->caps().backend))),
+                                          Q_ARG(QString, QString::fromStdString(n->dev->caps().adapter)), Q_ARG(QString, QString()), Q_ARG(QString, app->craftName()));
             if (m_lastRevision < 0) { const double r = app->craftRadius(); m_goal.dist = m_cur.dist = std::max(3.0, r * 2.8); }
             m_lastRevision = n->revision;
         }
