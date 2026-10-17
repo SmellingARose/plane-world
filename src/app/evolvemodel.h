@@ -14,6 +14,7 @@
 #include <QVariant>
 #include <QtQml/qqmlregistration.h>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -153,6 +154,8 @@ public:
     Q_INVOKABLE void stopReplay();
     Q_INVOKABLE QString exportBest();                     // path of the exported craft ("" on failure)
     Q_INVOKABLE void flyWithAutopilot();
+    /// Set by the FLY controller: receives the trained controller that flyWithAutopilot hands over.
+    static std::function<void(std::shared_ptr<const pw::evo::ExperimentContext>, pw::evo::Genome, pw::evo::ScriptRuntimeFactory)> autopilotSink;
 
     // ReplayProvider
     const pw::craft::CraftDocument* replayCraft(uint64_t& version) const override;

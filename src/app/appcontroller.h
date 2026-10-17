@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 #include "pw/craft/document.h"
+#include "pw/evo/evaluator.h"
 #include "pw/geo.h"
 #include "pw/sim/cfd.h"
 #include "pw/sim/craft_sim.h"
@@ -77,6 +78,8 @@ class AppController : public QObject {
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY telemetryChanged)
     Q_PROPERTY(QVariantMap perf READ perf NOTIFY telemetryChanged)
     Q_PROPERTY(bool crashed READ crashed NOTIFY telemetryChanged)
+    Q_PROPERTY(bool autopilot READ autopilot WRITE setAutopilot NOTIFY autopilotChanged)            // evolved controller flying
+    Q_PROPERTY(bool autopilotAvailable READ autopilotAvailable NOTIFY autopilotChanged)
     // ---- FLY world: the WORLD tab's live world (terrain, water, trees, props, wind) or flat ground
     Q_PROPERTY(bool flyInWorld READ flyInWorld WRITE setFlyInWorld NOTIFY worldChanged)
     Q_PROPERTY(QString worldName READ worldName NOTIFY worldChanged)
@@ -158,6 +161,11 @@ public:
     QStringList heldKeys() const;
     QVariantList inputs() const { return m_inputs; }
     Q_INVOKABLE void setOutputValue(const QString& id, double value);
+    bool autopilot() const { return m_ap != nullptr; }
+    bool autopilotAvailable() const { return m_apCtx != nullptr; }
+    void setAutopilot(bool on);
+    /// EVOLVE → FLY: the trained controller that "Fly with the evolved autopilot" hands over.
+    void setAutopilotSource(std::shared_ptr<const pw::evo::ExperimentContext> ctx, pw::evo::Genome genome, pw::evo::ScriptRuntimeFactory factory);
     Q_INVOKABLE void airStart(double altitude, double speed);   // FLY: reset in the air, level, moving forward
     Q_INVOKABLE void setKeybind(const QString& id, const QVariant& pos, const QVariant& neg, const QString& mode, double rate);
     Q_INVOKABLE void clearKeybind(const QString& id);
@@ -240,6 +248,7 @@ signals:
     void rigReportChanged();
     void outputsChanged();
     void outputValuesChanged();
+    void autopilotChanged();
     void heldKeysChanged();
     void inputsChanged();
     void pausedChanged();
@@ -336,6 +345,11 @@ private:
     bool m_paused = false;
     QString m_cameraMode = "chase";
     QSet<QString> m_held;
+    std::shared_ptr<const pw::evo::ExperimentContext> m_apCtx;
+    pw::evo::Genome m_apGenome;
+    pw::evo::ScriptRuntimeFactory m_apFactory;
+    std::unique_ptr<pw::evo::EvalWorker> m_ap;   // bound to m_sim while the autopilot flies
+    double m_apAccum = 0;
     std::vector<double> m_values;   // output values (index = m_sim outputs)
     std::vector<int> m_outputSim;   // m_outputs row -> sim output index
     // aero

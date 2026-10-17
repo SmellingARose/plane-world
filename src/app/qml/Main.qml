@@ -61,6 +61,8 @@ ApplicationWindow {
         { name: "EVOLVE: start / pause training", shortcut: "Ctrl+Return", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.train() } },
         { name: "EVOLVE: quick start (learns to hold altitude in ~10 s)", shortcut: "", run: () => { selectTab(3); EvolveModel.quickStart() } },
         { name: "EVOLVE: check script", shortcut: "", run: () => { selectTab(3); EvolveModel.checkScript() } },
+        { name: "EVOLVE: fly best with the evolved autopilot", shortcut: "", run: () => EvolveModel.flyWithAutopilot() },
+        { name: "FLY: toggle evolved autopilot", shortcut: "O", run: () => { App.autopilot = !App.autopilot } },
         { name: "EVOLVE: replay best", shortcut: "", run: () => { selectTab(3); EvolveModel.replay("best") } },
         { name: "Quit", shortcut: "Ctrl+Q", run: () => Qt.quit() }
     ]
@@ -143,7 +145,7 @@ ApplicationWindow {
         visible: win.currentTab === 3
         sourceComponent: EvolvePage {
             inspectorVisible: win.inspectorVisible
-            onFlyRequested: (path) => { App.openFile("file://" + path); win.selectTab(1) }
+            onFlyRequested: (path) => { App.openFile("file://" + path); win.selectTab(1); App.autopilot = true }
         }
     }
     readonly property var activeViewport: win.currentTab === 2 && worldLoader.item ? worldLoader.item.viewport

@@ -65,6 +65,7 @@ public:
     const std::string runID;
     std::string directory;
     std::shared_ptr<const ExperimentContext> context() const { return ctx_; }
+    const ScriptRuntimeFactory& runtimeFactory() const { return factory_; }
     SimEvaluator& evaluator() { return *evaluator_; }
     Algorithm& algorithm() { return *algorithm_; }
     const GenomeLayout& layout() const { return ctx_->layout; }

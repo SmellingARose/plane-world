@@ -18,6 +18,7 @@
 #include "pw/craft/outputs.h"
 #include "pw/flow/lbm.h"
 #include "pw/evo/evaluator.h"
+#include "evolvemodel.h"
 #include "worldmodel.h"
 
 using namespace pw;
@@ -79,6 +80,7 @@ AppController* AppController::create(QQmlEngine*, QJSEngine*) {
 
 AppController::AppController(QObject* parent) : QObject(parent) {
     s_instance = this;
+    EvolveModel::autopilotSink = [this](auto ctx, auto genome, auto factory) { setAutopilotSource(std::move(ctx), std::move(genome), std::move(factory)); };
     m_ground = std::make_unique<sim::FlatTerrain>(0.0);
     m_env.terrain = m_ground.get();
     m_mergeClock.start();
@@ -242,6 +244,7 @@ void AppController::reloadSim() {
     }
     fresh->equationCapture = &m_capture;
     if (m_sim) m_sim->aeroBackend = nullptr;
+    if (m_ap) { m_ap.reset(); emit autopilotChanged(); }   // it points at the old sim
     m_sim = std::move(fresh);
     syncWorld();
     respawn();
@@ -755,7 +758,7 @@ QString AppController::keyDisplay(const QString& name) const {
 }
 
 bool AppController::isReservedKey(const QString& name) const {
-    return name == "r" || name == "p" || name == "c" || name == "e" || name == "space";
+    return name == "r" || name == "p" || name == "c" || name == "e" || name == "o" || name == "space";
 }
 
 bool AppController::flyKey(QKeyEvent* e, bool press) {
@@ -767,6 +770,7 @@ bool AppController::flyKey(QKeyEvent* e, bool press) {
         if (m["pos"].toString() == name || m["neg"].toString() == name) { bound = true; break; }
     }
     if (bound) {
+        if (press && m_ap) { setAutopilot(false); emit notify("Autopilot off: you have control", "info"); }
         if (press && !m_held.contains(name)) { m_held.insert(name); emit heldKeysChanged(); }
         if (!press && !e->isAutoRepeat() && m_held.remove(name)) emit heldKeysChanged();
         return true;
@@ -775,6 +779,7 @@ bool AppController::flyKey(QKeyEvent* e, bool press) {
     if (name == "r") { resetFlight(); return true; }
     if (name == "p" || name == "space") { setPaused(!m_paused); return true; }
     if (name == "c") { cycleCamera(); return true; }
+    if (name == "o" && autopilotAvailable()) { setAutopilot(!m_ap); return true; }
     if (name == "e") { setEquationsLive(!m_eqLive); emit equationsToggled(); return true; }
     return false;
 }
@@ -959,6 +964,35 @@ double AppController::groundHeight(double x, double z) const {
     return m_env.terrain ? m_env.terrain->height(x, z) : 0.0;
 }
 
+void AppController::setAutopilotSource(std::shared_ptr<const pw::evo::ExperimentContext> ctx, pw::evo::Genome genome, pw::evo::ScriptRuntimeFactory factory) {
+    m_ap.reset();
+    m_apCtx = std::move(ctx); m_apGenome = std::move(genome); m_apFactory = std::move(factory);
+    emit autopilotChanged();
+}
+
+void AppController::setAutopilot(bool on) {
+    if (on == (m_ap != nullptr)) return;
+    if (!on) {
+        m_ap.reset();
+        for (int i = 0; i < int(m_values.size()); ++i) m_sim->setOutput(i, m_values[std::size_t(i)]);   // hand back the sliders
+    } else {
+        if (!m_apCtx || !m_sim) return;
+        // start where it was trained: the experiment's spawn
+        const auto& s = m_apCtx->experiment.episode.spawn;
+        if (s.mode == "air") airStart(std::max(1.0, s.altitudeAGL), s.speed); else resetFlight();
+        try {
+            auto w = std::make_unique<pw::evo::EvalWorker>(m_apCtx, m_apFactory());
+            w->bindLive(m_apGenome, *m_sim, m_env);
+            m_ap = std::move(w);
+            m_apAccum = 0;
+            setStatus("Autopilot on — press O or any flight key to take over", "info");
+        } catch (const std::exception& e) {
+            setStatus(QString("Autopilot failed: %1").arg(QString::fromUtf8(e.what())), "error");
+        }
+    }
+    emit autopilotChanged();
+}
+
 void AppController::airStart(double altitude, double speed) {
     if (!m_sim) return;
     resetFlight();
@@ -1040,6 +1074,16 @@ void AppController::applyKeybinds(double dt) {
 void AppController::stepFly(double dt) {
     if (!m_sim) return;
     applyKeybinds(dt);
+    if (m_ap) {   // evolved controller at its trained control rate (zero-order hold between ticks, like EVOLVE)
+        const double period = 1 / m_ap->controlHz();
+        m_apAccum += dt;
+        try {
+            while (m_apAccum >= period) { m_apAccum -= period; m_ap->liveTick(m_env); }
+        } catch (const std::exception& e) {
+            m_ap.reset(); emit autopilotChanged();
+            setStatus(QString("Autopilot stopped: %1").arg(QString::fromUtf8(e.what())), "error");
+        }
+    }
     m_eqAccum += dt;
     if (m_eqLive && m_eqAccum >= 0.1 && !m_capture.requested) {
         m_eqAccum = 0;

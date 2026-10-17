@@ -820,9 +820,13 @@ QString EvolveModel::exportBest() {
     }
 }
 
+std::function<void(std::shared_ptr<const pw::evo::ExperimentContext>, pw::evo::Genome, pw::evo::ScriptRuntimeFactory)> EvolveModel::autopilotSink;
+
 void EvolveModel::flyWithAutopilot() {
     QString p = exportBest();
     if (p.isEmpty()) return;
     stopReplay();
+    if (auto c = candidate(m_selected.isEmpty() ? QStringLiteral("best") : m_selected); c && autopilotSink)
+        autopilotSink(m_run->context(), c->genome, m_run->runtimeFactory());
     emit flyRequested(p);
 }

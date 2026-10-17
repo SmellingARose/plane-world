@@ -476,6 +476,32 @@ EpisodeResult EvalWorker::runEpisode(const Genome& g, int generation, int candid
     return r;
 }
 
+// MARK: - live autopilot
+void EvalWorker::bindLive(const Genome& g, sim::CraftSim& external, const sim::SimEnvironment& env) {
+    prepare(g);
+    sim_ = &external;
+    remap();
+    if (neat_) neat_->reset();
+    if (mlp_) mlp_->reset();
+    liveSx_ = external.position().x; liveSz_ = external.position().z;
+    frame_.tick = 0; frame_.done = false; frame_.doneReason.clear();
+    EpisodeInfo info; info.duration = ctx_->experiment.episode.duration; info.controlDt = 1 / controlHz();
+    frame_.info = info;
+    std::fill(frame_.outputs.begin(), frame_.outputs.end(), 0.0);
+    std::fill(frame_.termSums.begin(), frame_.termSums.end(), 0.0);
+    fillState(env, liveSx_, liveSz_); observe(env);
+    runtime_->beginEpisode(g, frame_);
+}
+void EvalWorker::liveTick(const sim::SimEnvironment& env) {
+    fillState(env, liveSx_, liveSz_); observe(env);
+    applyNativePolicy();
+    std::fill(frame_.terms.begin(), frame_.terms.end(), 0.0);
+    runtime_->tick(frame_);
+    for (std::size_t i = 0; i < outMap_.size(); ++i) if (outMap_[i] >= 0) sim_->setOutput(outMap_[i], frame_.outputs[i]);
+    frame_.tick += 1;
+}
+double EvalWorker::controlHz() const { return smax(1, ctx_->experiment.controller.hz); }
+
 // MARK: - evaluator
 SimEvaluator::SimEvaluator(std::shared_ptr<const ExperimentContext> ctx, int workers, ScriptRuntimeFactory factory, jobs::JobSystem* jobs)
     : ctx_(std::move(ctx)), jobs_(jobs ? jobs : &jobs::JobSystem::shared()) {

@@ -107,6 +107,11 @@ public:
     const ControlFrame& frame() const { return frame_; }
     sim::CraftSim& sim() { return *sim_; }
     ScriptRuntime& runtime() { return *runtime_; }
+    /// Live autopilot: fly `external` (the app's FLY sim, same craft) with genome `g`. Call liveTick once per control period
+    /// before stepping physics; unbind before `external` is destroyed.
+    void bindLive(const Genome& g, sim::CraftSim& external, const sim::SimEnvironment& env);
+    void liveTick(const sim::SimEnvironment& env);
+    double controlHz() const;
 private:
     void loadSim(sim::CraftSim& s, const sim::CraftSpec& spec, const craft::CraftDocument& doc);
     void remap();
@@ -127,6 +132,7 @@ private:
     std::vector<Vec3d> cornersPrev_, cornersCur_;
     int policyMode_ = 0;   // 0 script only, 1 mlp, 2 neat
     bool stopOnCrash_ = true;
+    double liveSx_ = 0, liveSz_ = 0;
 };
 
 class SimEvaluator {
