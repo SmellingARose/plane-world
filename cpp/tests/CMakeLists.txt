@@ -6,7 +6,8 @@ FetchContent_Declare(doctest
   SOURCE_SUBDIR _none_)   # header-only use: don't configure doctest's own CMake project
 FetchContent_MakeAvailable(doctest)
 
-add_executable(pwtests main.cpp test_core.cpp test_parity.cpp test_gpu.cpp alloc_counter.cpp)
+add_executable(pwtests main.cpp test_core.cpp test_parity.cpp test_gpu.cpp alloc_counter.cpp
+  test_math.cpp test_sim.cpp test_physics.cpp)
 target_include_directories(pwtests PRIVATE ${doctest_SOURCE_DIR})
 target_link_libraries(pwtests PRIVATE pwcore pwgpu)
 add_test(NAME pwtests COMMAND pwtests)

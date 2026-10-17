@@ -6,6 +6,15 @@ add_library(pwcore STATIC
   src/parity.cpp
   src/selftest.cpp
   src/core_selftests.cpp
+  # P1a: math / jobs / atmosphere / craft simulation
+  src/atmosphere.cpp
+  src/jobs.cpp
+  src/sim/craft_spec.cpp
+  src/sim/fidelity.cpp
+  src/sim/panel_aero.cpp
+  src/sim/craft_sim.cpp
+  src/sim/fast_gaps.cpp
+  src/sim/sensors.cpp
 )
 target_include_directories(pwcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(pwcore PUBLIC pw_flags)

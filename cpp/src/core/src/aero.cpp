@@ -5,7 +5,7 @@
 namespace pw::aero {
 using std::fabs; using std::pow; using std::sin; using std::sqrt;
 static inline double mn(double a, double b) { return b < a ? b : a; }   // Swift min/max argument order
-static inline double mx(double a, double b) { return b > a ? b : a; }
+static inline double mx(double a, double b) { return b >= a ? b : a; }
 
 double viscosity(double T) { return 1.458e-6 * pow(T, 1.5) / (T + 110.4); }
 
