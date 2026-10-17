@@ -51,17 +51,14 @@ elseif(WIN32)
   target_link_libraries(pwenv PUBLIC winhttp)
 endif()
 
-# Slang: compute kernels (erosion, ocean, fluid) and the render shaders (terrain CDLOD, water surface, trees /
-# impostors / grass). Render entry points are compiled and validated here; drawing them is the renderer's job (P3a).
+# Slang compute kernels (erosion, ocean, fluid) run through the pwgpu compute layer (pw/compute.h: read-write storage
+# buffers + atomics). The render shaders (shaders/env/{terrain,water,vegetation}.slang) live in the renderer's
+# library (shaders/CMakeLists.txt) and are drawn by pwenv_render (src/env/render).
 pw_add_slang_library(pwenv NAMESPACE pw::env_shaders HEADER pw/env_shaders.h
-  INCLUDES ${PROJECT_SOURCE_DIR}/shaders/env
   SHADERS
     ${PROJECT_SOURCE_DIR}/shaders/env/erosion.slang
     ${PROJECT_SOURCE_DIR}/shaders/env/ocean.slang
     ${PROJECT_SOURCE_DIR}/shaders/env/fluid.slang
-    ${PROJECT_SOURCE_DIR}/shaders/env/terrain.slang
-    ${PROJECT_SOURCE_DIR}/shaders/env/water.slang
-    ${PROJECT_SOURCE_DIR}/shaders/env/vegetation.slang
   ENTRIES
     ${PROJECT_SOURCE_DIR}/shaders/env/erosion.slang:erodeRainFlux:compute
     ${PROJECT_SOURCE_DIR}/shaders/env/erosion.slang:erodeWaterSediment:compute
@@ -77,14 +74,8 @@ pw_add_slang_library(pwenv NAMESPACE pw::env_shaders HEADER pw/env_shaders.h
     ${PROJECT_SOURCE_DIR}/shaders/env/fluid.slang:fluidDivergence:compute
     ${PROJECT_SOURCE_DIR}/shaders/env/fluid.slang:fluidPressure:compute
     ${PROJECT_SOURCE_DIR}/shaders/env/fluid.slang:fluidProject:compute
-    ${PROJECT_SOURCE_DIR}/shaders/env/fluid.slang:fluidG2P:compute
-    ${PROJECT_SOURCE_DIR}/shaders/env/terrain.slang:terrainVS:vertex
-    ${PROJECT_SOURCE_DIR}/shaders/env/terrain.slang:terrainPS:fragment
-    ${PROJECT_SOURCE_DIR}/shaders/env/water.slang:waterVS:vertex
-    ${PROJECT_SOURCE_DIR}/shaders/env/water.slang:waterPS:fragment
-    ${PROJECT_SOURCE_DIR}/shaders/env/vegetation.slang:treeVS:vertex
-    ${PROJECT_SOURCE_DIR}/shaders/env/vegetation.slang:treePS:fragment
-    ${PROJECT_SOURCE_DIR}/shaders/env/vegetation.slang:impostorVS:vertex
-    ${PROJECT_SOURCE_DIR}/shaders/env/vegetation.slang:impostorPS:fragment
-    ${PROJECT_SOURCE_DIR}/shaders/env/vegetation.slang:grassVS:vertex
-    ${PROJECT_SOURCE_DIR}/shaders/env/vegetation.slang:grassPS:fragment)
+    ${PROJECT_SOURCE_DIR}/shaders/env/fluid.slang:fluidG2P:compute)
+
+# pwenv_render: Renderables for the pwrender Renderer (P3a) - terrain CDLOD, water surface, trees / impostors / grass.
+add_library(pwenv_render STATIC render/render.cpp render/render_selftests.cpp)
+target_link_libraries(pwenv_render PUBLIC pwenv pwrender)

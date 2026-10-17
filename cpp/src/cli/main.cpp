@@ -18,6 +18,7 @@
 #include "pw/evo/train.h"
 #include "pw/selftest.h"
 #include "pw/env/env.h"
+#include "pw/env/render.h"
 
 int runBench(const std::vector<std::string>& args);
 int runTrain(const std::vector<std::string>& args);
@@ -44,6 +45,7 @@ int main(int argc, char** argv) {
     if (has(args, "--selftest")) {
         pw::selftest::registerCoreTests();
         pw::env::registerSelfTests();   // terrain.*, water.*, vegetation.*, env.*
+        pw::envrender::registerSelfTests();   // envrender.* (terrain / water / vegetation through the renderer)
         // GPU smoke as a self-test (skipped with a note when the machine has no usable GPU device).
         pw::selftest::add("gpu.smoke", [](pw::selftest::Context& c) {
             auto r = pw::gpu::smokeTest(false);

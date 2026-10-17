@@ -37,32 +37,20 @@ static bool shaderLibraryTest(selftest::Context& ctx) {
                 c.expect(loadKernel(*g, e.module, entry, e.tx, e.ty, e.tz, &err) > 0, std::string(e.module) + "." + entry + ": " + err);
                 ++kernels;
             }
-        // Render modules: compile the MSL library through a dummy kernel lookup (library compile errors surface here).
-        for (const char* m : {"terrain", "water", "vegetation"}) {
-            std::string key = std::string(m) + ".metal";
-            const shaders::Blob* b = env_shaders::find(key.c_str());
-            c.expect(b && b->size > 100, key + " missing");
-            if (!b) continue;
-            int k = g->loadKernel("__no_such_kernel__", b->data, b->size, 1, 1, 1);
-            c.expect(k == 0 && g->lastError().find("kernel not found") != std::string::npos, key + " MSL does not compile: " + g->lastError());
-        }
         c.log(st::Check::fmt("%d compute pipelines built, %zu blobs", kernels, n));
     } else {
-        int compute = 0, render = 0;
+        int compute = 0;
         for (std::size_t i = 0; i < n; ++i) {
             const shaders::Blob& b = blobs[i];
             bool dxbc = b.size > 4 && std::memcmp(b.data, "DXBC", 4) == 0;
             c.expect(dxbc, std::string(b.key) + " is not a DXIL container");
             std::string key = b.key;
-            bool isCompute = key.rfind("erosion.", 0) == 0 || key.rfind("ocean.", 0) == 0 || key.rfind("fluid.", 0) == 0;
-            if (isCompute) {
-                std::string entry = key.substr(key.find('.') + 1);
-                int k = g->loadKernel(entry.c_str(), b.data, b.size, 1, 1, 1);
-                c.expect(k > 0, key + ": " + g->lastError());
-                ++compute;
-            } else ++render;
+            std::string entry = key.substr(key.find('.') + 1);
+            int k = g->loadKernel(entry.c_str(), b.data, b.size, 1, 1, 1);
+            c.expect(k > 0, key + ": " + g->lastError());
+            ++compute;
         }
-        c.log(st::Check::fmt("%d compute PSOs created, %d render DXIL blobs validated by dxc at build time", compute, render));
+        c.log(st::Check::fmt("%d compute PSOs created", compute));
     }
     return c.ok;
 }

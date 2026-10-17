@@ -2,12 +2,14 @@
 // the machine has no compute device; CI on Windows runs them on WARP).
 #include "doctest/doctest.h"
 #include "pw/env/env.h"
+#include "pw/env/render.h"
 #include "pw/parity.h"
 #include "pw/selftest.h"
 
 static bool runEnv(const char* name) {
     pw::selftest::registerCoreTests();
     pw::env::registerSelfTests();
+    pw::envrender::registerSelfTests();
     for (auto& t : pw::selftest::all()) {
         if (t.name != name) continue;
         pw::selftest::Context c;
@@ -49,3 +51,4 @@ TEST_CASE("vegetation: placement and brushes") { CHECK(runEnv("vegetation.placem
 TEST_CASE("vegetation: breakable trees") { CHECK(runEnv("vegetation.breakable")); }
 TEST_CASE("vegetation: octahedral impostors") { CHECK(runEnv("vegetation.impostor")); }
 TEST_CASE("vegetation: on procedural terrain") { CHECK(runEnv("vegetation.on-terrain")); }
+TEST_CASE("envrender: terrain + ocean + trees through the renderer") { CHECK(runEnv("envrender.scene")); }

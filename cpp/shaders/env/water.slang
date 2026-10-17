@@ -1,7 +1,11 @@
-// Water surface (ocean grid, lakes, rivers): displaced by the FFT ocean cascades (displacement / derivative
-// texture arrays written from pw::water::OceanSimulation), river flow maps, Fresnel reflection of the sky,
-// depth-based absorption + scattering (terrain depth texture), Jacobian and shoreline foam. Premultiplied alpha.
-#include "env_common.slang"
+// Water surface for pwenv_render's WaterRenderable (port of the surface shaders in Sources/Water/WaterShaders.swift):
+// ocean grid / lake / river meshes displaced by the three FFT cascades (pw::water::OceanSimulation), river flow,
+// Fresnel sky reflection (sky-view LUT), sun glint, depth absorption + scattering (terrain depth texture),
+// Jacobian and shoreline foam, aerial perspective. Alpha blended after opaque geometry.
+// Bindings: b0 frame, b2 WaterDraw; t0..t4 frame textures; t5 displacement array (Dx, h, Dz, foam), t6 derivative
+// array (dh/dx, dh/dz, dDx/dx, dDz/dz), t7 terrain heights around the camera (R32F); t8 vertices (2 float4 each:
+// px py pz edge | fx fz 0 0, relative to the draw origin).
+#include "../common.slang"
 
 struct WaterDraw {   // = pw::water::WaterDrawGPU
     float4 origin;    // camera-relative surface origin, wave amplitude scale
@@ -12,74 +16,100 @@ struct WaterDraw {   // = pw::water::WaterDrawGPU
     float4 misc;      // foam intensity, time, shoreline foam width, camera underwater
     float4 scatter;   // scatter tint rgb, sss strength
 };
-ConstantBuffer<WaterDraw> draw : register(b1);
-struct WaterVertex { float px, py, pz, fx, fz, edge; };   // = pw::water::WaterVertex
-StructuredBuffer<WaterVertex> verts : register(t8);
-Texture2DArray<float4> dispTex : register(t1);    // Dx, h, Dz, foam
-Texture2DArray<float4> derivTex : register(t2);   // dh/dx, dh/dz, dDx/dx, dDz/dz
-Texture2D<float> depthTex : register(t3);          // terrain heights around the camera
+ConstantBuffer<WaterDraw> gDraw : register(b2);
+DepthTexture2DArray gShadowMap : register(t0);
+Texture2D<float4> gSkyLUT : register(t1);
+Texture3D<float4> gAerialL : register(t2);
+Texture3D<float4> gAerialT : register(t3);
+Texture3D<float4> gAerialS : register(t4);
+Texture2DArray<float4> gDisp : register(t5);
+Texture2DArray<float4> gDeriv : register(t6);
+Texture2D<float> gGround : register(t7);
+StructuredBuffer<float4> gVerts : register(t8);
 
-struct VSOut {
-    float4 pos : SV_Position;
+// Bilinear sample with wrap-around in both axes (the shared samplers clamp V), cascades are periodic tiles.
+float4 sampleWrap(Texture2DArray<float4> tex, float2 xzRel, int c)
+{
+    uint w, h, layers;
+    tex.GetDimensions(w, h, layers);
+    float2 p = (xzRel / gDraw.L[c] + gDraw.uvBase[c].xy) * float2(float(w), float(h)) - 0.5;
+    float2 f = floor(p), t = p - f;
+    int2 i0 = int2(f);
+    int2 m = int2(int(w) - 1, int(h) - 1);
+    int2 a = i0 & m, b = (i0 + 1) & m;
+    float4 s00 = tex.Load(int4(a.x, a.y, c, 0)), s10 = tex.Load(int4(b.x, a.y, c, 0));
+    float4 s01 = tex.Load(int4(a.x, b.y, c, 0)), s11 = tex.Load(int4(b.x, b.y, c, 0));
+    return lerp(lerp(s00, s10, t.x), lerp(s01, s11, t.x), t.y);
+}
+
+struct WaterVOut {
+    float4 position : SV_Position;
     float3 rel : TEXCOORD0;
-    float2 xz : TEXCOORD1;     // undisplaced camera-relative xz
+    float2 xz : TEXCOORD1;
     float2 flow : TEXCOORD2;
     float edge : TEXCOORD3;
 };
 
-float2 cascadeUV(float2 xzRel, int c) { return xzRel / draw.L[c] + draw.uvBase[c].xy; }
-
-[shader("vertex")]
-VSOut waterVS(uint vid : SV_VertexID) {
-    WaterVertex v = verts[vid];
-    float2 xz = draw.origin.xz + float2(v.px, v.pz);
-    float3 d = float3(0.0);
+[shader("vertex")] WaterVOut waterVertex(uint vid : SV_VertexID)
+{
+    float4 a = gVerts[vid * 2], b = gVerts[vid * 2 + 1];
+    float2 xz = gDraw.origin.xz + a.xz;
     float dist = length(xz);
+    float3 d = float3(0.0, 0.0, 0.0);
     for (int c = 0; c < 3; c++) {
-        float fade = saturate(1.0 - dist / draw.uvBase[c].w);
-        d += dispTex.SampleLevel(linearWrap, float3(cascadeUV(xz, c), float(c)), 0).xyz * fade;
+        float fade = saturate(1.0 - dist / gDraw.uvBase[c].w);
+        d += sampleWrap(gDisp, xz, c).xyz * fade;
     }
-    d *= draw.origin.w;
-    VSOut o;
-    o.rel = float3(xz.x + d.x, draw.origin.y + v.py + d.y, xz.y + d.z);
-    o.pos = mul(float4(o.rel, 1.0), frame.viewProj);
+    d *= gDraw.origin.w;
+    WaterVOut o;
+    o.rel = float3(xz.x + d.x, gDraw.origin.y + a.y + d.y, xz.y + d.z);
+    o.position = mulM(gFrame.viewProj, float4(o.rel, 1.0));
     o.xz = xz;
-    o.flow = float2(v.fx, v.fz);
-    o.edge = v.edge;
+    o.flow = b.xy;
+    o.edge = a.w;
     return o;
 }
 
-[shader("fragment")]
-float4 waterPS(VSOut i) : SV_Target {
-    float4 dv = float4(0.0);
-    float foam = 0.0;
+[shader("fragment")] float4 waterFragment(WaterVOut i) : SV_Target
+{
     float dist = length(i.rel);
-    float2 xz = i.xz - i.flow * frac(draw.misc.y / 8.0) * 8.0;
+    float t = gDraw.misc.y;
+    float2 xz = i.xz - i.flow * frac(t / 8.0) * 8.0;
+    float4 dv = float4(0.0, 0.0, 0.0, 0.0);
+    float foam = 0.0;
     for (int c = 0; c < 3; c++) {
-        float fade = saturate(1.0 - dist / draw.uvBase[c].w);
-        float3 uvw = float3(cascadeUV(xz, c), float(c));
-        dv += derivTex.Sample(linearWrap, uvw) * fade;
-        foam += dispTex.Sample(linearWrap, uvw).w * fade;
+        float fade = saturate(1.0 - dist / gDraw.uvBase[c].w);
+        dv += sampleWrap(gDeriv, xz, c) * fade;
+        foam += sampleWrap(gDisp, xz, c).w * fade;
     }
-    dv *= draw.origin.w;
-    float3 n = normalize(float3(-dv.x / max(1.0 + dv.z, 0.2), 1.0, -dv.y / max(1.0 + dv.w, 0.2)));
-    float3 viewDir = normalize(-i.rel);
-    float cosT = saturate(dot(n, viewDir));
+    dv *= gDraw.origin.w;
+    float3 N = normalize(float3(-dv.x / max(1.0 + dv.z, 0.2), 1.0, -dv.y / max(1.0 + dv.w, 0.2)));
+    float3 V = normalize(-i.rel);
+    float cosT = saturate(dot(N, V));
     float fresnel = 0.02 + 0.98 * pow(1.0 - cosT, 5.0);
-    float3 r = reflect(-viewDir, n);
-    float3 sky = lerp(frame.horizonColor.rgb, frame.skyColor.rgb, saturate(r.y * 1.5));
-    float spec = pow(saturate(dot(r, frame.sunDir.xyz)), 600.0) * frame.sunDir.w * 4.0;
-    // water depth from the terrain depth texture
-    float2 duv = (i.rel.xz - draw.depthTex.xy) / draw.depthTex.z;
-    float ground = depthTex.SampleLevel(linearClamp, duv, 0);
-    float depth = max((i.rel.y - draw.depthTex.w) - ground, 0.0);
-    float3 trans = exp(-draw.absorb.rgb * depth);
-    float3 deep = draw.scatter.rgb * draw.absorb.w * frame.sunColor.rgb * frame.sunDir.w;
-    float3 body = lerp(deep, float3(0.0), trans.g) + deep * (1.0 - trans.g);
-    float shore = saturate(1.0 - depth / max(draw.misc.z, 1e-3)) * draw.misc.x;
-    float f = saturate(foam * draw.misc.x + shore * (0.6 + 0.4 * hash12(floor(i.xz * 4.0 + draw.misc.y))));
-    float3 color = lerp(body, sky, fresnel) + spec + f * float3(0.9, 0.93, 0.95);
+    float3 R = reflect(-V, N);
+    R.y = abs(R.y);
+    float3 skyScale = gFrame.sunColor.rgb * gFrame.sunDir.w;
+    float3 sky = sampleSky(gSkyLUT, R) * skyScale;
+    AerialSample ap = aerialLookup(gAerialL, gAerialT, gAerialS, i.rel);
+    float3 sunE = skyScale * ap.sunT;
+    float3 H = normalize(V + gFrame.sunDir.xyz);
+    float NoH = saturate(dot(N, H));
+    float spec = D_GGX(NoH, 0.02) * 0.25 * saturate(dot(N, gFrame.sunDir.xyz));
+    // water depth from the terrain heights around the camera
+    float2 duv = (i.rel.xz - gDraw.depthTex.xy) / gDraw.depthTex.z;
+    float ground = gGround.SampleLevel(gLinearClamp, duv, 0.0) + gDraw.depthTex.w;   // camera relative
+    bool hasGround = all(duv > 0.0) && all(duv < 1.0);
+    float depth = hasGround ? max(i.rel.y - ground, 0.0) : 1000.0;
+    float3 trans = exp(-gDraw.absorb.rgb * depth);
+    float3 deep = gDraw.scatter.rgb * gDraw.absorb.w * sunE * (0.4 + 0.6 * saturate(gFrame.sunDir.y));
+    float shore = hasGround ? saturate(1.0 - depth / max(gDraw.misc.z, 1e-3)) : 0.0;
+    float2 cell = floor(i.xz * 4.0 + t);
+    float n = frac(sin(dot(cell, float2(12.9898, 78.233))) * 43758.5453);
+    float f = saturate(foam * gDraw.misc.x + shore * gDraw.misc.x * (0.6 + 0.4 * n));
+    float3 body = deep * (1.0 - trans.g);
+    float3 color = lerp(body, sky, fresnel) + spec * sunE + f * sunE * 0.25;
     float alpha = saturate(max(1.0 - trans.g * (1.0 - fresnel), f)) * saturate(i.edge * 4.0);
-    color = applyFog(color, i.rel);
-    return float4(color * alpha, alpha);
+    color = color * ap.T + ap.L * alpha;
+    return float4(color, alpha);
 }
