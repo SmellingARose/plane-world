@@ -110,7 +110,7 @@ class WorldModel : public QObject {
     Q_PROPERTY(double turbidity READ turbidity WRITE setTurbidity NOTIFY skyChanged)
     Q_PROPERTY(double fogDensity READ fogDensity WRITE setFogDensity NOTIFY skyChanged)
 public:
-    explicit WorldModel(QObject* parent = nullptr);
+    explicit WorldModel(QObject* parent);   // no default: QML must use create() (one shared instance)
     ~WorldModel() override;
     static WorldModel* instance();   // the QML singleton (created on first use)
     static WorldModel* create(QQmlEngine*, QJSEngine*);

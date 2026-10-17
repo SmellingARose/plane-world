@@ -68,7 +68,7 @@ class EvolveModel : public QObject, public ReplayProvider {
     Q_PROPERTY(bool replayPlaying READ replayPlaying WRITE setReplayPlaying NOTIFY replayChanged)
     Q_PROPERTY(QVariantList replayOutputs READ replayOutputs NOTIFY replayTimeChanged)
 public:
-    explicit EvolveModel(QObject* parent = nullptr);
+    explicit EvolveModel(QObject* parent);   // no default: QML must use create() (one shared instance)
     ~EvolveModel() override;
     static EvolveModel* instance();
     static EvolveModel* create(QQmlEngine*, QJSEngine*);

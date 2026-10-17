@@ -50,6 +50,21 @@ struct WorldViewportNode : QSGSimpleTextureNode {
 };
 }
 
+void pwUnitBoxMesh(std::vector<pw::render::MeshVertex>& v, std::vector<uint32_t>& idx) {
+    const float F[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+    for (int f = 0; f < 6; ++f) {
+        const float* nn = F[f];
+        float u[3] = {nn[1] != 0 ? 1.f : 0.f, 0, 0}; if (nn[0] != 0) { u[0] = 0; u[2] = 1; } if (nn[2] != 0) { u[0] = 1; u[2] = 0; }
+        float w[3] = {nn[1]*u[2]-nn[2]*u[1], nn[2]*u[0]-nn[0]*u[2], nn[0]*u[1]-nn[1]*u[0]};
+        uint32_t base = uint32_t(v.size());
+        for (int c = 0; c < 4; ++c) {
+            float su = (c == 1 || c == 2) ? 0.5f : -0.5f, sw = (c >= 2) ? 0.5f : -0.5f;
+            v.push_back({nn[0]*0.5f + u[0]*su + w[0]*sw, nn[1]*0.5f + u[1]*su + w[1]*sw, nn[2]*0.5f + u[2]*su + w[2]*sw, nn[0], nn[1], nn[2], su + 0.5f, sw + 0.5f});
+        }
+        idx.insert(idx.end(), {base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base, base + 3, base + 2});   // both windings
+    }
+}
+
 WorldViewport::WorldViewport(QQuickItem* parent) : QQuickItem(parent) {
     setFlag(ItemHasContents, true);
     setFlag(ItemIsFocusScope, true);
@@ -92,6 +107,11 @@ void WorldViewport::setTimeOfDay(double h) {
 void WorldViewport::frameCraft() { m_goal.dist = 160; m_goal.pitch = 0.5; update(); }
 void WorldViewport::resetView() { const double tx = m_goal.tx, tz = m_goal.tz; m_goal = Orbit{}; m_goal.tx = tx; m_goal.tz = tz; update(); }
 void WorldViewport::lookAtWorld(double x, double z) { m_goal.tx = x; m_goal.tz = z; update(); }
+QVariantList WorldViewport::viewTarget() const {
+    double h = std::atan2(-std::cos(m_cur.yaw), -std::sin(m_cur.yaw)) * 180 / 3.141592653589793;
+    if (h < 0) h += 360;
+    return {m_cur.tx, m_cur.tz, h};
+}
 
 bool WorldViewport::brushTool() const { return m_editWorld && WorldModel::instance()->tool() != QLatin1String("orbit"); }
 
@@ -294,18 +314,7 @@ QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
     // props as boxes (unit cube scaled per object)
     if (!n->box) {
         std::vector<pw::render::MeshVertex> v; std::vector<uint32_t> idx;
-        const float F[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-        for (int f = 0; f < 6; ++f) {
-            const float* nn = F[f];
-            float u[3] = {nn[1] != 0 ? 1.f : 0.f, 0, 0}; if (nn[0] != 0) { u[0] = 0; u[2] = 1; } if (nn[2] != 0) { u[0] = 1; u[2] = 0; }
-            float w[3] = {nn[1]*u[2]-nn[2]*u[1], nn[2]*u[0]-nn[0]*u[2], nn[0]*u[1]-nn[1]*u[0]};
-            uint32_t base = uint32_t(v.size());
-            for (int c = 0; c < 4; ++c) {
-                float su = (c == 1 || c == 2) ? 0.5f : -0.5f, sw = (c >= 2) ? 0.5f : -0.5f;
-                v.push_back({nn[0]*0.5f + u[0]*su + w[0]*sw, nn[1]*0.5f + u[1]*su + w[1]*sw, nn[2]*0.5f + u[2]*su + w[2]*sw, nn[0], nn[1], nn[2], su + 0.5f, sw + 0.5f});
-            }
-            idx.insert(idx.end(), {base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base, base + 3, base + 2});   // both windings
-        }
+        pwUnitBoxMesh(v, idx);
         n->box = std::make_unique<pw::render::GpuMesh>(*n->dev, v, idx, "prop-box");
         n->renderer->add(&n->propsR);
     }

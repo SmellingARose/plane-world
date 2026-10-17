@@ -25,9 +25,11 @@ ApplicationWindow {
                    { title: "Edit", rows: [["Undo", "Ctrl+Z"], ["Redo", "Ctrl+Shift+Z"], ["Add part", "A"], ["Delete part", "Backspace"]] },
                    { title: "Parts", rows: [["Wings, props, jets, rockets, wheels, servos, CAD bodies", ""]] } ],
         "FLY":   [ { title: "Flight", rows: [["Launch / reset", "R"], ["Pause", "Space"], ["Camera", "C"]] },
+                   { title: "World", rows: [["Flies in the WORLD tab's world", ""], ["Edit world", "Ctrl+3"]] },
                    { title: "Aero model", rows: [["Fast · classic", ""], ["Fast · slipstream", ""], ["Fast+ (all effects)", ""], ["Full CFD presets", ""]] },
                    { title: "Outputs", rows: [["Per-output sliders and key bindings", ""]] } ],
         "WORLD": [ { title: "Terrain", rows: [["Heightfield, water, vegetation", ""], ["Undo", "Ctrl+Z"]] },
+                   { title: "Use it", rows: [["Fly here", "Ctrl+Shift+2"]] },
                    { title: "Objects", rows: [["Place prop", "P"], ["Breakables and buildings", ""]] } ],
         "EVOLVE":[ { title: "Experiment", rows: [["New experiment", "Ctrl+E"], ["Start / stop training", "Ctrl+Return"]] },
                    { title: "Algorithms", rows: [["GA · NEAT · CMA-ES · MAP-Elites · novelty", ""]] },
@@ -52,6 +54,9 @@ ApplicationWindow {
         { name: "Show the welcome tour", shortcut: "", run: () => tour.start() },
         { name: "WORLD: generate terrain", shortcut: "Ctrl+G", run: () => { selectTab(2); WorldModel.generate() } },
         { name: "WORLD: save world", shortcut: "", run: () => WorldModel.save() },
+        { name: "WORLD: fly here (start a flight at the view centre)", shortcut: "Ctrl+Shift+2", run: () => { selectTab(2); if (worldLoader.item) worldLoader.item.flyHere() } },
+        { name: "FLY: fly in the WORLD tab's world", shortcut: "", run: () => { App.flyInWorld = true; selectTab(1) } },
+        { name: "FLY: fly over flat ground", shortcut: "", run: () => { App.flyInWorld = false; selectTab(1) } },
         { name: "WORLD: new mountains world", shortcut: "", run: () => { selectTab(2); WorldModel.newWorld("mountains") } },
         { name: "EVOLVE: start / pause training", shortcut: "Ctrl+Return", run: () => { selectTab(3); EvolveModel.running ? EvolveModel.pause() : EvolveModel.start() } },
         { name: "EVOLVE: check script", shortcut: "", run: () => { selectTab(3); EvolveModel.checkScript() } },
@@ -195,7 +200,8 @@ ApplicationWindow {
         onFileDropped: win.currentTab = 0
     }
     PwToast { id: toast; parent: Overlay.overlay }
-    Connections { target: App; function onNotify(text, kind) { toast.show(text, kind) } }
+    Connections { target: App; function onNotify(text, kind) { toast.show(text, kind) }
+                               function onTabRequested(t) { const i = win.tabs.indexOf(t); if (i >= 0) win.selectTab(i) } }
 
     // Unsaved edits: ask before quitting.
     property bool closeConfirmed: false

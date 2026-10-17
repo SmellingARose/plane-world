@@ -14,6 +14,12 @@
 #include "pw/gpu.h"
 #include "pw/render/craft_renderable.h"
 #include "pw/render/renderer.h"
+#pragma push_macro("emit")
+#undef emit
+#include "pw/env/render.h"
+#pragma pop_macro("emit")
+#include "worldmodel.h"
+#include "worldviewport.h"
 using namespace pw;
 #if PW_GPU_D3D12
 #include <QtQuick/qsgtexture_platform.h>
@@ -38,10 +44,26 @@ struct ViewportNode : QSGSimpleTextureNode {
     pw::gpu::Texture* wrapped = nullptr;
     int revision = -1;
     std::vector<geo::Transform> poses;
+    // FLY in the WORLD tab's world: terrain / water / vegetation / props replace the flat ground
+    std::shared_ptr<WorldScene> scene;
+    std::unique_ptr<pw::envrender::TerrainRenderable> terrainR;
+    std::unique_ptr<pw::envrender::WaterRenderable> waterR;
+    std::unique_ptr<pw::envrender::VegetationRenderable> vegR;
+    std::unique_ptr<pw::render::GpuMesh> box;
+    pw::render::MeshRenderable propsR{5};
+    bool groundAdded = false, propsAdded = false;
+    void dropWorld() {
+        if (terrainR) { renderer->remove(terrainR.get()); renderer->remove(waterR.get()); renderer->remove(vegR.get()); }
+        if (propsAdded) { renderer->remove(&propsR); propsAdded = false; }
+        dev->waitIdle();
+        vegR.reset(); waterR.reset(); terrainR.reset();
+        scene.reset();
+    }
     ~ViewportNode() override {
         tex.reset();
         if (renderer && flow) renderer->remove(flow.get());
         renderer.reset();   // waits for the GPU
+        vegR.reset(); waterR.reset(); terrainR.reset();
     }
 };
 
@@ -312,6 +334,7 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
         pw::render::MeshRenderable::Item g; g.albedo = {0.18f, 0.22f, 0.12f}; g.roughness = 0.9f; g.pattern = 1;
         n->groundR.setBatches({{n->ground.get(), {g}}});
         n->renderer->add(&n->groundR);
+        n->groundAdded = true;
         n->craft = std::make_unique<pw::render::CraftRenderable>(*n->dev);
         n->renderer->add(n->craft.get());
         n->flow = std::make_unique<pw::flow::FlowOverlay>(*n->dev);
@@ -350,6 +373,41 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
         }
     }
 
+    // ---- world (FLY over the WORLD tab's world); BUILD keeps the neutral flat ground
+    const std::shared_ptr<WorldScene> scene = app ? app->flyScene() : nullptr;
+    if (scene != n->scene) {
+        n->dropWorld();
+        if (scene) {
+            n->terrainR = std::make_unique<pw::envrender::TerrainRenderable>(*n->dev, scene->terrain);
+            n->waterR = std::make_unique<pw::envrender::WaterRenderable>(*n->dev, scene->water);
+            n->vegR = std::make_unique<pw::envrender::VegetationRenderable>(*n->dev, scene->veg);
+            if (n->terrainR->ok()) n->renderer->add(n->terrainR.get());
+            if (n->waterR->ok() && !qEnvironmentVariableIsSet("PW_NOWATER")) n->renderer->add(n->waterR.get());
+            if (n->vegR->ok() && !qEnvironmentVariableIsSet("PW_NOVEG")) n->renderer->add(n->vegR.get());
+            n->scene = scene;
+        }
+    }
+    const bool wantGround = !(n->terrainR && n->terrainR->ok());
+    if (wantGround != n->groundAdded) { if (wantGround) n->renderer->add(&n->groundR); else n->renderer->remove(&n->groundR); n->groundAdded = wantGround; }
+    if (n->scene) {
+        if (!n->box) {
+            std::vector<pw::render::MeshVertex> v; std::vector<uint32_t> idx;
+            pwUnitBoxMesh(v, idx);
+            n->box = std::make_unique<pw::render::GpuMesh>(*n->dev, v, idx, "prop-box");
+        }
+        std::vector<pw::render::MeshRenderable::Item> items;
+        for (auto& o : WorldModel::instance()->document().objects) {
+            pw::render::MeshRenderable::Item it;
+            it.transform = o.transform;
+            it.scale = {float(o.scale.size() > 0 ? o.scale[0] : 1), float(o.scale.size() > 1 ? o.scale[1] : 1), float(o.scale.size() > 2 ? o.scale[2] : 1)};
+            it.albedo = o.breakable ? Float3{0.55f, 0.33f, 0.18f} : Float3{0.62f, 0.62f, 0.6f};
+            it.roughness = 0.8f;
+            items.push_back(it);
+        }
+        n->propsR.setBatches({{n->box.get(), std::move(items)}});
+        if (!n->propsAdded) { n->renderer->add(&n->propsR); n->propsAdded = true; }
+    }
+
     const double t = m_clock.elapsed() / 1000.0;
     double dt = std::clamp(t - m_lastT, 0.0, 0.1);
     m_lastT = t;
@@ -367,7 +425,8 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
     } else {
         const Vec3d target = m_focus + Vec3d{0, m_cur.height, 0};
         const Vec3d eye = target + Vec3d{std::cos(m_cur.pitch) * std::sin(m_cur.yaw), std::sin(m_cur.pitch), std::cos(m_cur.pitch) * std::cos(m_cur.yaw)} * m_cur.dist;
-        cam.lookAt(target, {eye.x, std::max(eye.y, 0.3), eye.z});
+        const double floorY = (n->scene ? app->groundHeight(eye.x, eye.z) : 0.0) + 0.3;
+        cam.lookAt(target, {eye.x, std::max(eye.y, floorY), eye.z});
         cam.nearZ = float(std::max(0.05, m_cur.dist * 0.005));
     }
     m_camPos = cam.position; m_camFwd = cam.forward(); m_camRight = cam.right(); m_camUp = cam.up();
@@ -403,6 +462,14 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
     }
 
     n->renderer->environment.timeOfDayHours = m_timeOfDay;
+    if (n->scene) {   // the world's sky and wind
+        WorldModel* wm = WorldModel::instance();
+        n->renderer->environment.timeOfDayHours = wm->timeOfDay();
+        n->renderer->environment.sunAzimuthDeg = wm->sunAzimuth();
+        n->renderer->environment.windSpeed = wm->windSpeed();
+        n->renderer->environment.windDirectionDeg = wm->windDirection();
+        n->renderer->environment.fogDensity = wm->fogDensity();
+    }
     n->renderer->render(cam, t);
     n->markDirty(QSGNode::DirtyMaterial);
 

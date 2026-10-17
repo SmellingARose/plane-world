@@ -29,6 +29,8 @@
 
 class QQmlEngine;
 class QKeyEvent;
+struct WorldScene;
+namespace pw::evo { class HeadlessObstacles; }
 class QJSEngine;
 namespace pw::flow { class LBMSolver; }
 
@@ -75,6 +77,10 @@ class AppController : public QObject {
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY telemetryChanged)
     Q_PROPERTY(QVariantMap perf READ perf NOTIFY telemetryChanged)
     Q_PROPERTY(bool crashed READ crashed NOTIFY telemetryChanged)
+    // ---- FLY world: the WORLD tab's live world (terrain, water, trees, props, wind) or flat ground
+    Q_PROPERTY(bool flyInWorld READ flyInWorld WRITE setFlyInWorld NOTIFY worldChanged)
+    Q_PROPERTY(QString worldName READ worldName NOTIFY worldChanged)
+    Q_PROPERTY(QString worldSummary READ worldSummary NOTIFY worldChanged)
     // ---- aero model
     Q_PROPERTY(QVariantList aeroModels READ aeroModels CONSTANT)
     Q_PROPERTY(QString aeroModel READ aeroModel WRITE setAeroModel NOTIFY aeroChanged)
@@ -168,6 +174,18 @@ public:
     void setCameraMode(const QString& m);
     Q_INVOKABLE void cycleCamera();
     Q_INVOKABLE void resetFlight();
+    bool flyInWorld() const { return m_flyInWorld; }
+    void setFlyInWorld(bool on);
+    QString worldName() const;
+    QString worldSummary() const;
+    /// FLY from a world point (WORLD's "Fly from here"); y < -1e8 drops onto the ground. Cleared when the world spawn moves.
+    Q_INVOKABLE void flyFrom(double x, double z, double headingDeg);
+    Q_INVOKABLE void clearFlyFrom();
+    Q_INVOKABLE void requestTab(const QString& tab) { emit tabRequested(tab); }
+    /// Ground (terrain or flat 0) height under (x, z) for the cameras.
+    double groundHeight(double x, double z) const;
+    /// The world scene FLY renders (null when flying over flat ground).
+    std::shared_ptr<WorldScene> flyScene() const { return m_flyInWorld && m_mode == "fly" ? m_worldScene : nullptr; }
     QVariantMap telemetry() const { return m_telemetry; }
     QStringList warnings() const { return m_warnings; }
     QVariantMap perf() const { return m_perf; }
@@ -230,10 +248,13 @@ signals:
     void aeroChanged();
     void cfdDiagnosticsChanged();
     void equationsChanged();
+    void worldChanged();
     /// Transient message for the toast ("info" | "good" | "warn" | "bad").
     void notify(const QString& text, const QString& kind);
     /// FLY shortcuts handled by the event filter that the UI reacts to.
     void equationsToggled();
+    /// Ask the window to show a tab ("BUILD" | "FLY" | "WORLD" | "EVOLVE"), e.g. FLY's "Edit world".
+    void tabRequested(const QString& tab);
 
 protected:
     bool eventFilter(QObject* obj, QEvent* ev) override;
@@ -250,6 +271,8 @@ private:
     void rebuildOutputs();
     void rebuildMeshCache();
     void reloadSim();
+    void syncWorld();
+    void respawn();
     void applyAeroToSim();
     void tick();
 public:
@@ -297,6 +320,12 @@ private:
     // simulation
     std::unique_ptr<pw::sim::CraftSim> m_sim;
     std::unique_ptr<pw::sim::FlatTerrain> m_ground;
+    std::shared_ptr<WorldScene> m_worldScene;
+    std::shared_ptr<pw::evo::HeadlessObstacles> m_obstacles;
+    std::vector<pw::Vec3d> m_cornersPrev, m_cornersCur;
+    pw::Vec3d m_prevPos;
+    bool m_flyInWorld = true, m_hasFlyFrom = false, m_worldConnected = false;
+    double m_flyFromX = 0, m_flyFromZ = 0, m_flyFromHeading = 0;
     std::unique_ptr<pw::sim::AeroBackend> m_backend;
     pw::sim::EquationCapture m_capture{512};
     pw::sim::SimEnvironment m_env;

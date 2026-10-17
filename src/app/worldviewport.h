@@ -16,6 +16,9 @@
 #include <QPointF>
 #include <QQuickItem>
 #include <QVector3D>
+#include <QVariant>
+#include <cstdint>
+#include <vector>
 #include "pw/math.h"
 #include <QtQml/qqmlregistration.h>
 
@@ -23,6 +26,9 @@ class QSGTexture;
 class QQuickWindow;
 namespace pw::gpu { class Texture; }
 QSGTexture* pwWrapNativeTexture(QQuickWindow* w, pw::gpu::Texture* t);   // gpuviewport.cpp / _metal.mm
+namespace pw::render { struct MeshVertex; }
+/// Unit cube (both windings) for world props; shared by the WORLD and FLY viewports.
+void pwUnitBoxMesh(std::vector<pw::render::MeshVertex>& v, std::vector<uint32_t>& idx);
 
 class WorldViewport : public QQuickItem {
     Q_OBJECT
@@ -67,6 +73,8 @@ public:
     Q_INVOKABLE void lookAtWorld(double x, double z);
     Q_INVOKABLE void frameCraft();
     Q_INVOKABLE void resetView();
+    /// Where the camera looks: [x, z, headingDeg] (heading of the view direction, craft convention: 0 = +X).
+    Q_INVOKABLE QVariantList viewTarget() const;
 signals:
     void infoChanged();
     void statsChanged();
@@ -86,6 +94,8 @@ protected:
     void keyPressEvent(QKeyEvent* e) override;
     void keyReleaseEvent(QKeyEvent* e) override;
     void releaseResources() override;
+    // the node is dropped while hidden (tab switch); ask for a frame again when shown
+    void itemChange(ItemChange c, const ItemChangeData& d) override { QQuickItem::itemChange(c, d); if (c == ItemVisibleHasChanged && d.boolValue) update(); }
 private:
     Q_INVOKABLE void setInfo(const QString& backend, const QString& adapter, const QString& error, const QString& craft);
     Q_INVOKABLE void setStats(double fps, double gpuMs, const QString& passes, bool async);
