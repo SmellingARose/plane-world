@@ -29,6 +29,16 @@ RowLayout {
             focusPolicy: Qt.NoFocus
             highlighted: checked
             onClicked: { seg.currentIndex = index; seg.activated(index) }
+            // The macOS style draws checkable / highlighted push buttons exactly like plain ones (and `highlighted`
+            // only when the window is key), so the selection was invisible there. Paint it explicitly.
+            Rectangle {
+                visible: Theme.mac && parent.checked
+                anchors.fill: parent; anchors.margins: 3
+                radius: Theme.radiusSmall
+                color: Theme.accentSoft
+                border.width: 1.5; border.color: Theme.accent
+                z: 1
+            }
             ToolTip.visible: hovered && typeof modelData !== "string" && !!modelData.tip
             ToolTip.delay: Theme.tooltipDelay
             ToolTip.text: typeof modelData === "string" ? "" : (modelData.tip || "")
