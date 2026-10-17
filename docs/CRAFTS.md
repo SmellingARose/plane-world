@@ -16,6 +16,74 @@ Every servo, motor, jet and solid becomes an output (a FLY slider, or a controll
 | **Jet trainer** | boxes, wings, jet, tank, servos, wheels | Turbojet with spool lag and fuel burn |
 | **Rover** | boxes, motor, servos, wheels | Ground vehicle: suspension and Pacejka-lite tyres, servo steering |
 | **Sounding rocket** | cone, cylinders, solid motor, fins | Unguided solid rocket with passive fin stability |
+| **Racer quad** | cylinder, cones, arms, 4 motors + props, sensors | 5" FPV-style racing quad, T/W ≈ 9.5. The craft for `drone-hover` and `drone-race` |
+
+## Racer quad (`data/crafts/racer-quad.json`)
+
+A 5-inch FPV racing quad at real scale: 0.764 kg, four 0.127 m (5") props rated 18 N static each
+(72 N, **T/W ≈ 9.5**), X layout with 0.226 m motor-to-motor diagonal. The generator for the file is not checked in;
+edit the JSON directly.
+
+| Group | Parts | Notes |
+|---|---|---|
+| Fuselage | `Battery pod` cylinder r 0.03 × 0.16 m (0.43 kg, C_D 0.08), `Camera nose` cone, `Tail fairing` cone (C_D 0.05) | Streamlined pod, **tilted 50° nose-up** relative to the prop plane |
+| Arms | 4 thin carbon `box` arms 0.113 × 0.006 × 0.014 m, C_D 0.1 | |
+| Motors | `Motor bell XX` cylinders (31 g each) at the arm tips for mass and drag; output parts `Motor FL/FR/RL/RR` | One output per prop |
+| Props | `Prop FL (CW)`, `Prop RR (CW)` spin +1; `Prop FR (CCW)`, `Prop RL (CCW)` spin −1; d 0.127, thrust 18 N, vmax 70 m/s | Canted 10° tangentially (see below) |
+| Sensors | `att`, `rate`, `alt`, `vs`, `air`, `target` (target at 0, 10, 0) | Inputs for the controllers |
+
+### Design rationale
+
+- **Body tilt.** A racing quad flies its dash at 60–80° nose-down. The pod is built 50° nose-up relative to the
+  prop plane (like an FPV camera uptilt), so it is close to streamlined to the flow at dash attitude.
+- **Canted motors for yaw.** The prop torque model reacts Q = 0.75 P / Ω with Ω ∝ throttle, so the reaction torque
+  hardly changes with throttle and differential throttle gives almost no yaw (measured: −1.7 °/s after 0.1 s
+  with a 0.03 split). Each prop is therefore canted 10° tangentially: the CW pair leans one way and the CCW pair
+  the other, so a speed difference between the pairs gives a real yaw moment (−85 °/s after 0.1 s, same split)
+  for a 1.5 % thrust cost. Tilted motors are a real technique for heavy-lift multirotors.
+- **Motor output parts sit at the centre with 1 g mass and `cd` 0.** A `motor` part is a fixed 0.5 m cube body.
+  At the arm tips that cube's inertia would triple the quad's pitch/roll inertia and, with the default C_D,
+  dominate the drag. The real motor mass and drag are in the small `Motor bell` cylinders. The cubes' ground
+  contact corners still make the quad sit about 0.24 m above the ground on the runway.
+- **Thrust and throttle.** Static prop thrust grows as power^(2/3), so with T/W 9.5 the motors hover at about
+  **4 % output** (≈ 11 % of maximum thrust). The controllers work in thrust fraction and send
+  `fraction^1.5` to the motors.
+- **Real scale.** At 1 kHz physics the 0.76 kg craft is stable under PID control, so it was not scaled up.
+
+### Measured (fast aero, flat world, still air, scripted cascaded PID: `pwcli --train` probes)
+
+| | |
+|---|---|
+| Hover output | 0.040 per motor (thrust fraction 0.106) |
+| Full-power climb | 51 m/s vertical, 122 m in 3 s from the ground |
+| Dash, level at 10 m | 28 m/s with a 78° lean limit, 37 m/s at 85°, **42 m/s (150 km/h)** at 88° (the attitude loop saturates at about 76° real pitch); about 0.03 m² effective drag area, most of it rotor in-plane (H-force) drag from the p-factor model |
+| Yaw | 90 °/s command tracked at 89 °/s mean |
+
+### Controls (FLY keys)
+
+There is no output mixer: each keybind drives one output, so a keyboard cannot give pitch and roll. The
+keybinds give throttle and yaw only:
+
+| Keys | Outputs | Effect |
+|---|---|---|
+| ↑ / ↓ (ramp) | `Motor FL`, `Motor RR` (CW pair) | Press both pairs together for throttle |
+| W / S (ramp) | `Motor FR`, `Motor RL` (CCW pair) | Run the pairs at different levels to yaw |
+
+The ramp rate is 0.25/s; hover is about 0.04. For stable flight in FLY, train `drone-hover` and use "Autopilot
+from evolved controller" (export the best craft from EVOLVE).
+
+### Experiments
+
+The controller in both is a JS flight controller: position → lean angle → attitude PD → quad mixer, with an
+altitude PD and yaw-rate damping. The mixer signs were measured on the craft (more front thrust pitches up, more
+left thrust raises the left side, more CW-pair thrust gives negative yaw rate), so all gains are ≥ 0.
+
+- `examples/experiments/drone-hover.json`: climb to 10 m and hold position in wind up to 3 m/s with turbulence.
+  8 genes, CMA-ES, 24 × 30 generations. Fitness goes from −8.8 (gen 0) to +11.6, with 13.4 s of the 15 s episode
+  inside the ±1 m / 1.5 m hover box. About 10 s wall time (M4, 10 workers).
+- `examples/experiments/drone-race.json`: reach (100, 15, 40) m (109 m away) as fast as possible, then stop and
+  hold there. 9 genes (adds the lean limit). Fitness goes from −8.0 (never arrives) to +16.7: it arrives after
+  5.3 s and then holds. About 11 s wall time.
 
 ## Ducted rocket (`examples/crafts/ducted-rocket.json`)
 
