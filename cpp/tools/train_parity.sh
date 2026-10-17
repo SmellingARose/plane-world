@@ -11,6 +11,8 @@ PWCLI="$1"; MODE="${2:-exact}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${TMPDIR:-/tmp}/pw-train-parity"; rm -rf "$OUT"; mkdir -p "$OUT"
 PY=$(command -v python3 || command -v python)
+# Slow shared CI machines: widen the JS watchdog so no candidate times out (results are unaffected unless it fires).
+export PW_SCRIPT_BUDGET_SCALE="${PW_SCRIPT_BUDGET_SCALE:-20}"
 fail=0
 for e in hold100-ga hover-pid hover-ducted-rocket glide-cmaes; do
   for w in 1 4; do

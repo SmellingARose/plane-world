@@ -245,7 +245,13 @@ public:
         compiled_ = true;
     }
 
-    double tickBudget() const { return std::max(0.01, bundle_.callBudgetMs); }
+    /// PW_SCRIPT_BUDGET_SCALE (> 0) multiplies the watchdog budgets: parity harnesses on slow shared CI machines,
+    /// where a 5 ms per-tick budget occasionally fails a candidate that a desktop runs in 0.5 ms.
+    static double budgetScale() {
+        static const double k = [] { const char* v = std::getenv("PW_SCRIPT_BUDGET_SCALE"); double x = v ? std::atof(v) : 1; return x > 0 ? x : 1; }();
+        return k;
+    }
+    double tickBudget() const { return std::max(0.01, bundle_.callBudgetMs) * budgetScale(); }
     double episodeBudget() const { return tickBudget() * 20; }
 
     std::string genomeLayout(const std::string& base) override {
