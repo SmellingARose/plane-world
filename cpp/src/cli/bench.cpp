@@ -1,5 +1,6 @@
 // pwcli --bench: micro-benchmarks of the ported kernels (more arrive with each phase; docs/PERF.md in the Swift app).
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
@@ -84,6 +85,28 @@ std::vector<Bench> benches() {
             return double(iters) * n / std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 1e6;
         }});
     }
+    b.push_back({"math.fma", "Mfma/s", [](int reps) {
+        // std::fma throughput (the Apple-simd-exact math is FMA heavy; MSVC routes std::fma through the CRT).
+        std::vector<double> x(1024), y(1024);
+        pw::SplitMix r(9);
+        for (std::size_t i = 0; i < x.size(); ++i) { x[i] = r.next(); y[i] = r.next(); }
+        auto t0 = std::chrono::steady_clock::now();
+        double acc = 0.5;
+        long n = 0;
+        for (int k = 0; k < reps * 20000; ++k)
+            for (std::size_t i = 0; i < x.size(); ++i, ++n) acc = std::fma(x[i], y[i], acc * 0.999);
+        sink = acc;
+        return double(n) / std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 1e6;
+    }});
+    b.push_back({"math.quat-act", "Mops/s", [](int reps) {
+        pw::Quatd q = pw::Quatd::eulerXYZDegrees({10, 20, 30});
+        pw::Vec3d v{1, 2, 3};
+        auto t0 = std::chrono::steady_clock::now();
+        long n = reps * 5000000L;
+        for (long k = 0; k < n; ++k) v = q.act(v);
+        sink = v.x;
+        return double(n) / std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 1e6;
+    }});
     b.push_back({"jobs.parallelFor.empty", "kloops/s", [](int reps) {
         auto& js = pw::jobs::JobSystem::shared();
         std::vector<double> acc(1024, 0.0);
