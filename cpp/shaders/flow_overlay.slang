@@ -14,7 +14,8 @@ ConstantBuffer<OverlayDraw> gOverlay : register(b2);
 Texture2D<float4> gSlice : register(t5);
 StructuredBuffer<float4> gTracers : register(t9);
 
-float3 srgbToLinear(float3 c) { return select(c <= 0.04045, c / 12.92, pow((c + 0.055) / 1.055, 2.4)); }
+float srgbToLinear1(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
+float3 srgbToLinear(float3 c) { return float3(srgbToLinear1(c.x), srgbToLinear1(c.y), srgbToLinear1(c.z)); }
 
 struct SliceVOut { float4 position : SV_Position; float2 uv : TEXCOORD0; };
 [shader("vertex")] SliceVOut flowSliceVertex(uint vid : SV_VertexID)
