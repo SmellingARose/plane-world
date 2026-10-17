@@ -69,6 +69,7 @@ struct EvolvePanelContent: View {
         VStack(alignment: .leading, spacing: 10) {
             experimentSection
             craftWorldSection
+            aeroSection
             genomeSection
             algorithmSection
             episodeSection
@@ -139,6 +140,23 @@ struct EvolvePanelContent: View {
             Toggle("Trees (static obstacles, contact = crash)", isOn: bind(\.headless.vegetation))
             Toggle("Props + breakables (static, contact = crash)", isOn: bind(\.headless.breakables))
         }.font(.callout)
+    }
+
+    // MARK: aero model (fast | full CFD) — consumed by the evaluator / --train (training builder)
+
+    private var aeroSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SectionHeader(title: "Aero model")
+            Card {
+                AeroModelSwitch(settings: bind(\.aero))
+                if evo.experiment.aero.model == .full {
+                    DisclosureGroup("CFD settings") { CFDSettingsView(cfd: bind(\.aero.cfd)).padding(.top, 4) }.font(.callout)
+                    Text("Full-model lanes share one GPU domain pool per worker; expect far fewer evaluations/s than Fast.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                DisclosureGroup("Fast-model effects") { FastTogglesView(toggles: bind(\.aero.toggles)).padding(.top, 4) }.font(.callout)
+            }
+        }
     }
 
     // MARK: genome

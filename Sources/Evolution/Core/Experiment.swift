@@ -172,6 +172,8 @@ public struct ExperimentDocument: Codable, Sendable, Equatable {
     public var batchLanes = ExperimentDocument.defaultBatchLanes
     /// Default for `batchLanes` (the best measured setting, docs/PERF.md "Batched lanes").
     public static let defaultBatchLanes = 1
+    /// Aero model for training (fast analytic | full GPU CFD), CFD settings and fast-model toggles (docs/FIDELITY.md).
+    public var aero = AeroRunSettings()
     public init() {}
 
     public init(from d: any Decoder) throws {
@@ -186,7 +188,7 @@ public struct ExperimentDocument: Codable, Sendable, Equatable {
         episode = v(.episode, def.episode); seed = v(.seed, def.seed); scripts = v(.scripts, def.scripts)
         rewardTerms = v(.rewardTerms, def.rewardTerms); descriptorAxes = v(.descriptorAxes, def.descriptorAxes)
         checkpointEvery = v(.checkpointEvery, def.checkpointEvery); workers = v(.workers, def.workers)
-        batchLanes = v(.batchLanes, def.batchLanes)
+        batchLanes = v(.batchLanes, def.batchLanes); aero = v(.aero, def.aero)
     }
 
     public static var directory: URL {

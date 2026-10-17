@@ -8,6 +8,7 @@ import Synchronization
 import simd
 import PWCore
 import PWPhysics
+import PWCraft
 
 /// Everything resolved for a run (crafts loaded, world baked, layout built). Immutable; shared by workers.
 public final class ExperimentContext: @unchecked Sendable {
@@ -160,8 +161,20 @@ public final class EvalWorker {
         mlpX = .allocate(capacity: m); mlpY = .allocate(capacity: m)
         mlpX.initialize(repeating: 0, count: m); mlpY.initialize(repeating: 0, count: m)
         remap()
+        try applyAero(baseSim)
     }
     deinit { simInputs.deallocate(); mlpX.deallocate(); mlpY.deallocate(); cornersPrev.deallocate(); cornersCur.deallocate() }
+
+    /// Worker-private CFD backend (`.full` only); reused (reconfigured) when the design changes per candidate.
+    var fullBackend: AeroBackend?
+    /// experiment.aero → sim: fast-model toggles, and for `.full` a configured CFD domain (docs/CFD.md).
+    func applyAero(_ s: CraftSim) throws {
+        s.fastToggles = ctx.experiment.aero.toggles
+        guard ctx.experiment.aero.model == .full else { return }
+        do { try AeroGeometry.enableFull(on: s, settings: ctx.experiment.aero.cfd, backend: fullBackend) }
+        catch { throw EvolutionError.invalidExperiment("aero model 'full': \(error)") }
+        fullBackend = s.aeroBackend
+    }
 
     func remap() {
         let ins = sim.inputs.map(\.name), outs = sim.outputs.map(\.name)
@@ -187,6 +200,7 @@ public final class EvalWorker {
             try s.load(doc)
             s.substepHz = ctx.experiment.episode.physicsHz
             s.crashSpeed = ctx.experiment.episode.crashSpeed
+            try applyAero(s)
             sim = s
             remap()
         } else if sim !== baseSim { sim = baseSim; remap() }
@@ -199,6 +213,7 @@ public final class EvalWorker {
     }
 
     /// A/B knob for benches: PW_EVAL_SPLIT=0 schedules whole candidates (the old granularity).
+    static let nanTrap = ProcessInfo.processInfo.environment["PW_NAN_TRAP"] == "1"
     static let splitEpisodes = ProcessInfo.processInfo.environment["PW_EVAL_SPLIT"] != "0"
 
     /// One episode's raw result (aggregated per candidate by `aggregate`).
@@ -396,6 +411,10 @@ public final class EvalWorker {
             swap(&cornersPrev, &cornersCur); run.prevPos = sim.position
         }
         fillState(run.env, spawnXZ: run.spawnXZ); observe(run.env)
+        if EvalWorker.nanTrap && !(simd_length(sim.angularVelocityWorld) < 200 && simd_length(sim.velocity) < 500) {
+            print("NAN-TRAP t=\(run.env.time) pos \(sim.position) vel \(sim.velocity) w \(sim.angularVelocityWorld) outs \(Array(frame.outputs))")
+            print(sim.debugDump())
+        }
         if !(sim.position.x.isFinite && sim.position.y.isFinite && sim.velocity.y.isFinite) { frame.done = true; frame.doneReason = "nan"; return false }
         if stopOnCrash && sim.crashed { frame.done = true; frame.doneReason = "crash"; return false }
         if let b = run.bounds, sim.position.x < b.min.x || sim.position.x > b.max.x || sim.position.z < b.min.z || sim.position.z > b.max.z {
@@ -456,7 +475,8 @@ public final class SimEvaluator: Evaluator {
     public init(context: ExperimentContext, workers: Int = 0, jobs: JobSystem = .shared, runtimeFactory: ScriptRuntimeFactory) throws {
         self.context = context; self.jobs = jobs
         let n = workers > 0 ? workers : jobs.threadCount
-        let K = Self.resolveBatchLanes(context.experiment.batchLanes)
+        // `.full` (CFD) runs on the scalar CraftSim only: the SIMD-lane batch sim has no backend call site.
+        let K = context.experiment.aero.model == .full ? 1 : Self.resolveBatchLanes(context.experiment.batchLanes)
         batchLanes = K
         if K > 1 {
             drivers = try (0..<n).map { _ in BatchEvalDriver(lanes: try (0..<K).map { _ in try EvalWorker(context: context, runtime: runtimeFactory()) }) }

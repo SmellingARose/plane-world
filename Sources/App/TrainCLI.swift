@@ -41,7 +41,7 @@ enum TrainCLI {
 
     static func run(_ args: [String]) -> Int32 {
         ScriptedAlgorithmRegistration.register()
-        guard let path = value(args, "--train") else { print("usage: PlaneWorld --train <experiment.json> [--generations N] [--out dir] [--resume] [--current-as-flat]"); return 2 }
+        guard let path = value(args, "--train") else { print("usage: PlaneWorld --train <experiment.json> [--generations N] [--out dir] [--resume] [--current-as-flat] [--aero fast|full] [--cfd-preset draft|medium|high|ultra]"); return 2 }
         let url = URL(fileURLWithPath: path)
         do {
             var e = try ExperimentDocument.load(url)
@@ -49,6 +49,14 @@ enum TrainCLI {
             if let w = value(args, "--workers").flatMap(Int.init) { e.workers = w }
             if let p = value(args, "--population").flatMap(Int.init) { e.population = p }
             if let s = value(args, "--seed").flatMap(UInt64.init) { e.seed = s }
+            if let a = value(args, "--aero") {
+                guard let m = AeroModel(rawValue: a) else { print("error: --aero must be fast or full"); return 2 }
+                e.aero.model = m
+            }
+            if let pr = value(args, "--cfd-preset") {
+                guard let p = CFDQualityPreset(rawValue: pr) else { print("error: --cfd-preset must be one of \(CFDQualityPreset.allCases.map(\.rawValue))"); return 2 }
+                e.aero.cfd = CFDSettings.preset(p)
+            }
             guard let craft = resolveCraft(e.crafts.first, experimentURL: url) else { print("error: craft not found"); return 1 }
             if e.world.source == "current" && !args.contains("--current-as-flat") {
                 print("error: world source 'current' means the world open in the app, which the CLI cannot see.")
@@ -64,6 +72,7 @@ enum TrainCLI {
             let r = resume ? try EvolutionRun.resume(from: out, world: world)
                            : try EvolutionRun(experiment: e, craft: craft, world: world, runID: runID, directory: out)
             let gens = max(1, e.generations)
+            print("aero model: \(e.aero.model.rawValue)" + (e.aero.model == .full ? "  (CFD preset \(e.aero.cfd.preset.rawValue), \(e.aero.cfd.cellsPerMeter) cells/m, max \(e.aero.cfd.maxCellsPerAxis)/axis, update every \(e.aero.cfd.updateEvery) substeps; scalar sims, one GPU domain per worker)" : ""))
             print("experiment '\(e.name)'  algorithm \(e.algorithm.kind)  genes \(r.layout.count)  population \(e.population)  workers \(e.workers == 0 ? ProcessInfo.processInfo.activeProcessorCount : e.workers)  episode \(e.episode.duration)s x\(e.episode.episodesPerCandidate)  world \(world.name)")
             print("terms: \(r.termNames.joined(separator: ", "))   out: \(out.path)")
             var csv = "generation,best,mean,median,worst,failures,evaluations,wall_s,sims_per_s,simsec_per_wall_s,species,coverage," + r.termNames.map { "best_\($0)" }.joined(separator: ",") + "\n"

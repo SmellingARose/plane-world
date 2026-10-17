@@ -34,7 +34,9 @@ function failed(ctx) {
 function terminate(ctx) { return failed(ctx); }
 
 function fitness(ctx) {
-  const crash = failed(ctx) ? -2 * (20 - ctx.t) - 5 : 0;   // losing the rest of the episode costs ~2 points/s
+  // Losing the rest of the episode costs the same per second as sitting on the ground (height error ~1/s),
+  // so trying to fly is never worse than not taking off (a harsher penalty made 'stay on the ground' optimal).
+  const crash = failed(ctx) ? -1.0 * (20 - ctx.t) - 1 : 0;
   const s = ctx.sum;
   return { fitness: s.height + s.hover + s.calm + s.drift + s.upright + s.spin + crash, terms: { crash: crash } };
 }
