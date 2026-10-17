@@ -116,6 +116,7 @@ static void testEvolve(const QString& dir) {
     e.set("world.source", "flat");
     e.set("workers", 2);
     e.set("episode.episodesPerCandidate", 1);   // replay can then be compared bit for bit
+    e.set("name", "UI test");   // ASCII: pwcore paths are narrow std::string (non-ASCII run dirs break on Windows, see todos)
     CHECK(std::abs(e.document().episode.duration - 4.0) < 1e-12);
     CHECK(e.document().population == 8);
     CHECK(e.get("world.source").toString() == "flat");
