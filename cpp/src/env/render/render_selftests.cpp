@@ -1,6 +1,8 @@
 // envrender.* self-tests: terrain + ocean + vegetation drawn by the pwrender Renderer offscreen (Metal locally, WARP
 // on the Windows CI), image sanity checks and PNG artefacts (PW_SELFTEST_OUT or the temp directory).
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <mutex>
@@ -204,21 +206,34 @@ void registerSelfTests() {
             render::Camera cam;
             cam.lookAt({0, s.terrain.height(0, 0), 0}, {-1500, std::max(s.terrain.height(-1500, 1500), 0.0) + 250, 1500});
             auto rr = render::Renderer::create(*dev, &err);
-            if (!rr || !rr->resize(1920, 1080)) { ctx.note("FAIL: renderer " + err); return false; }
+            if (const char* a = std::getenv("PW_ASYNC")) rr->settings.asyncCompute = std::atoi(a);
+            int W = 1920, H = 1080;
+            if (const char* r = std::getenv("PW_PERF_RES")) std::sscanf(r, "%dx%d", &W, &H);
+            if (!rr || !rr->resize(W, H)) { ctx.note("FAIL: renderer " + err); return false; }
             TerrainRenderable tr(*dev, s.terrain);
             WaterRenderable wr(*dev, s.water);
             VegetationRenderable vr(*dev, s.veg);
             if (const char* l = std::getenv("PW_VEG_LOD1")) vr.settings.lod1Distance = std::atof(l);
             if (const char* l = std::getenv("PW_VEG_LOD0")) vr.settings.lod0Distance = std::atof(l);
-            rr->add(&tr); rr->add(&wr); rr->add(&vr);
+            {   // PW_SKIP=terrain,water,vegetation drops renderables (profiling by subtraction)
+                const char* sk = std::getenv("PW_SKIP"); std::string skip = sk ? sk : "";
+                if (skip.find("terrain") == std::string::npos) rr->add(&tr);
+                if (skip.find("water") == std::string::npos) rr->add(&wr);
+                if (skip.find("vegetation") == std::string::npos) rr->add(&vr);
+            }
             double sum = 0; int n = 0;
+            auto tw0 = std::chrono::steady_clock::now();
             for (int i = 0; i < 40; ++i) {
+                if (i == 10) { dev->waitIdle(); tw0 = std::chrono::steady_clock::now(); }
                 rr->render(cam, 10 + i / 60.0);
                 if (i >= 10 && rr->lastGpuMs() > 0) { sum += rr->lastGpuMs(); ++n; }
             }
             dev->waitIdle();
+            const double wallMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tw0).count() / 30;
+            ctx.note(fmt("wall %.2f ms per frame (frames 10-39, GPU-bound throughput)", wallMs));
             double ms = n ? sum / n : 0;
-            ctx.note(fmt("1920x1080 terrain + ocean + %.0f trees: %.2f ms GPU per frame (%.0f fps); ", double(s.veg.aliveTreeCount()), ms, ms > 0 ? 1000 / ms : 0) +
+            { std::string pt = "passes:"; for (auto& t : rr->passTimes()) pt += " " + t.name + fmt("=%.2f", t.ms); ctx.note(pt); }
+            ctx.note(fmt("%.0fx%.0f terrain + ocean + %.0f trees: %.2f ms GPU per frame (%.0f fps); ", double(W), double(H), double(s.veg.aliveTreeCount()), ms, ms > 0 ? 1000 / ms : 0) +
                      fmt("%.0f terrain nodes, trees LOD0 %.0f LOD1 %.0f impostors %.0f, grass blades %.0f", tr.stats().nodes, vr.stats().lod0, vr.stats().lod1,
                          vr.stats().impostors, vr.stats().grassBlades));
             return true;

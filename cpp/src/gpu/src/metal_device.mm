@@ -422,13 +422,21 @@ public:
         return f;
     }
 
+    double prevFrameEnd = 0;
     void resolveSlot(int s) {
         double t0 = 1e300, t1 = 0;
         for (id<MTLCommandBuffer> cb : slotCbs[s]) {
             [cb waitUntilCompleted];
             if (cb.GPUEndTime > 0) { t0 = std::min(t0, cb.GPUStartTime); t1 = std::max(t1, cb.GPUEndTime); }
         }
-        if (!slotCbs[s].empty() && t1 > t0) frameGpuMs = (t1 - t0) * 1000.0;
+        // Apple GPUs overlap consecutive frames (the next frame's vertex work runs under this one's fragment work),
+        // so the raw start..end span over-counts when several frames are in flight. Count only the time after the
+        // previous frame finished: the sum over frames is then the real GPU busy time (throughput).
+        if (!slotCbs[s].empty() && t1 > t0) {
+            const double start = std::max(t0, prevFrameEnd);
+            frameGpuMs = (t1 > start ? t1 - start : 0) * 1000.0;
+            prevFrameEnd = t1;
+        }
         slotCbs[s].clear();
         if (counters[s] && timerMask[s]) {
             NSData* data = [counters[s] resolveCounterRange:NSMakeRange(0, kMaxTimers * 2)];
