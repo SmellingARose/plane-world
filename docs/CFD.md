@@ -26,7 +26,7 @@ Settings: `CFDSettings` (`src/core/pw/sim/cfd.h:45`), presets in `CFDSettings::f
   high to resolve, so leave LES on.
 - **Moving, craft-following domain.** A **world-axis-aligned** box that translates with the craft's centre of
   mass (Galilean frame at the craft velocity; changes of velocity enter as a uniform body force). It is laid out
-  on the first update, fitted to the craft's posed bounding box plus padding (multiples of the craft's half size)
+  on the first update: every face at least the craft's bounding radius Lc from the CoM, plus padding in multiples of Lc,
   on the dominant flow direction (or the rotor wake when hovering). dx = min(1/cellsPerMeter, main-wing chord / 16),
   then coarsened to the cell budget `maxCellsPerAxis`³ (and 2 × `maxCellsPerAxis` per axis); the effective dx is in
   the diagnostics. The settings inspector shows the effective dx under the
@@ -223,7 +223,8 @@ most cells above and below; and no wall model. Changes (`shaders/flow/lbm_common
   a cell (fluid on both sides) reflects correctly. Log-law wall model: the first fluid cell gets the eddy viscosity
   ν_w = u_τ² y / u_t that makes its wall stress ρ u_τ² (κ 0.41, E 9.8; only for y+ > 11).
 - **Resolution where it matters.** dx = min(1/cellsPerMeter, chord/16) with the main-wing chord taken from the
-  largest plate-like part; the domain is fitted to the craft's bounding box. The cell budget still applies, so Draft
+  largest plate-like part. The box keeps every face at least the bounding radius from the CoM: a box hugging the
+  body's extents blocked ~16 % of a cube's cross-section and tripled its drag. The cell budget still applies, so Draft
   stays coarse; Medium gives about 16 cells per chord on the Trainer. True local refinement (nested multi-resolution
   blocks with coarse/fine coupling) is **not implemented**: the chord-targeted uniform grid is the current answer.
 - **Forces.** Momentum exchange (Galilean invariant) per wall link, in lattice momentum per step:

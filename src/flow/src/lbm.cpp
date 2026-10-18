@@ -306,11 +306,14 @@ void LBMSolver::layout(const Vec3d& com, const Vec3d& velocity, const AeroPartPo
     int ax = 0;
     if (std::fabs(dir.y) > std::fabs(dir[ax])) ax = 1;
     if (std::fabs(dir.z) > std::fabs(dir[ax])) ax = 2;
-    // Padding in multiples of the craft's half size Lc (for a sphere this is the old L (1 + pad) box).
-    const double Lc = 0.5 * std::max(bmax.x - bmin.x, std::max(bmax.y - bmin.y, bmax.z - bmin.z));
-    Vec3d lo = -bmin + Vec3d::splat(s.padLateral * Lc), hi = bmax + Vec3d::splat(s.padLateral * Lc);
+    // Box around the craft: each face at least the bounding radius Lc from the CoM (never tighter than the body),
+    // plus padding in multiples of Lc. A box hugging the body's extents (padded by its half side) blocked ~16 % of
+    // a cube's cross-section and tripled its drag (flow.cube-drag), so blockage, not cell count, sets the size.
+    const double Lc = 0.5 * length(bmax - bmin);
+    Vec3d lo, hi;
+    for (int a = 0; a < 3; ++a) { lo[a] = std::max(-bmin[a], Lc) + s.padLateral * Lc; hi[a] = std::max(bmax[a], Lc) + s.padLateral * Lc; }
     const double up = s.padUpstream * Lc, dn = s.padDownstream * Lc;
-    if (dir[ax] >= 0) { lo[ax] = -bmin[ax] + up; hi[ax] = bmax[ax] + dn; } else { lo[ax] = -bmin[ax] + dn; hi[ax] = bmax[ax] + up; }
+    if (dir[ax] >= 0) { lo[ax] = std::max(-bmin[ax], Lc) + up; hi[ax] = std::max(bmax[ax], Lc) + dn; } else { lo[ax] = std::max(-bmin[ax], Lc) + dn; hi[ax] = std::max(bmax[ax], Lc) + up; }
     // dx: settings resolution, refined to chordCells per main-wing chord, coarsened to the cell budget.
     double dx = 1 / std::max(s.cellsPerMeter, 0.5);
     if (m.chord > 0 && chordCells > 0) dx = std::min(dx, m.chord / chordCells);
