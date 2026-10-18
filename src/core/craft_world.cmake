@@ -34,6 +34,7 @@ target_sources(pwcore PRIVATE
   src/craft/library.cpp
   src/world/document.cpp
   src/world/bake.cpp
+  src/world/presets.cpp
   src/collision/convex.cpp
   src/collision/world.cpp
   src/craft_world_selftests.cpp

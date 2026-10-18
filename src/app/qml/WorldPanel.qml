@@ -86,6 +86,7 @@ Rectangle {
                             MenuItem { text: "Rolling hills"; onTriggered: WorldModel.newWorld("hills") }
                             MenuItem { text: "Islands"; onTriggered: WorldModel.newWorld("islands") }
                             MenuItem { text: "Mountains"; onTriggered: WorldModel.newWorld("mountains") }
+                            MenuItem { text: "Manhattan (Midtown)"; onTriggered: WorldModel.newWorld("manhattan") }
                         }
                     }
                     Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0

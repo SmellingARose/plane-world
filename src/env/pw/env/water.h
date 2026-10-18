@@ -255,6 +255,9 @@ struct WaterVertex { float px, py, pz, fx, fz, edge; };
 struct WaterMesh { std::vector<WaterVertex> vertices; std::vector<uint32_t> indices; };
 WaterMesh oceanGridMesh(int segments = 192, int rings = 360);
 WaterMesh lakeMesh(double radius, int segments = 128, int rings = 64);
+/// Mesh for a lake as stored: its polygon (ear-clipped, triangles subdivided to <= ~maxEdge metres so the waves
+/// displace it), relative to l.center; a lake without a polygon falls back to the disk of l.radius.
+WaterMesh lakeMesh(const world::Lake& l, double maxEdge = 24);
 WaterMesh riverMesh(const world::River& r);
 /// Matches `WaterDraw` in shaders/env/water.slang (per draw constants).
 struct WaterDrawGPU {

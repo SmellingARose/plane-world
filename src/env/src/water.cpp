@@ -5,6 +5,7 @@
 #include <cstdio>
 #include "pw/craft/document.h"
 #include "pw/env/water.h"
+#include <array>
 #include "pw/jobs.h"
 
 namespace pw::water {
@@ -288,6 +289,62 @@ WaterMesh lakeMesh(double radius, int segs, int rings) {
             uint32_t a = a0 + uint32_t(s), a1 = a0 + uint32_t((s + 1) % segs), b = b0 + uint32_t(s), b1 = b0 + uint32_t((s + 1) % segs);
             m.indices.insert(m.indices.end(), {a, a1, b, a1, b1, b});
         }
+    }
+    return m;
+}
+
+WaterMesh lakeMesh(const world::Lake& l, double maxEdge) {
+    if (l.polygon.size() < 3) return lakeMesh(l.radius);
+    // polygon relative to the centre, counter-clockwise
+    std::vector<Vec2d> p;
+    for (auto& q : l.polygon) p.push_back({q.x - l.center.x, q.y - l.center.y});
+    double area2 = 0;
+    for (std::size_t i = 0, j = p.size() - 1; i < p.size(); j = i++) area2 += p[j].x * p[i].y - p[i].x * p[j].y;
+    if (area2 < 0) std::reverse(p.begin(), p.end());
+    auto cross = [](const Vec2d& a, const Vec2d& b, const Vec2d& c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); };
+    // ear clipping (O(n^2) is fine for hand-made outlines)
+    std::vector<int> idx(p.size());
+    for (std::size_t i = 0; i < p.size(); ++i) idx[i] = int(i);
+    std::vector<std::array<Vec2d, 3>> tris;
+    int guard = 0;
+    while (idx.size() > 3 && guard++ < 10000) {
+        bool clipped = false;
+        for (std::size_t i = 0; i < idx.size(); ++i) {
+            const Vec2d &a = p[std::size_t(idx[(i + idx.size() - 1) % idx.size()])], &b = p[std::size_t(idx[i])], &c = p[std::size_t(idx[(i + 1) % idx.size()])];
+            if (cross(a, b, c) <= 1e-9) continue;   // reflex
+            bool inside = false;
+            for (int k : idx) {
+                const Vec2d& q = p[std::size_t(k)];
+                if (&q == &a || &q == &b || &q == &c) continue;
+                if (cross(a, b, q) > 0 && cross(b, c, q) > 0 && cross(c, a, q) > 0) { inside = true; break; }
+            }
+            if (inside) continue;
+            tris.push_back({a, b, c});
+            idx.erase(idx.begin() + std::ptrdiff_t(i));
+            clipped = true;
+            break;
+        }
+        if (!clipped) break;   // degenerate outline: keep what we have
+    }
+    if (idx.size() == 3) tris.push_back({p[std::size_t(idx[0])], p[std::size_t(idx[1])], p[std::size_t(idx[2])]});
+    // subdivide each triangle into a k x k barycentric grid
+    WaterMesh m;
+    for (auto& t : tris) {
+        const double e = std::max({std::hypot(t[1].x - t[0].x, t[1].y - t[0].y), std::hypot(t[2].x - t[1].x, t[2].y - t[1].y), std::hypot(t[0].x - t[2].x, t[0].y - t[2].y)});
+        const int k = std::clamp(int(std::ceil(e / std::max(1.0, maxEdge))), 1, 96);
+        const uint32_t base = uint32_t(m.vertices.size());
+        auto at = [&](int i, int j) { return base + uint32_t(i * (k + 1) - i * (i - 1) / 2 + j); };   // row i has k + 1 - i vertices
+        for (int i = 0; i <= k; ++i)
+            for (int j = 0; j <= k - i; ++j) {
+                const double a = double(i) / k, b = double(j) / k;
+                const double x = t[0].x + (t[1].x - t[0].x) * a + (t[2].x - t[0].x) * b, z = t[0].y + (t[1].y - t[0].y) * a + (t[2].y - t[0].y) * b;
+                m.vertices.push_back({float(x), 0, float(z), 0, 0, 1});
+            }
+        for (int i = 0; i < k; ++i)
+            for (int j = 0; j < k - i; ++j) {
+                m.indices.insert(m.indices.end(), {at(i, j), at(i, j + 1), at(i + 1, j)});
+                if (j < k - i - 1) m.indices.insert(m.indices.end(), {at(i + 1, j), at(i, j + 1), at(i + 1, j + 1)});
+            }
     }
     return m;
 }

@@ -87,6 +87,7 @@ private:
     std::unique_ptr<gpu::Texture> disp_, deriv_, ground_;
     Mesh ocean_;
     std::vector<Mesh> lakes_, rivers_;
+    double lakeKey_ = 0;
     double uploadedTime_ = -1;
     std::vector<float> groundData_;
     std::vector<uint16_t> halfScratch_;

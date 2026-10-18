@@ -57,6 +57,7 @@ ApplicationWindow {
         { name: "WORLD: fly here (start a flight at the view centre)", shortcut: "Ctrl+Shift+2", run: () => { selectTab(2); if (worldLoader.item) worldLoader.item.flyHere() } },
         { name: "FLY: fly in the WORLD tab's world", shortcut: "", run: () => { App.flyInWorld = true; selectTab(1) } },
         { name: "FLY: fly over flat ground", shortcut: "", run: () => { App.flyInWorld = false; selectTab(1) } },
+        { name: "WORLD: new Manhattan (Midtown) world", shortcut: "", run: () => { selectTab(2); WorldModel.newWorld("manhattan") } },
         { name: "WORLD: new mountains world", shortcut: "", run: () => { selectTab(2); WorldModel.newWorld("mountains") } },
         { name: "EVOLVE: start / pause training", shortcut: "Ctrl+Return", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.train() } },
         { name: "EVOLVE: quick start (learns to hold altitude in ~10 s)", shortcut: "", run: () => { selectTab(3); EvolveModel.quickStart() } },

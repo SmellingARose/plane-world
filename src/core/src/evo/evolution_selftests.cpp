@@ -17,6 +17,7 @@
 #include "pw/evo/run.h"
 #include "pw/evo/selftests.h"
 #include "pw/selftest.h"
+#include "pw/world/presets.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic ignored "-Wbitwise-instead-of-logical"   // a & b: every check runs and notes its result
@@ -532,6 +533,29 @@ void registerRunTests() {
         a = {-0.5, 2.5, 40.5}; b = {0.5, 2.5, 40.5};
         ok &= expect(c, !o.hit(b, 1, &a, &b, 1, 1), "passes over a 2 m wall");
         return ok & expect(c, o.treeCount == 1 && o.objectCount == 1, "counts");
+    });
+    selftest::add("world.preset-manhattan", [](Context& c) -> bool {
+        auto d = world::presets::manhattanMidtown();
+        HeadlessObstacles o;
+        o.addObjects(d.objects);
+        const int n = int(d.objects.size());
+        bool ok = expect(c, n >= 5000 && n <= 40000, "thousands of instanced primitives (" + std::to_string(n) + ")");
+        ok &= expect(c, o.objectCount > 3000 && o.objectCount < n, "massing collides, ground / details do not (" + std::to_string(o.objectCount) + ")");
+        ok &= expect(c, d.water.lakes.size() >= 6, "rivers + Reservoir / Lake / Pond");
+        auto P = [](double u, double v, double y) { return world::presets::manhattanPoint(u, v, y); };
+        auto crosses = [&](Vec3d a, Vec3d b) { return o.hit(b, 1, &a, &b, 1, length(b - a)); };
+        // flying east along 33.5th St at 200 m through the Empire State Building's shaft
+        ok &= expect(c, crosses(P(-160, -40, 200), P(-75, -40, 200)), "the Empire State Building is solid");
+        ok &= expect(c, !crosses(P(-160, -40, 460), P(-75, -40, 460)), "...and you can fly over it");
+        ok &= expect(c, crosses(P(-420, 1000, 40), P(-420, 1040, 40)) || crosses(P(-150, 1000, 30), P(-150, 1040, 30)), "midtown blocks are solid at 30-40 m");
+        ok &= expect(c, !crosses(P(-280, 600, 3), P(-280, 1400, 3)), "Sixth Avenue is an open street at 3 m");
+        Vec3d s0 = d.spawn.position + Vec3d{0, 1, 0}, s1 = s0 + d.spawn.rotation.act(Vec3d{150, 0, 0});   // craft forward is +X
+        ok &= expect(c, !crosses(s0, s1), "the spawn (Great Lawn) has a clear 150 m run ahead");
+        const Vec3d fwd = d.spawn.rotation.act(Vec3d{1, 0, 0}), north = P(0, 1, 0) - P(0, 0, 0);
+        ok &= expect(c, dot(fwd, north) > 0.99, "the spawn faces up-town");
+        int veg = 0; if (auto v = d.vegetation.find("strokes")) veg = int(v->size());
+        ok &= expect(c, veg > 100, "Central Park tree strokes (" + std::to_string(veg) + ")");
+        return ok;
     });
     selftest::add("evolution.experiment-json", [](Context& c) -> bool {
         bool ok = true;

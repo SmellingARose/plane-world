@@ -100,6 +100,7 @@ private:
     Q_INVOKABLE void setInfo(const QString& backend, const QString& adapter, const QString& error, const QString& craft);
     Q_INVOKABLE void setStats(double fps, double gpuMs, const QString& passes, bool async);
     void stepCamera(double dt);
+    void applyEnvView();
     void cameraFrame(pw::Vec3d& eye, pw::Vec3d& target) const;
     bool pick(const QPointF& p, pw::Vec3d& hit) const;
     void setCursor3D(bool valid, const pw::Vec3d& p);

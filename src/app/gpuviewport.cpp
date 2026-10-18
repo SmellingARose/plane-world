@@ -20,6 +20,7 @@
 #pragma pop_macro("emit")
 #include "worldmodel.h"
 #include "worldviewport.h"
+#include "propbatches.h"
 using namespace pw;
 #if PW_GPU_D3D12
 #include <QtQuick/qsgtexture_platform.h>
@@ -49,7 +50,7 @@ struct ViewportNode : QSGSimpleTextureNode {
     std::unique_ptr<pw::envrender::TerrainRenderable> terrainR;
     std::unique_ptr<pw::envrender::WaterRenderable> waterR;
     std::unique_ptr<pw::envrender::VegetationRenderable> vegR;
-    std::unique_ptr<pw::render::GpuMesh> box;
+    PropBatches props;
     pw::render::MeshRenderable propsR{5};
     bool groundAdded = false, propsAdded = false;
     void dropWorld() {
@@ -390,21 +391,7 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
     const bool wantGround = !(n->terrainR && n->terrainR->ok());
     if (wantGround != n->groundAdded) { if (wantGround) n->renderer->add(&n->groundR); else n->renderer->remove(&n->groundR); n->groundAdded = wantGround; }
     if (n->scene) {
-        if (!n->box) {
-            std::vector<pw::render::MeshVertex> v; std::vector<uint32_t> idx;
-            pwUnitBoxMesh(v, idx);
-            n->box = std::make_unique<pw::render::GpuMesh>(*n->dev, v, idx, "prop-box");
-        }
-        std::vector<pw::render::MeshRenderable::Item> items;
-        for (auto& o : WorldModel::instance()->document().objects) {
-            pw::render::MeshRenderable::Item it;
-            it.transform = o.transform;
-            it.scale = {float(o.scale.size() > 0 ? o.scale[0] : 1), float(o.scale.size() > 1 ? o.scale[1] : 1), float(o.scale.size() > 2 ? o.scale[2] : 1)};
-            it.albedo = o.breakable ? Float3{0.55f, 0.33f, 0.18f} : Float3{0.62f, 0.62f, 0.6f};
-            it.roughness = 0.8f;
-            items.push_back(it);
-        }
-        n->propsR.setBatches({{n->box.get(), std::move(items)}});
+        n->props.update(*n->dev, n->propsR, WorldModel::instance()->document().objects, WorldModel::instance()->objectsVersion());
         if (!n->propsAdded) { n->renderer->add(&n->propsR); n->propsAdded = true; }
     }
 
@@ -479,6 +466,8 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
         m_frames = 0;
         QString passes;
         for (const auto& p : n->renderer->passTimes()) passes += QString::fromStdString(p.name) + QStringLiteral(" %1  ").arg(p.ms, 0, 'f', 2);
+        if (qEnvironmentVariableIsSet("PW_PERF_LOG"))   // perf reviews: frame rate and per-pass GPU times on stdout
+            qInfo("fly viewport: %.1f fps, gpu %.2f ms | %s", f, n->renderer->lastGpuMs(), qPrintable(passes));
         QMetaObject::invokeMethod(this, "setStats", Qt::QueuedConnection, Q_ARG(double, f), Q_ARG(double, n->renderer->lastGpuMs()),
                                   Q_ARG(QString, passes.trimmed()), Q_ARG(bool, n->renderer->usesAsyncCompute()));
     }

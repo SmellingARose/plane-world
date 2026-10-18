@@ -18,7 +18,7 @@ C++20 core, Qt 6 Quick UI, Metal and Direct3D 12 renderers with shaders written 
 - **FLY:** 1 kHz physics, chase / orbit / cockpit cameras, per-output sliders, HUD, aero model picker, CFD settings
   and diagnostics, flow slice overlay, and the EQUATIONS panel (every fast-model equation with live values).
 - **WORLD:** flat, procedural (GPU erosion), heightmap or real-world terrain; sculpt and paint; ocean, lakes, rivers,
-  vegetation, props and breakables; sky and wind.
+  vegetation, props and breakables; sky and wind. New → *Manhattan (Midtown)* builds a detailed, flyable Midtown.
 - **EVOLVE:** GA, CMA-ES, sep-CMA-ES, OpenAI-ES, NEAT, MAP-Elites, novelty search or your own algorithm in JavaScript;
   neural controllers, craft designs or both; headless parallel training, charts, replays in the viewport.
 
@@ -107,6 +107,7 @@ The app takes `--tab`, `--color-scheme`, `--size WxH`, `--command "<palette entr
 | [EVOLUTION.md](docs/EVOLUTION.md) | EVOLVE, experiment format, JavaScript API, algorithms, reward shaping |
 | [SCRIPTING.md](docs/SCRIPTING.md) | JavaScript engines (JavaScriptCore, QuickJS) and their differences |
 | [CRAFTS.md](docs/CRAFTS.md) | Bundled crafts and the ducted-rocket design |
+| [WORLDS.md](docs/WORLDS.md) | World presets (incl. Manhattan), prop params (shape / colour / facade pattern / collide) |
 | [CONTROLS.md](docs/CONTROLS.md) | Keys → axes → controller → outputs: mix tables, the multirotor flight controller, adding a controller |
 | [PERF.md](docs/PERF.md) | Benchmarks and methodology |
 | [PACKAGING.md](docs/PACKAGING.md) | .dmg / .msi, signing, CI release |

@@ -1,4 +1,6 @@
 #include "worldviewport.h"
+#include "propbatches.h"
+#include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QQuickWindow>
@@ -34,7 +36,8 @@ struct WorldViewportNode : QSGSimpleTextureNode {
     std::unique_ptr<pw::envrender::TerrainRenderable> terrainR;
     std::unique_ptr<pw::envrender::WaterRenderable> waterR;
     std::unique_ptr<pw::envrender::VegetationRenderable> vegR;
-    std::unique_ptr<pw::render::GpuMesh> box;
+    PropBatches props;
+    bool propsAdded = false;
     pw::render::MeshRenderable propsR{5};
     std::unique_ptr<pw::render::CraftRenderable> replay;
     uint64_t replayVersion = ~0ull, idleVersion = ~0ull;
@@ -74,6 +77,7 @@ WorldViewport::WorldViewport(QQuickItem* parent) : QQuickItem(parent) {
     const auto& sp = WorldModel::instance()->document().spawn.position;
     m_goal.tx = sp.x; m_goal.tz = sp.z;
     m_cur = m_goal;
+    applyEnvView();
     m_clock.start(); m_fpsClock.start();
     connect(WorldModel::instance(), &WorldModel::skyChanged, this, [this] { setTimeOfDay(WorldModel::instance()->timeOfDay()); });
     m_timeOfDay = WorldModel::instance()->timeOfDay();
@@ -83,12 +87,26 @@ WorldViewport::WorldViewport(QQuickItem* parent) : QQuickItem(parent) {
         if (!m_editWorld || !sc || sc.get() == m_lastScene) return;
         m_lastScene = sc.get();
         const auto b = sc->terrain.bounds();
-        const double relief = b.max.y - b.min.y;
-        if (!(relief > 50)) return;
-        m_goal.tx = 0.5 * (b.min.x + b.max.x); m_goal.tz = 0.5 * (b.min.z + b.max.z);
-        m_goal.dist = std::clamp(relief * 2.2, 400.0, 6000.0); m_goal.pitch = 0.45; m_goal.height = 0;
+        double relief = b.max.y - b.min.y;
+        for (const auto& o : WorldModel::instance()->document().objects)   // a city on flat ground counts as relief too
+            if (o.scale.size() > 1) relief = std::max(relief, o.transform.position.y + 0.5 * o.scale[1] - b.min.y);
+        if (relief > 50) {
+            m_goal.tx = 0.5 * (b.min.x + b.max.x); m_goal.tz = 0.5 * (b.min.z + b.max.z);
+            m_goal.dist = std::clamp(relief * 2.2, 400.0, 6000.0); m_goal.pitch = 0.45; m_goal.height = 0;
+        }
+        applyEnvView();
         update();
     });
+}
+
+// PW_WORLD_VIEW="x,z,distance,pitch,yaw[,height]" (screenshots / reviews): pins the orbit camera, re-applied after
+// every new scene so a world opened by --command still lands on the requested view.
+void WorldViewport::applyEnvView() {
+    const QStringList v = qEnvironmentVariable("PW_WORLD_VIEW").split(',');
+    if (v.size() < 5) return;
+    m_goal.tx = v[0].toDouble(); m_goal.tz = v[1].toDouble(); m_goal.dist = v[2].toDouble();
+    m_goal.pitch = v[3].toDouble(); m_goal.yaw = v[4].toDouble(); m_goal.height = v.size() > 5 ? v[5].toDouble() : 0;
+    m_cur = m_goal;
 }
 
 void WorldViewport::setInfo(const QString& b, const QString& a, const QString& e, const QString& c) {
@@ -249,6 +267,7 @@ void WorldViewport::releaseResources() {
 }
 
 QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
+    QElapsedTimer cpuT; cpuT.start();
     auto* n = static_cast<WorldViewportNode*>(old);
     QQuickWindow* win = window();
     const QSize px = (size() * win->effectiveDevicePixelRatio()).toSize();
@@ -306,30 +325,14 @@ QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
         else if (!n->waterR->ok()) err = QString::fromStdString("water: " + n->waterR->error());
         else if (!n->vegR->ok()) err = QString::fromStdString("vegetation: " + n->vegR->error());
         if (n->terrainR->ok()) n->renderer->add(n->terrainR.get());
-        if (n->waterR->ok()) n->renderer->add(n->waterR.get());
-        if (n->vegR->ok()) n->renderer->add(n->vegR.get());
+        if (n->waterR->ok() && !qEnvironmentVariableIsSet("PW_NOWATER")) n->renderer->add(n->waterR.get());
+        if (n->vegR->ok() && !qEnvironmentVariableIsSet("PW_NOVEG")) n->renderer->add(n->vegR.get());
         if (!err.isEmpty()) QMetaObject::invokeMethod(this, "setInfo", Qt::QueuedConnection, Q_ARG(QString, m_backend), Q_ARG(QString, m_adapter), Q_ARG(QString, err), Q_ARG(QString, m_craft));
         n->scene = scene;
     }
-    // props as boxes (unit cube scaled per object)
-    if (!n->box) {
-        std::vector<pw::render::MeshVertex> v; std::vector<uint32_t> idx;
-        pwUnitBoxMesh(v, idx);
-        n->box = std::make_unique<pw::render::GpuMesh>(*n->dev, v, idx, "prop-box");
-        n->renderer->add(&n->propsR);
-    }
-    {
-        std::vector<pw::render::MeshRenderable::Item> items;
-        for (auto& o : wm->document().objects) {
-            pw::render::MeshRenderable::Item it;
-            it.transform = o.transform;
-            it.scale = {float(o.scale.size() > 0 ? o.scale[0] : 1), float(o.scale.size() > 1 ? o.scale[1] : 1), float(o.scale.size() > 2 ? o.scale[2] : 1)};
-            it.albedo = o.breakable ? Float3{0.55f, 0.33f, 0.18f} : Float3{0.62f, 0.62f, 0.6f};
-            it.roughness = 0.8f;
-            items.push_back(it);
-        }
-        n->propsR.setBatches({{n->box.get(), std::move(items)}});
-    }
+    // props: instanced boxes / cylinders / cones (rebuilt when the object list changes)
+    if (!n->propsAdded) { n->renderer->add(&n->propsR); n->propsAdded = true; }
+    n->props.update(*n->dev, n->propsR, wm->document().objects, wm->objectsVersion());
     // replay (EVOLVE): the replayed candidate replaces the spawn craft
     uint64_t ver = 0;
     const pw::craft::CraftDocument* rc = m_showReplay ? EvolveModel::instance()->replayCraft(ver) : nullptr;
@@ -405,6 +408,7 @@ QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
     n->renderer->environment.fogDensity = wm->fogDensity();
     n->renderer->render(cam, t);
     n->markDirty(QSGNode::DirtyMaterial);
+    const double cpuMs = cpuT.nsecsElapsed() / 1e6;
 
     ++m_frames;
     if (m_fpsClock.elapsed() >= 500) {
@@ -412,6 +416,8 @@ QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
         m_frames = 0;
         QString passes;
         for (const auto& p : n->renderer->passTimes()) passes += QString::fromStdString(p.name) + QStringLiteral(" %1  ").arg(p.ms, 0, 'f', 2);
+        if (qEnvironmentVariableIsSet("PW_PERF_LOG"))   // perf reviews: frame rate and per-pass GPU times on stdout
+            qInfo("world viewport: %.1f fps, cpu %.2f ms, gpu %.2f ms | %s", f, cpuMs, n->renderer->lastGpuMs(), qPrintable(passes));
         QMetaObject::invokeMethod(this, "setStats", Qt::QueuedConnection, Q_ARG(double, f), Q_ARG(double, n->renderer->lastGpuMs()),
                                   Q_ARG(QString, passes.trimmed()), Q_ARG(bool, n->renderer->usesAsyncCompute()));
     }

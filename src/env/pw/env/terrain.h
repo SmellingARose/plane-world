@@ -219,6 +219,12 @@ private:
     static void finishBase(HeightField& f);
     GridRect brushRect(const Vec3d& c, double radius) const;
     static std::shared_ptr<HeightField> makeFlatField(float level);
+public:
+    /// Flat terrain only: writes sculpt edits (spec.params["edits"]) that lower the ground `depth` metres under every
+    /// polygon lake (plus the samples within half a cell of its outline), so lakes and rivers on flat ground get a
+    /// real bed instead of a few centimetres of foam. Returns false (and leaves spec alone) for other terrain kinds.
+    static bool carveLakeBeds(world::TerrainSpec& spec, const std::vector<world::JsonObject>& lakes, double depth = 8);
+private:
 
     std::shared_ptr<HeightField> field_;
     std::vector<std::shared_ptr<HeightField>> retired_;   // keeps replaced fields alive for in-flight readers

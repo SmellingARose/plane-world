@@ -65,14 +65,59 @@ float3 groundPattern(float3 rel, float3 base)
     return c;
 }
 
+float hash2(float2 p) { return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453); }
+
+// Building facades in world space (props with pattern 2 = punched windows, 3 = glass curtain wall). Floors and bays
+// come from the world position along the wall, so every box of any size gets consistent storeys; distant walls fade
+// to the average so the grid does not alias.
+void facadePattern(float3 rel, float3 N, bool glass, inout float3 albedo, inout float rough, inout float metal, inout float emit)
+{
+    if (abs(N.y) > 0.5) { albedo *= 0.8; return; }   // roofs: a little darker (tar / gravel)
+    float3 w = rel + gFrame.cameraWorld.xyz;
+    float3 T = normalize(cross(float3(0.0, 1.0, 0.0), N));
+    float s = dot(w, T), y = w.y;
+    float floorH = glass ? 4.0 : 3.6, bayW = glass ? 1.5 : 3.2;
+    float2 cell = float2(floor(s / bayW), floor(y / floorH));
+    float fx = frac(s / bayW), fy = frac(y / floorH);
+    float2 fw = float2(fwidth(s / bayW), fwidth(y / floorH));
+    float fade = saturate(max(fw.x, fw.y) * 2.0 - 0.5);   // 0 near, 1 when a bay is ~1 px
+    float r = hash2(cell + floor(w.xz / 37.0));
+    if (glass) {
+        float mull = max(1.0 - smoothstep(0.0, 0.06 + fw.x, min(fx, 1.0 - fx)), 1.0 - smoothstep(0.0, 0.05 + fw.y, min(fy, 1.0 - fy)));
+        float spandrel = smoothstep(0.78, 0.8, fy) * 0.6;
+        float3 pane = albedo * (0.85 + 0.3 * r);
+        float3 c = lerp(pane, albedo * 0.45, spandrel);
+        c = lerp(c, float3(0.55, 0.57, 0.6), mull * 0.8 * (1.0 - fade));
+        albedo = lerp(c, albedo * 0.9, fade);
+        rough = lerp(0.08, rough, mull);
+        metal = max(metal, 0.3 * (1.0 - mull));
+    } else {
+        float2 lo = float2(0.2, 0.28), hi = float2(0.8, 0.88);
+        float wx = smoothstep(lo.x - fw.x, lo.x + fw.x, fx) * (1.0 - smoothstep(hi.x - fw.x, hi.x + fw.x, fx));
+        float wy = smoothstep(lo.y - fw.y, lo.y + fw.y, fy) * (1.0 - smoothstep(hi.y - fw.y, hi.y + fw.y, fy));
+        float win = wx * wy;
+        float3 glassC = float3(0.05, 0.06, 0.075) * (0.7 + 0.8 * r);
+        float3 c = lerp(albedo, glassC, win);
+        if (y < 4.5) c = lerp(c, float3(0.04, 0.045, 0.05), 0.75 * wx);   // storefronts
+        float cornice = smoothstep(0.92, 0.95, fy) * 0.12;
+        c *= 1.0 - cornice;
+        albedo = lerp(c, lerp(albedo, glassC, 0.35), fade);
+        rough = lerp(rough, 0.15, win * (1.0 - fade));
+        emit += win * (1.0 - fade) * step(0.985, r) * 0.6;   // the odd lit window
+    }
+}
+
 [shader("fragment")] float4 meshFragment(MeshVOut i) : SV_Target
 {
     float3 N = normalize(i.normal);
     float3 albedo = i.color.rgb;
+    float rough = i.color.a, metal = i.material.x, emit = 0.0;
     if (i.material.z > 0.5 && i.material.z < 1.5) albedo = groundPattern(i.rel, albedo);
+    else if (i.material.z > 1.5 && i.material.z < 3.5) facadePattern(i.rel, N, i.material.z > 2.5, albedo, rough, metal, emit);
     AerialSample ap = aerialLookup(gAerialL, gAerialT, gAerialS, i.rel);
-    float3 c = shadeSurfaceT(gSkyLUT, gShadowMap, i.rel, N, albedo, i.color.a, i.material.x, 1.0, ap.sunT);
+    float3 c = shadeSurfaceT(gSkyLUT, gShadowMap, i.rel, N, albedo, rough, metal, 1.0, ap.sunT);
     c += i.color.rgb * i.material.y;                            // emissive
+    c += float3(1.0, 0.85, 0.6) * emit;
     c = c * ap.T + ap.L;
     return float4(c, 1.0);
 }

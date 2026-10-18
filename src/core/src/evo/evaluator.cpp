@@ -24,6 +24,7 @@ void HeadlessObstacles::addTrees(const std::vector<TreeProxy>& proxies) {
 }
 void HeadlessObstacles::addObjects(const std::vector<world::WorldObject>& objs) {
     for (auto& d : objs) {
+        if (auto c = d.params.find("collide"); c && !c->boolean(true)) continue;   // e.g. a flat park slab
         Vec3d s = d.scale.size() == 3 ? Vec3d{d.scale[0], d.scale[1], d.scale[2]} : Vec3d{1, 1, 1};
         Vec3d he = s * 0.5;
         std::string a = d.asset ? *d.asset : "";

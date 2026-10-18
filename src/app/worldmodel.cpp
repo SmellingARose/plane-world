@@ -1,4 +1,5 @@
 #include "worldmodel.h"
+#include "pw/world/presets.h"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -49,6 +50,7 @@ WorldModel::WorldModel(QObject* parent) : QObject(parent) {
     m_scene->terrain.setFlat(0);
     m_scene->veg.enabled = false;
     m_scene->veg.generate(&m_scene->terrain, {}, 1);
+    connect(this, &WorldModel::objectsChanged, this, [this] { m_objectsVersion.fetch_add(1, std::memory_order_acq_rel); });
     m_doc.name = "Untitled world";
     refreshLibrary();
     connect(&m_timer, &QTimer::timeout, this, &WorldModel::tick);
@@ -190,7 +192,10 @@ void WorldModel::emitAll() {
 void WorldModel::newWorld(const QString& preset) {
     world::WorldDocument d;
     d.name = "Untitled world";
-    if (preset == "flat") {
+    if (preset == "manhattan") {
+        d = world::presets::manhattanMidtown();
+        pw::terrain::TerrainSystem::carveLakeBeds(d.terrain, d.water.lakes);   // rivers and park lakes get a bed
+    } else if (preset == "flat") {
         d.terrain.kind = world::TerrainKind::Flat;
     } else {
         d.terrain.kind = world::TerrainKind::Procedural;

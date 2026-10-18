@@ -117,6 +117,8 @@ public:
 
     std::shared_ptr<WorldScene> scene() const { return m_scene; }
     const pw::world::WorldDocument& document() const { return m_doc; }
+    /// Bumped on every objectsChanged (the viewports rebuild their prop instance batches only when it moves).
+    uint64_t objectsVersion() const { return m_objectsVersion.load(std::memory_order_acquire); }
     /// Snapshot of the current world as a document (terrain spec + edits, water, vegetation, objects, sky).
     pw::world::WorldDocument currentDocument() const;
     /// Directory the current file lives in ("" for unsaved), for relative heightmap paths.
@@ -188,7 +190,7 @@ public:
     void setFogDensity(double v);
 
     // file
-    Q_INVOKABLE void newWorld(const QString& preset);   // "flat" | "hills" | "islands" | "mountains"
+    Q_INVOKABLE void newWorld(const QString& preset);   // "flat" | "hills" | "islands" | "mountains" | "manhattan"
     Q_INVOKABLE bool open(const QString& pathOrUrl);
     Q_INVOKABLE bool save();
     Q_INVOKABLE bool saveAs(const QString& pathOrUrl);
@@ -254,6 +256,7 @@ private:
     void applyVegetationParams(bool regenerate);
 
     std::shared_ptr<WorldScene> m_scene;
+    std::atomic<uint64_t> m_objectsVersion{1};
     pw::world::WorldDocument m_doc;            // name, objects, environment, spawn, extra (terrain/water/veg live in the scene)
     QString m_path, m_status, m_busyText;
     bool m_dirty = false, m_busy = false;

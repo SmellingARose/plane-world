@@ -470,6 +470,43 @@ world::JsonObject TerrainSystem::encodeEdits() const {
     return out;
 }
 
+bool TerrainSystem::carveLakeBeds(world::TerrainSpec& spec, const std::vector<world::JsonObject>& lakeJson, double depth) {
+    if (spec.kind != world::TerrainKind::Flat || lakeJson.empty()) return false;
+    const auto f = makeFlatField(0);
+    std::vector<world::Lake> lakes;
+    for (auto& j : lakeJson) lakes.push_back(world::Lake::fromJson(j));
+    const double half = f->spacing * 0.5;
+    const std::size_t n = std::size_t(f->width) * std::size_t(f->height);
+    std::vector<uint8_t> raw(n * 2, 0);
+    bool any = false;
+    for (int y = 0; y < f->height; ++y)
+        for (int x = 0; x < f->width; ++x) {
+            const double wx = f->origin.x + x * f->spacing, wz = f->origin.y + y * f->spacing;
+            bool wet = false;
+            for (const auto& l : lakes) {
+                for (int k = 0; k < 9 && !wet; ++k)   // the sample or a point half a cell away lies in the lake
+                    wet = l.contains(wx + (k % 3 - 1) * half, wz + (k / 3 - 1) * half);
+                if (wet) break;
+            }
+            if (!wet) continue;
+            const uint16_t h = env::floatToHalf(float(-depth));
+            const std::size_t i = std::size_t(y) * std::size_t(f->width) + std::size_t(x);
+            raw[i * 2] = uint8_t(h); raw[i * 2 + 1] = uint8_t(h >> 8);
+            any = true;
+        }
+    if (!any) return false;
+    std::vector<uint8_t> z;
+    if (!env::deflateRaw(raw.data(), raw.size(), z)) return false;
+    world::JsonObject o;
+    o.set("w", Value::number(f->width)); o.set("h", Value::number(f->height));
+    o.set("f16zlib", Value::string(geo::base64Encode(z.data(), z.size())));
+    world::JsonObject p;
+    for (auto& [k, v] : spec.params.kv) if (k != "edits") p.set(k, v);
+    p.set("edits", o.toValue());
+    spec.params = p;
+    return true;
+}
+
 bool TerrainSystem::applyEdits(const world::JsonObject& e) {
     HeightField& f = *field_;
     std::size_t n = std::size_t(f.width) * std::size_t(f.height);

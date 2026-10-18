@@ -244,9 +244,16 @@ void WaterRenderable::prepare(render::FrameContext& f) {
         keep.push_back(std::move(zr));
     }
     zones_ = std::move(keep);
-    if (lakes_.size() != water_.lakes().size()) {
+    // Lake meshes follow the lakes' outlines (rebuilt when a lake is added, removed, moved or reshaped).
+    double lakeKey = double(water_.lakes().size());
+    for (auto& l : water_.lakes()) {
+        lakeKey = lakeKey * 1.000123 + l.center.x * 0.37 + l.center.y * 0.61 + l.radius * 0.11 + double(l.polygon.size());
+        for (auto& q : l.polygon) lakeKey += (q.x * 0.013 + q.y * 0.017);
+    }
+    if (lakes_.size() != water_.lakes().size() || lakeKey != lakeKey_) {
         lakes_.clear();
-        for (auto& l : water_.lakes()) lakes_.push_back(makeMesh(water::lakeMesh(l.radius), "lake"));
+        for (auto& l : water_.lakes()) lakes_.push_back(makeMesh(water::lakeMesh(l), "lake"));
+        lakeKey_ = lakeKey;
     }
     if (rivers_.size() != water_.rivers().size()) {
         rivers_.clear();
