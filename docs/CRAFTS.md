@@ -77,15 +77,17 @@ offset itself.
 ### Experiments
 
 The controller in both is a JS flight controller: position → lean angle → attitude PD → quad mixer, with an
-altitude PD and yaw-rate damping. The mixer signs were measured on the craft (more front thrust pitches up, more
-left thrust raises the left side, more CW-pair thrust gives negative yaw rate), so all gains are ≥ 0.
+altitude PD and yaw-rate damping. Mixer signs: more front thrust pitches up, more left thrust raises the left side,
+more CW-pair thrust (FL, RR) gives negative yaw rate, so the yaw term enters with a minus sign and all gains are ≥ 0.
+(Before the `rotorSpeedLaw` fix rotor drag torque did not change with throttle, so the yaw sign was never exercised
+and had been wrong.)
 
 - `examples/experiments/drone-hover.json`: climb to 10 m and hold position in wind up to 3 m/s with turbulence.
-  8 genes, CMA-ES, 24 × 30 generations. Fitness goes from −8.8 (gen 0) to +11.6, with 13.4 s of the 15 s episode
-  inside the ±1 m / 1.5 m hover box. About 10 s wall time (M4, 10 workers).
+  8 genes, CMA-ES, 24 × 30 generations. Best fitness 11.7 (population mean 11.5), with 13.8 s of the 15 s episode
+  inside the ±1 m / 1.5 m hover box. About 15 s wall time (M4).
 - `examples/experiments/drone-race.json`: reach (100, 15, 40) m (109 m away) as fast as possible, then stop and
-  hold there. 9 genes (adds the lean limit). Fitness goes from −8.0 (never arrives) to +16.7: it arrives after
-  5.3 s and then holds. About 11 s wall time.
+  hold there. 9 genes (adds the lean limit, starting at 45°). Fitness goes from −8.0 (never arrives) to +15.2: it arrives
+  after about 5.6 s and then holds. About 20 s wall time (M4).
 
 ## Ducted rocket (`examples/crafts/ducted-rocket.json`)
 
