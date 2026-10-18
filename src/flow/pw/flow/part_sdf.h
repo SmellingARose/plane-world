@@ -16,15 +16,21 @@ namespace pw::flow {
 struct PartSDF {
     int partIndex = 0;
     Float3 origin;                 // part-local corner of cell (0,0,0), metres
-    float h = 0;                   // cell size, metres
+    float h = 0;                   // smallest cell size, metres
+    Float3 h3;                     // cell size per part axis (anisotropic: thin axes get finer cells), metres
     int dims[3] = {0, 0, 0};
     std::vector<float> values;     // signed distance at cell centres (metres, < 0 inside)
     bool thin = false;             // no interior cell (open panel / sheet)
     float boundRadius = 0;         // max |vertex| in the part frame + band
+    Float3 meshLo, meshHi;         // part-local bounds of the mesh
+    float band = 0;                // smallest distance band kept around the surface (m)
     float minValue = 0;
 
-    /// Grid with cell size ~ targetH (coarsened so the longest axis has at most maxCells cells). nullopt for < 1 triangle.
-    static std::optional<PartSDF> build(const sim::AeroPartGeometry& g, float targetH, int maxCells = 64);
+    /// Grid with cell size ~ targetH per axis, refined on axes shorter than 10 cells (so a wing's thickness is
+    /// resolved even when it is thinner than a lattice cell), coarsened so no axis exceeds maxCells and the grid stays
+    /// under ~1.5M cells. `band` (m) = minimum distance band kept outside the surface (default 2 cells per axis).
+    /// nullopt for < 1 triangle.
+    static std::optional<PartSDF> build(const sim::AeroPartGeometry& g, float targetH, int maxCells = 192, float band = 0);
     /// Trilinear sample (part-local metres), same formula as the GPU (for tests).
     float sample(const Float3& local) const;
 };

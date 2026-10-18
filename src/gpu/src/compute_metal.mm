@@ -126,6 +126,7 @@ public:
         if (last.status == MTLCommandBufferStatusError) err = last.error ? [[last.error localizedDescription] UTF8String] : "command buffer failed";
         last = nil;
     }
+    bool isIdle() override { return !last || last.status >= MTLCommandBufferStatusCompleted; }
     double lastGpuMs() const override { return lastMs; }
 };
 }

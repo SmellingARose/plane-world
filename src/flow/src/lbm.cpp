@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -25,49 +26,87 @@ constexpr int kMaxRotors = 16;
 constexpr int kHeader = 10;                       // float4 params
 constexpr int kRotorBase = kHeader;               // 3 float4 per rotor
 constexpr int kPartBase = kRotorBase + 3 * kMaxRotors;
-constexpr int kPartStride = 7;
+constexpr int kPartStride = 8;
 constexpr int kRedHeader = 8;
 constexpr double kFixed = 16777216.0;             // 2^24, FIXED_SCALE in the shader
+constexpr int kGroup = 64;                        // [numthreads(64,1,1)] of the per-cell kernels (wave32/64, Apple SIMD 32)
 
 struct DispatchConst { int32_t i[4]; float f[4]; };
 static_assert(sizeof(DispatchConst) == 32, "Dispatch layout");
 
 struct Kernels {
-    int voxelize = 0, init = 0, rescale = 0, clear = 0, collide = 0, stream = 0, mass = 0, sample = 0, slice = 0, particles = 0;
-    bool ok() const { return voxelize && init && rescale && clear && collide && stream && mass && sample && slice && particles; }
+    // f-touching kernels in the storage precision in use; the rest are shared
+    int voxelize = 0, init = 0, rescale = 0, step = 0;
+    int clear = 0, mass = 0, sample = 0, slice = 0, particles = 0;
+    bool fp16 = false;
+    bool ok() const { return voxelize && init && rescale && step && clear && mass && sample && slice && particles; }
 };
 
-/// Kernel handles per (context, velocity set). Thread-safe.
+bool envOn(const char* n) { const char* v = std::getenv(n); return v && *v && *v != '0'; }
+
+/// Kernel handles per (context, velocity set). fp16 population storage when the device can load the 16-bit kernels
+/// (D3D12: SM 6.2 native 16-bit types; Metal: always) unless PW_FLOW_FP32=1; fp32 otherwise. Thread-safe.
 bool kernelsFor(gpu::ComputeContext& c, int q, Kernels& out, std::string& err) {
     static std::mutex m;
     static std::map<std::pair<gpu::ComputeContext*, int>, Kernels> cache;
     std::lock_guard<std::mutex> lk(m);
     auto key = std::make_pair(&c, q);
     if (auto it = cache.find(key); it != cache.end()) { out = it->second; return true; }
-    const std::string module = q == 27 ? "lbm27" : "lbm19";
-    auto load = [&](const char* entry, int tx, int ty, int tz) -> int {
+    auto load = [&](const std::string& module, const char* entry, int tx, int ty, int tz, std::string& e) -> int {
         std::string blob = c.backend() == gpu::Backend::Metal ? module + ".metal" : module + "." + entry;
         const shaders::Blob* b = flow_shaders::find(blob.c_str());
-        if (!b) { if (err.empty()) err = "shader blob missing: " + blob; return 0; }
+        if (!b) { if (e.empty()) e = "shader blob missing: " + blob; return 0; }
         int k = c.loadKernel(entry, b->data, b->size, tx, ty, tz);
-        if (!k && err.empty()) err = c.lastError();
+        if (!k && e.empty()) e = c.lastError();
         return k;
     };
+    const std::string m32 = q == 27 ? "lbm27" : "lbm19", m16 = m32 + "h";
     Kernels k;
-    k.voxelize = load("lbmVoxelize", 32, 2, 2);
-    k.init = load("lbmInit", 128, 1, 1);
-    k.rescale = load("lbmRescale", 128, 1, 1);
-    k.clear = load("lbmClear", 128, 1, 1);
-    k.collide = load("lbmCollide", 32, 2, 2);
-    k.stream = load("lbmStream", 32, 2, 2);
-    k.mass = load("lbmMass", 128, 1, 1);
-    k.sample = load("lbmSample", 64, 1, 1);
-    k.slice = load("lbmSlice", 16, 16, 1);
-    k.particles = load("lbmParticles", 128, 1, 1);
+    k.clear = load(m32, "lbmClear", 128, 1, 1, err);
+    k.mass = load(m32, "lbmMass", 128, 1, 1, err);
+    k.sample = load(m32, "lbmSample", 64, 1, 1, err);
+    k.slice = load(m32, "lbmSlice", 16, 16, 1, err);
+    k.particles = load(m32, "lbmParticles", 128, 1, 1, err);
+    if (!envOn("PW_FLOW_FP32")) {
+        std::string e16;
+        Kernels h;
+        h.voxelize = load(m16, "lbmVoxelize", kGroup, 1, 1, e16);
+        h.init = h.voxelize ? load(m16, "lbmInit", kGroup, 1, 1, e16) : 0;
+        h.rescale = h.init ? load(m16, "lbmRescale", kGroup, 1, 1, e16) : 0;
+        h.step = h.rescale ? load(m16, "lbmStep", kGroup, 1, 1, e16) : 0;
+        if (h.voxelize && h.init && h.rescale && h.step) {
+            k.voxelize = h.voxelize; k.init = h.init; k.rescale = h.rescale; k.step = h.step; k.fp16 = true;
+        }
+    }
+    if (!k.fp16) {
+        k.voxelize = load(m32, "lbmVoxelize", kGroup, 1, 1, err);
+        k.init = load(m32, "lbmInit", kGroup, 1, 1, err);
+        k.rescale = load(m32, "lbmRescale", kGroup, 1, 1, err);
+        k.step = load(m32, "lbmStep", kGroup, 1, 1, err);
+    }
     if (!k.ok()) return false;
     cache[key] = k;
     out = k;
     return true;
+}
+
+/// Main-wing chord (m) from the part meshes: the largest plate-like part (extents e0 <= e1 <= e2 with e2 >= 3 e1 and
+/// e0 <= 0.5 e1 (span >> chord > thickness + dihedral rise) gives chord = e1. 0 when there is none.
+double mainWingChord(const std::vector<sim::AeroPartGeometry>& parts) {
+    double bestArea = 0, chord = 0;
+    for (const auto& g : parts) {
+        if (g.isRotor || g.positions.size() < 3) continue;
+        float lo[3] = {g.positions[0].x, g.positions[0].y, g.positions[0].z}, hi[3] = {lo[0], lo[1], lo[2]};
+        for (const auto& p : g.positions) {
+            const float v[3] = {p.x, p.y, p.z};
+            for (int a = 0; a < 3; ++a) { lo[a] = std::min(lo[a], v[a]); hi[a] = std::max(hi[a], v[a]); }
+        }
+        double e[3] = {double(hi[0] - lo[0]), double(hi[1] - lo[1]), double(hi[2] - lo[2])};
+        std::sort(e, e + 3);
+        if (e[1] <= 1e-3 || e[2] < 3 * e[1] || e[0] > 0.5 * e[1]) continue;
+        if (e[1] * e[2] > bestArea) { bestArea = e[1] * e[2]; chord = e[1]; }
+    }
+    return chord;
 }
 
 inline Float4 f4(double x, double y, double z, double w) { return {float(x), float(y), float(z), float(w)}; }
@@ -103,6 +142,7 @@ struct LBMSolver::Impl {
     int maxPartIndex = 0;
     int sampleCap = 0;
     int gridsBuf = 0, sceneBuf = 0, redBuf = 0;
+    double chord = 0;                   // main-wing chord (m), 0 = none
     // lattice
     bool laidOut = false;
     int N = 0;
@@ -111,7 +151,9 @@ struct LBMSolver::Impl {
     Vec3d frameVel;
     float pendingRescale = 1;
     int32_t stepCounter = 0;
-    int fA = 0, fB = 0, macroA = 0, macroB = 0, geo = 0, links = 0;
+    uint32_t lbmStep = 0;               // global LBM step index (its parity selects the esoteric-pull slots)
+    int wallCap = 0;                    // wall slots (near-wall cells with an exact Bouzidi history)
+    int fA = 0, wallF = 0, macroA = 0, macroB = 0, geo = 0, links = 0;
     bool curIsA = true;
     std::vector<Float4> scene;          // CPU mirror (header + rotors + parts + samples)
     std::vector<uint32_t> red;          // CPU copy of the reduction buffer
@@ -139,7 +181,7 @@ struct LBMSolver::Impl {
     float particleSteps = 0;
 
     void destroyLattice(gpu::ComputeContext* c) {
-        for (int* b : {&fA, &fB, &macroA, &macroB, &geo, &links}) if (*b) { c->destroyBuffer(*b); *b = 0; }
+        for (int* b : {&fA, &wallF, &macroA, &macroB, &geo, &links}) if (*b) { c->destroyBuffer(*b); *b = 0; }
     }
 };
 
@@ -176,17 +218,20 @@ bool LBMSolver::configure(const std::vector<sim::AeroPartGeometry>& parts, const
     kernelsOK_ = loadKernels(s.lattice == CFDLattice::D3Q27 ? 27 : 19);
     if (!kernelsOK_) return fail("CFD unavailable: " + lastError_);
     Impl& m = *m_;
-    const float dxTarget = float(1 / std::max(s.cellsPerMeter, 0.5));
+    m.chord = mainWingChord(parts);
+    double dxT = 1 / std::max(s.cellsPerMeter, 0.5);
+    if (m.chord > 0 && chordCells > 0) dxT = std::min(dxT, m.chord / chordCells);
+    const float dxTarget = float(dxT);
     m.sdfs.clear(); m.slotPart.clear();
     for (const auto& g : parts) {
         if (g.isRotor) continue;
-        if (auto sdf = PartSDF::build(g, dxTarget * 0.5f)) { m.sdfs.push_back(std::move(*sdf)); m.slotPart.push_back(g.partIndex); }
+        if (auto sdf = PartSDF::build(g, dxTarget * 0.5f, 192, dxTarget)) { m.sdfs.push_back(std::move(*sdf)); m.slotPart.push_back(g.partIndex); }
     }
     m.maxPartIndex = 0;
     for (const auto& g : parts) m.maxPartIndex = std::max(m.maxPartIndex, g.partIndex);
-    std::vector<float> flat;
+    std::vector<float> flat;   // bound as float4 in lbmVoxelize: padded to a multiple of 4
     for (const auto& sd : m.sdfs) flat.insert(flat.end(), sd.values.begin(), sd.values.end());
-    if (flat.empty()) flat.push_back(0);
+    flat.resize(std::max<std::size_t>(4, (flat.size() + 3) / 4 * 4), 0.0f);
     for (int* b : {&m.gridsBuf, &m.sceneBuf, &m.redBuf}) if (*b) { ctx_->destroyBuffer(*b); *b = 0; }
     m.gridsBuf = ctx_->createBuffer(flat.size() * 4, flat.data());
     const int nparts = int(m.sdfs.size());
@@ -208,6 +253,7 @@ bool LBMSolver::configure(const std::vector<sim::AeroPartGeometry>& parts, const
         cs.convergenceEvery = 0; cs.visualization.enabled = false; cs.visualization.particles = false;
         shadow_.reset(new LBMSolver(ctx_, true));
         shadow_->accuracy = accuracy;
+        shadow_->chordCells = std::max(1, chordCells / 2);
         shadow_->wallDampingCells = wallDampingCells;
         if (!shadow_->configure(parts, cs, error)) return fail("shadow: " + shadow_->lastError_);
     } else shadow_.reset();
@@ -230,17 +276,27 @@ void LBMSolver::layout(const Vec3d& com, const Vec3d& velocity, const AeroPartPo
                        const AeroRotorSource* rotors, int rotorCount, const AeroEnvironmentSample& env) {
     Impl& m = *m_;
     const sim::CFDSettings& s = settings_;
-    double L = 0.05;
+    // Craft-fitted box: the posed parts' bounding box (sdf grid boxes, i.e. mesh + band) relative to the CoM.
+    Vec3d bmin = Vec3d::splat(-0.05), bmax = Vec3d::splat(0.05);
     for (std::size_t k = 0; k < m.sdfs.size(); ++k) {
-        int pi = m.slotPart[k];
+        const int pi = m.slotPart[k];
         if (pi >= poseCount) continue;
-        L = std::max(L, length(poses[pi].position - com) + double(m.sdfs[k].boundRadius));
+        const PartSDF& sd = m.sdfs[k];
+        for (int c = 0; c < 8; ++c) {
+            const Vec3d local(sd.origin.x + ((c & 1) ? sd.dims[0] * sd.h3.x : 0.0), sd.origin.y + ((c & 2) ? sd.dims[1] * sd.h3.y : 0.0),
+                              sd.origin.z + ((c & 4) ? sd.dims[2] * sd.h3.z : 0.0));
+            const Vec3d w = poses[pi].position - com + poses[pi].rotation.act(local);
+            for (int a = 0; a < 3; ++a) { bmin[a] = std::min(bmin[a], w[a]); bmax[a] = std::max(bmax[a], w[a]); }
+        }
     }
     double maxT = 0, vi = 0;
     Vec3d wakeDir{0, -1, 0};
     for (int r = 0; r < rotorCount; ++r) {
         const AeroRotorSource& ro = rotors[r];
-        L = std::max(L, length(ro.center - com) + ro.radius);
+        for (int a = 0; a < 3; ++a) {
+            bmin[a] = std::min(bmin[a], ro.center[a] - com[a] - ro.radius);
+            bmax[a] = std::max(bmax[a], ro.center[a] - com[a] + ro.radius);
+        }
         if (std::fabs(ro.thrust) > maxT) { maxT = std::fabs(ro.thrust); wakeDir = -normalize(ro.axis) * (ro.thrust >= 0 ? 1.0 : -1.0); }
         vi = std::max(vi, std::sqrt(std::fabs(ro.thrust) / (2 * env.rho * kPi * std::max(ro.radius * ro.radius, 1e-6))));
     }
@@ -250,14 +306,20 @@ void LBMSolver::layout(const Vec3d& com, const Vec3d& velocity, const AeroPartPo
     int ax = 0;
     if (std::fabs(dir.y) > std::fabs(dir[ax])) ax = 1;
     if (std::fabs(dir.z) > std::fabs(dir[ax])) ax = 2;
-    const double lat = L * (1 + s.padLateral);
-    Vec3d lo = Vec3d::splat(lat), hi = Vec3d::splat(lat);
-    const double up = L * (1 + s.padUpstream), dn = L * (1 + s.padDownstream);
-    if (dir[ax] >= 0) { lo[ax] = up; hi[ax] = dn; } else { lo[ax] = dn; hi[ax] = up; }
+    // Padding in multiples of the craft's half size Lc (for a sphere this is the old L (1 + pad) box).
+    const double Lc = 0.5 * std::max(bmax.x - bmin.x, std::max(bmax.y - bmin.y, bmax.z - bmin.z));
+    Vec3d lo = -bmin + Vec3d::splat(s.padLateral * Lc), hi = bmax + Vec3d::splat(s.padLateral * Lc);
+    const double up = s.padUpstream * Lc, dn = s.padDownstream * Lc;
+    if (dir[ax] >= 0) { lo[ax] = -bmin[ax] + up; hi[ax] = bmax[ax] + dn; } else { lo[ax] = -bmin[ax] + dn; hi[ax] = bmax[ax] + up; }
+    // dx: settings resolution, refined to chordCells per main-wing chord, coarsened to the cell budget.
     double dx = 1 / std::max(s.cellsPerMeter, 0.5);
+    if (m.chord > 0 && chordCells > 0) dx = std::min(dx, m.chord / chordCells);
     const double cap = double(std::max(16, s.maxCellsPerAxis));
-    double longest = std::max(lo.x + hi.x, std::max(lo.y + hi.y, lo.z + hi.z));
-    if (longest / dx + 1 > cap) dx = longest / (cap - 1);
+    const double budget = cap * cap * cap;
+    auto cellsAt = [&](double h) { double c = 1; for (int a = 0; a < 3; ++a) c *= std::ceil((lo[a] + hi[a]) / h) + 1; return c; };
+    for (int it = 0; it < 12 && cellsAt(dx) > budget; ++it) dx *= std::cbrt(cellsAt(dx) / budget) * 1.01;
+    const double longest = std::max(lo.x + hi.x, std::max(lo.y + hi.y, lo.z + hi.z));
+    if (longest / dx + 1 > 2 * cap) dx = longest / (2 * cap - 1);
     for (int a = 0; a < 3; ++a) dims_[a] = std::max(16, int(std::ceil((lo[a] + hi[a]) / dx)) + 1);
     m.N = dims_[0] * dims_[1] * dims_[2];
     dxM_ = dx;
@@ -269,16 +331,23 @@ void LBMSolver::layout(const Vec3d& com, const Vec3d& velocity, const AeroPartPo
     // buffers
     m.destroyLattice(ctx_);
     const std::size_t N = std::size_t(m.N), Q = std::size_t(m.q);
-    m.fA = ctx_->createBuffer(N * Q * 4);
-    m.fB = ctx_->createBuffer(N * Q * 4);
+    m.wallCap = std::max(16384, m.N / 16);
+    m.fA = ctx_->createBuffer(N * Q * (m.k.fp16 ? 2 : 4));            // single population buffer (esoteric pull)
+    m.wallF = ctx_->createBuffer(std::size_t(m.wallCap) * Q * 4);
     m.macroA = ctx_->createBuffer(N * 16);
     m.macroB = ctx_->createBuffer(N * 16);
     m.geo = ctx_->createBuffer(N * 8);
-    m.links = ctx_->createBuffer((Q + 1) / 2 * N * 4);
-    if (!m.fA || !m.fB || !m.macroA || !m.macroB || !m.geo || !m.links) {
+    m.links = ctx_->createBuffer(((Q + 1) / 2 + 1) * N * 4);           // link codes + wall slot
+    if (!m.fA || !m.wallF || !m.macroA || !m.macroB || !m.geo || !m.links) {
         lastError_ = "CFD lattice allocation failed (" + std::to_string(m.N) + " cells): " + ctx_->lastError();
         m.destroyLattice(ctx_);
         return;
+    }
+    {   // geo = "unknown, fluid" so the first voxelisation does not treat every fluid cell as freshly uncovered
+        const float big = 1e30f;
+        uint32_t bits;
+        std::memcpy(&bits, &big, 4);
+        ctx_->fill(m.geo, bits);
     }
     m.curIsA = true;
     m.laidOut = true;
@@ -293,11 +362,9 @@ void LBMSolver::layout(const Vec3d& com, const Vec3d& velocity, const AeroPartPo
     ctx_->upload(m.sceneBuf, m.scene.data(), kHeader * 16);
     if (ctx_->begin()) {
         DispatchConst dc{};
-        const int g1 = gpu::ComputeContext::groupsFor(m.N, 128);
-        for (int f : {m.fA, m.fB}) {
-            const int b[8] = {m.sceneBuf, f, 0, 0, 0, 0, 0, 0};
-            ctx_->dispatch(m.k.init, &dc, sizeof dc, b, 8, g1, 1, 1);
-        }
+        dc.i[0] = int32_t(m.lbmStep);
+        const int b[8] = {m.sceneBuf, m.fA, 0, 0, 0, 0, 0, 0};
+        ctx_->dispatch(m.k.init, &dc, sizeof dc, b, 8, gpu::ComputeContext::groupsFor(m.N, kGroup), 1, 1);
         ctx_->end(true);
     }
 }
@@ -323,7 +390,7 @@ void LBMSolver::updateParams(const Vec3d& com, const Vec3d& velocity, const Aero
         }
     const Vec3d gv = -velocity * toLat;
     const int nparts = int(m.sdfs.size());
-    const int32_t accFlags = (accuracy.thinOnlyInflation ? 1 : 0) | (accuracy.refinedCrossings ? 2 : 0);
+    const int32_t accFlags = (accuracy.thinOnlyInflation ? 1 : 0) | (accuracy.refinedCrossings ? 2 : 0) | (accuracy.wallModel ? 4 : 0);
     Float4 accBits;
     std::memcpy(&accBits.y, &accFlags, 4);
     Float4* h = m.scene.data();
@@ -341,9 +408,9 @@ void LBMSolver::updateParams(const Vec3d& com, const Vec3d& velocity, const Aero
 
 // ---------------------------------------------------------------- submit
 
-/// Thin on this lattice: an open sheet, or an interior shallower than 1.5 lattice cells (wings, panels, skins).
-/// Decided per domain (the coarse shadow grid too); only consulted with accuracy.thinOnlyInflation.
-bool LBMSolver::thinOnLattice(const PartSDF& sd) const { return sd.thin || -double(sd.minValue) < 1.5 * dxM_; }
+/// Thin on this lattice: an open sheet, or a closed plate thinner than 0.3 lattice cells (the link sampling could miss
+/// it): such parts get a 0.15-cell core. Decided per domain (the coarse shadow grid too).
+bool LBMSolver::thinOnLattice(const PartSDF& sd) const { return sd.thin || -double(sd.minValue) < 0.15 * dxM_; }
 
 bool LBMSolver::prepare(const Vec3d& com, const Vec3d& velocity, const AeroPartPose* poses, int poseCount,
                         const AeroRotorSource* rotors, int rotorCount, const AeroEnvironmentSample& env, double dt) {
@@ -388,6 +455,7 @@ bool LBMSolver::prepare(const Vec3d& com, const Vec3d& velocity, const AeroPartP
         g[4] = i4(sd.dims[0], sd.dims[1], sd.dims[2], off);
         off += sd.dims[0] * sd.dims[1] * sd.dims[2];
         g[5] = Float4(sd.origin, sd.h);
+        g[7] = Float4(sd.h3.x, sd.h3.y, sd.h3.z, sd.band);
         if (pi < poseCount) {
             const AeroPartPose& p = poses[pi];
             g[0] = f4(p.rotation.x, p.rotation.y, p.rotation.z, p.rotation.w);
@@ -470,8 +538,7 @@ void LBMSolver::record() {
     if (!m.prepared) return;
     m.prepared = false;
     gpu::ComputeContext& c = *ctx_;
-    const int gx = gpu::ComputeContext::groupsFor(dims_[0], 32), gy = gpu::ComputeContext::groupsFor(dims_[1], 2),
-              gz = gpu::ComputeContext::groupsFor(dims_[2], 2);
+    const int gc = gpu::ComputeContext::groupsFor(m.N, kGroup);
     const int g1 = gpu::ComputeContext::groupsFor(m.N, 128);
     DispatchConst dc{};
     dc.i[0] = m.redWords;
@@ -481,27 +548,28 @@ void LBMSolver::record() {
     }
     if (m.pendingRescale != 1) {
         DispatchConst rk{};
+        rk.i[0] = int32_t(m.lbmStep);
         rk.f[0] = m.pendingRescale;
-        for (int f : {m.fA, m.fB}) {
-            const int b[8] = {m.sceneBuf, f, 0, 0, 0, 0, 0, 0};
-            c.dispatch(m.k.rescale, &rk, sizeof rk, b, 8, g1, 1, 1);
-        }
+        const int b[8] = {m.sceneBuf, m.fA, 0, 0, 0, m.geo, 0, 0};
+        c.dispatch(m.k.rescale, &rk, sizeof rk, b, 8, gc, 1, 1);
         m.pendingRescale = 1;
     }
     {
-        const int b[8] = {m.sceneBuf, m.gridsBuf, 0, 0, 0, m.geo, m.links, 0};
-        c.dispatch(m.k.voxelize, &dc, sizeof dc, b, 8, gx, gy, gz);
+        DispatchConst vc{};
+        vc.i[0] = int32_t(m.lbmStep); vc.i[1] = m.wallCap;
+        const int b[8] = {m.sceneBuf, m.fA, m.wallF, 0, m.gridsBuf, m.geo, m.links, m.redBuf};
+        c.dispatch(m.k.voxelize, &vc, sizeof vc, b, 8, gc, 1, 1);
     }
     for (int s = 0; s < m.steps; ++s) {
-        const int cur = m.curIsA ? m.fA : m.fB, nxt = m.curIsA ? m.fB : m.fA;
         const int mo = m.curIsA ? m.macroA : m.macroB, mi = m.curIsA ? m.macroB : m.macroA;
-        const int bc[8] = {m.sceneBuf, cur, 0, mo, mi, m.geo, 0, m.redBuf};
-        c.dispatch(m.k.collide, &dc, sizeof dc, bc, 8, gx, gy, gz);
-        const int bs[8] = {m.sceneBuf, cur, nxt, 0, 0, m.geo, m.links, m.redBuf};
-        c.dispatch(m.k.stream, &dc, sizeof dc, bs, 8, gx, gy, gz);
+        DispatchConst sc{};
+        sc.i[0] = int32_t(m.lbmStep); sc.i[1] = s == m.steps - 1 ? 1 : 0;
+        const int b[8] = {m.sceneBuf, m.fA, m.wallF, mo, mi, m.geo, m.links, m.redBuf};
+        c.dispatch(m.k.step, &sc, sizeof sc, b, 8, gc, 1, 1);
         m.curIsA = !m.curIsA;
+        m.lbmStep += 1;
     }
-    const int latest = m.curIsA ? m.macroB : m.macroA;   // written by the last collide
+    const int latest = m.curIsA ? m.macroB : m.macroA;   // written by the last step
     if (m.steps > 0) {
         const int b[8] = {m.sceneBuf, 0, 0, 0, latest, 0, 0, m.redBuf};
         c.dispatch(m.k.mass, &dc, sizeof dc, b, 8, g1, 1, 1);
@@ -572,6 +640,14 @@ bool LBMSolver::finishInflight() {
             slice_.field = m.sliceField; slice_.speedScale = m.sliceSpeedScale; slice_.serial += 1;
         }
     }
+    if (m.red[7] > uint32_t(m.wallCap) && m.wallF) {
+        // more near-wall cells than wall slots (the overflow fell back to the approximate bounce-back): grow; the
+        // slots are refilled by every voxelisation, so nothing is lost
+        m.wallCap = int(double(m.red[7]) * 1.25) + 1024;
+        ctx_->destroyBuffer(m.wallF);
+        m.wallF = ctx_->createBuffer(std::size_t(m.wallCap) * std::size_t(m.q) * 4);
+        if (!m.wallF) { lastError_ = "CFD wall-slot allocation failed: " + ctx_->lastError(); m.laidOut = false; }
+    }
     if (n <= 0) return true;
     const double ma = double(bitsToFloat(m.red[0]));
     diag_.maxLatticeMach = ma;
@@ -613,8 +689,13 @@ bool LBMSolver::finishInflight() {
     return true;
 }
 
+bool LBMSolver::fp16Storage() const { return m_->k.fp16; }
+double LBMSolver::wingChord() const { return m_->chord; }
+
 bool LBMSolver::collect(sim::ForceTorque* forces, Vec3d* sampleVelocity, int count) {
-    const bool got = finishInflight();
+    // Non-blocking: while the GPU is still on this update, hand back the previous forces (the next submit waits).
+    const bool busy = nonBlockingCollect && !pool_ && m_->inflight && !ctx_->isIdle();
+    const bool got = busy ? false : finishInflight();
     const Impl& m = *m_;
     for (int i = 0; i < count; ++i) {
         forces[i] = sim::ForceTorque{};

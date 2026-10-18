@@ -4,21 +4,29 @@
 //
 // One craft-following domain per LBMSolver:
 //   * world-axis-aligned box translating with the craft CoM (Galilean frame at the craft velocity; changes of that
-//     velocity enter as a uniform fictitious body force -rho a_frame), laid out on the first submit from the craft
-//     size, the padding settings and the dominant relative-flow direction (or the rotor wake axis);
-//   * D3Q19 / D3Q27; BGK, TRT ("mrt") or regularized collision; Smagorinsky or WALE LES. `cumulant` is not
-//     implemented (as in Swift) and runs the regularized operator (effectiveCollision());
-//   * parts re-voxelised every update from part-local signed-distance grids; simple or interpolated (Bouzidi)
-//     bounce-back with moving walls; Galilean-invariant momentum exchange -> force + torque about the CoM per part;
+//     velocity enter as a uniform fictitious body force -rho a_frame), laid out on the first submit: fitted to the
+//     craft's posed bounding box plus padding (multiples of the craft's half size) on the dominant relative-flow
+//     direction (or the rotor wake axis). dx = min(1/cellsPerMeter, main-wing chord / chordCells), so the main wing
+//     gets 16 cells per chord, then coarsened to the cell budget (maxCellsPerAxis cubed, 2 maxCellsPerAxis per axis);
+//   * D3Q19 / D3Q27; BGK, TRT ("mrt") or regularized collision; Smagorinsky or WALE LES; log-law wall model on the
+//     first fluid cell. `cumulant` is not implemented (as in Swift) and runs the regularized operator;
+//   * one population buffer, esoteric-pull streaming fused with collision (one kernel per LBM step), fp16 storage
+//     when the device supports 16-bit shader types (else fp32), SoA, 64-thread 1D groups;
+//   * parts re-voxelised every update from part-local anisotropic signed-distance grids; interpolated (Bouzidi)
+//     bounce-back with moving walls, exact also across sub-cell sheets (near-wall cells keep their last post-collision
+//     set in a wall-slot buffer); Galilean-invariant momentum exchange -> force + torque about the CoM per part;
 //   * rotors are actuator disks (axial thrust + swirl body force, Guo forcing);
 //   * ground = moving wall at the ground's velocity in the craft frame; far field = equilibrium shell + sponge;
 //   * a 2x-coarser shadow domain runs alongside (convergenceEvery > 0) for the grid-convergence estimate.
-// Units: dx = 1/cellsPerMeter (coarsened to respect maxCellsPerAxis), dt_lat = Ma cs dx / U_ref, nu_lat = nu dt/dx^2,
-// F = F_lat rho dx^4/dt^2, T = T_lat rho dx^5/dt^2. submit(dt) advances floor(dt/dt_lat) LBM steps (remainder carried).
+// Units: dt_lat = Ma cs dx / U_ref, nu_lat = nu dt/dx^2. The momentum exchanged per step is lattice momentum
+// (rho dx^3 * dx/dt per step dt), so F = F_lat rho dx^4/dt^2 and T = T_lat rho dx^5/dt^2 (lever arm in cells from the
+// CoM node), averaged over the steps of the update. submit(dt) advances floor(dt/dt_lat) LBM steps (remainder carried).
 //
 // Threading: one thread drives a solver (or a pool); solvers share the process-wide flow compute context, which has
 // its own queue (D3D12: own device + direct queue), so CFD overlaps rendering. submit/collect do not allocate after
-// the first submit of a layout (unless the domain diverges and is re-laid out).
+// the first submit of a layout (unless the domain diverges and is re-laid out). The readback is a few hundred bytes;
+// with nonBlockingCollect, collect() never waits for the GPU (while it is still busy the previous forces are returned
+// and the next submit waits instead).
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -44,10 +52,11 @@ struct FlowSlice {
     uint64_t serial = 0;       // increments every time the pixels change
 };
 
-/// Optional accuracy upgrades (default off = Swift-identical numerics; see docs/CFD.md in the port notes).
+/// Accuracy options (all on by default; off = the Swift solver's choices).
 struct LBMAccuracy {
-    bool thinOnlyInflation = false;   // inflate (0.3 h) only sheets / parts thinner than 1.5 cells; thick bodies keep their volume
-    bool refinedCrossings = false;    // two secant iterations on the wall crossing q (sharper Bouzidi q)
+    bool thinOnlyInflation = true;    // inflate only sheets / sub-0.3-cell plates (off: every part by 0.3 sdf cell, as Swift)
+    bool refinedCrossings = true;     // two secant iterations on the wall crossing q (sharper Bouzidi q)
+    bool wallModel = true;            // log-law eddy viscosity on the first fluid cell (under-resolved boundary layers)
     bool operator==(const LBMAccuracy&) const = default;
 };
 
@@ -83,6 +92,14 @@ public:
     const int* dims() const { return dims_; }
 
     LBMAccuracy accuracy;
+    /// Target cells per main-wing chord (sets dx when finer than cellsPerMeter; the cell budget still applies).
+    int chordCells = 16;
+    /// collect() returns the previous forces instead of waiting while the GPU is still busy (real-time FLY).
+    bool nonBlockingCollect = false;
+    /// Population storage is fp16 (device supports 16-bit shader types and PW_FLOW_FP32 is not set).
+    bool fp16Storage() const;
+    /// Main-wing chord found by configure (m, 0 = no wing-like part).
+    double wingChord() const;
     /// Smagorinsky near-wall damping length in cells (van Driest-like, 0 = off).
     double wallDampingCells = 2.0;
 

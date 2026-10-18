@@ -11,8 +11,9 @@ Settings: `CFDSettings` (`src/core/pw/sim/cfd.h:45`), presets in `CFDSettings::f
 > **Status.** The GPU solver is wired end to end: FLY (aero model list, CFD settings
 > panel, live diagnostics, slice + particle overlay), `--train --aero full`, EVOLVE, and
 > `pwcli --aero-compare` (per-part fast vs CFD table). Selftests `flow.*` and `fidelity.*` cover it.
-> **Accuracy is poor at the grids that run at usable speed** (see §6): treat full-mode forces as qualitative
-> unless the convergence readouts are small. If the backend is unavailable, **full** falls back to **fast** and
+> The 2026-10 solver rework (§7: anisotropic part SDFs, exact Bouzidi across sub-cell sheets, log-law wall model,
+> chord-targeted craft-fitted domain, esoteric-pull fp16 single-buffer streaming) has **not been re-measured yet**;
+> the §6 numbers are from the old solver, where accuracy was poor at usable grids. Check the convergence readouts. If the backend is unavailable, **full** falls back to **fast** and
 > the UI says why.
 
 ## 1. Method
@@ -25,15 +26,16 @@ Settings: `CFDSettings` (`src/core/pw/sim/cfd.h:45`), presets in `CFDSettings::f
   high to resolve, so leave LES on.
 - **Moving, craft-following domain.** A **world-axis-aligned** box that translates with the craft's centre of
   mass (Galilean frame at the craft velocity; changes of velocity enter as a uniform body force). It is laid out
-  on the first update from the craft size, the padding and the dominant flow direction (or the rotor wake when
-  hovering), then coarsened to respect `maxCellsPerAxis` (the effective dx is in the diagnostics; the Draft
-  Trainer runs at dx = 38 cm, not the nominal 12.5 cm). The settings inspector shows the effective dx under the
+  on the first update, fitted to the craft's posed bounding box plus padding (multiples of the craft's half size)
+  on the dominant flow direction (or the rotor wake when hovering). dx = min(1/cellsPerMeter, main-wing chord / 16),
+  then coarsened to the cell budget `maxCellsPerAxis`³ (and 2 × `maxCellsPerAxis` per axis); the effective dx is in
+  the diagnostics. The settings inspector shows the effective dx under the
   resolution slider and turns it orange with a "capped by max cells/axis" note when the cap is what sets it.
 - **Boundaries:** inflow faces hold the far-field velocity with a velocity sponge; the other faces are open
   pressure outlets with a density-only sponge (so mass is not exactly conserved: see `massDrift`).
 - **Geometry** is voxelised every CFD update from the part transforms, so servo-deflected surfaces and wheels move.
-- **Walls:** simple bounce-back or interpolated (Bouzidi-style) bounce-back (default, better for curved and
-  off-grid surfaces).
+- **Walls:** simple bounce-back or interpolated (Bouzidi) bounce-back (default) on the signed-distance wall
+  position, plus a log-law wall model on the first fluid cell (§7).
 - **Forces:** Galilean-invariant momentum exchange at wall links (populations taken relative to the rest state, so a
   part partly buried in another part does not feel the ambient pressure on its exposed side only), summed per part, to give a force and torque per part. These replace
   the fast wing, body and panel aero.
@@ -81,8 +83,8 @@ so keep it at 0.05–0.15. Above `maxMach` (default 0.3) the run is flagged.
 | Setting | Default | What it does | Cost / accuracy |
 |---|---|---|---|
 | `cellsPerMeter` | 16 | Resolution. dx = 1/cellsPerMeter | Cost ∝ cells³ × steps ∝ roughly (cellsPerMeter)⁴. The biggest single accuracy knob |
-| `maxCellsPerAxis` | 192 | Hard cap; the domain is coarsened to fit | Protects memory (19 or 27 floats × 2 per cell) |
-| `padUpstream / padDownstream / padLateral` | 1.0 / 2.5 / 1.0 craft lengths | Domain size around the craft | Too small: blockage and reflected waves inflate forces. Too big: cells wasted |
+| `maxCellsPerAxis` | 192 | Cell budget: at most maxCellsPerAxis³ cells (and 2× per axis); dx is coarsened to fit | Memory ≈ 19 or 27 × 2 bytes (fp16) or × 4 (fp32) + ~40 bytes per cell |
+| `padUpstream / padDownstream / padLateral` | 1.0 / 2.5 / 1.0 craft half-sizes | Padding around the craft's bounding box | Too small: blockage and reflected waves inflate forces. Too big: cells wasted |
 | `latticeMach` | 0.1 | Sets the time step | Lower is more accurate, but needs more steps per second of sim time |
 | `maxMach` | 0.3 | Divergence guard | Flagged when exceeded |
 | `lattice` | d3q19 | Velocity set | d3q27 is about 40 % more work, more isotropic, more stable with cumulant |
@@ -175,7 +177,7 @@ Full mode is about **3000× slower** than fast (measured below). Extra CLI flag:
 | Fine vs 2× coarse shadow | sphere 12 cells/D | coarseDelta 41 %, Richardson 13.6 % | |
 
 Drag converges toward experiment as the grid is refined; lift is badly under-predicted because the boundary layer
-is not resolved (no wall model yet).
+is not resolved (this was before the wall model and the other §7 changes).
 
 **Fast vs CFD per part** (`pwcli --aero-compare Trainer --speed 30 --alpha 4 --seconds 1 --cfd-preset P`;
 craft pinned, throttle 0; totals over non-rotor parts; Fx = −drag, Fy = lift):
@@ -202,6 +204,40 @@ CFD (radial loads that mostly cancel) vs ≤ 0.33 N fast; the fixed vanes 0.87 N
 fast 790–1170 sim-s/s; full/Draft 0.3 sim-s/s (405 s wall in total). The full experiment
 (population 48, 2 × 20 s episodes) runs at 1000–1750 sim-s/s in fast (about 1 s for 5 generations) and would take
 about 3.5 h per generation in full/Draft.
+
+## 7. Solver rework (accuracy and speed; not yet re-measured)
+
+Why the old solver flew slowly in full mode (Trainer, 40 m/s, 4°: CFD drag 9887 N / lift 641 N on Draft vs
+1048 / 12154 fast): the part SDF grids were capped at 64 cells per axis with one isotropic cell size, so a 10 m wing
+got 17 cm cells and its 18 cm thickness disappeared (an inflated sub-cell slab, no camber, no thickness); the main
+wing had 4 cells per chord at the Draft dx of 38 cm; the domain was a sphere-radius box, so a flat craft wasted
+most cells above and below; and no wall model. Changes (`shaders/flow/lbm_common.slang`, `src/flow/src/lbm.cpp`,
+`src/flow/src/part_sdf.cpp`):
+
+- **Geometry.** Part SDFs are anisotropic (cell size per part axis, >= 10 cells across short axes, up to 192 per
+  axis / 1.5M cells), so wings keep their real thickness and camber (`flow.sdf-thin-wing`). Only open sheets and
+  plates under 0.3 lattice cells get a core (0.15 dx) so link sampling cannot miss them; closed bodies keep their
+  true volume (`LBMAccuracy`, all options on by default).
+- **Walls.** Interpolated (Bouzidi) bounce-back on refined wall crossings. Near-wall cells keep their last
+  post-collision set in a wall-slot buffer, so the q >= 0.5 branch is exact and a link crossing a sheet thinner than
+  a cell (fluid on both sides) reflects correctly. Log-law wall model: the first fluid cell gets the eddy viscosity
+  ν_w = u_τ² y / u_t that makes its wall stress ρ u_τ² (κ 0.41, E 9.8; only for y+ > 11).
+- **Resolution where it matters.** dx = min(1/cellsPerMeter, chord/16) with the main-wing chord taken from the
+  largest plate-like part; the domain is fitted to the craft's bounding box. The cell budget still applies, so Draft
+  stays coarse; Medium gives about 16 cells per chord on the Trainer. True local refinement (nested multi-resolution
+  blocks with coarse/fine coupling) is **not implemented**: the chord-targeted uniform grid is the current answer.
+- **Forces.** Momentum exchange (Galilean invariant) per wall link, in lattice momentum per step:
+  F = F_lat ρ dx⁴/dt², T = T_lat ρ dx⁵/dt² with the lever arm from the CoM node (the domain is centred on the CoM
+  passed to `submit`), averaged over the steps of the update. CraftSim adds these to the CoM force/torque.
+- **Speed.** One population buffer with esoteric-pull streaming (Lehmann 2022) fused with collision: one kernel per
+  LBM step (was collide + stream with two buffers, four passes over the populations). Populations stored as fp16
+  ((f − w)·2¹⁵, fp32 arithmetic) when the device supports 16-bit shader types (D3D12 SM 6.2, e.g. RX 6700 XT;
+  Metal always), else fp32; `PW_FLOW_FP32=1` forces fp32. SoA layout, 64-thread 1D groups, macro fields written only
+  where the next step needs them (every cell on the last step), lattice-Mach/NaN checks reduced per wave. FLY sets
+  `LBMSolver::nonBlockingCollect`: collect never waits for the GPU (it keeps the previous forces while the GPU is
+  busy).
+- **Tests.** The `flow.*` references are the old solver's numbers and are now printed for comparison only; the
+  checks are physical bands.
 
 ## Screenshots
 

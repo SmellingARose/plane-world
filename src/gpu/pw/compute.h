@@ -46,6 +46,8 @@ public:
     /// Submits; when `wait` blocks until complete and returns the GPU time in ms (or -1 when unavailable).
     virtual double end(bool wait = true) = 0;
     virtual void waitIdle() = 0;
+    /// Non-blocking: true when the most recent submission has completed (or nothing is pending).
+    virtual bool isIdle() { return true; }
     /// GPU time (ms) of the most recent submission once it has completed (after end(true), or end(false) followed
     /// by waitIdle / upload / download); -1 when unknown.
     virtual double lastGpuMs() const { return -1; }

@@ -134,6 +134,7 @@ public:
         signalAndWait();
         if (tsPending) { tsPending = false; lastMs = readTimestamps(); }
     }
+    bool isIdle() override { return !pending || fence->GetCompletedValue() >= fenceValue; }
     double lastGpuMs() const override { return lastMs; }
     double readTimestamps() {
         double ms = -1;
@@ -288,7 +289,7 @@ public:
         ID3D12CommandList* l[] = {list.Get()};
         queue->ExecuteCommandLists(1, l);
         pending = 1; tsPending = true;
-        if (!wait) return -1;
+        if (!wait) { ++fenceValue; queue->Signal(fence.Get(), fenceValue); return -1; }   // for isIdle()
         signalAndWait();
         tsPending = false;
         if (dev->GetDeviceRemovedReason() != S_OK) { err = "device removed " + hrs(dev->GetDeviceRemovedReason()); lastMs = -1; return -1; }

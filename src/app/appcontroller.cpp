@@ -1268,7 +1268,10 @@ void AppController::applyAeroToSim() {
     if (m_aeroModel == "full" && m_mode == "fly") {
         if (!fullAvailable()) err = "No CFD backend in this build";
         else {
-            if (!m_backend) m_backend = sim::AeroBackendRegistry::makeFull()();
+            if (!m_backend) {
+                m_backend = sim::AeroBackendRegistry::makeFull()();
+                if (auto* s = dynamic_cast<flow::LBMSolver*>(m_backend.get())) s->nonBlockingCollect = true;   // FLY never waits on the GPU
+            }
             std::string e;
             if (!m_backend || !m_backend->isAvailable()) err = "CFD backend unavailable (no compute GPU)";
             else if (!m_sim->enableFull(*m_backend, m_flightDoc, m_cfdSettings, &e)) err = qs(e);

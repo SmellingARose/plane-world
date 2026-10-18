@@ -1,5 +1,6 @@
 // flow.* self-tests: port of Sources/Flow/FlowSelfTests.swift plus parity against the Swift solver's measured
-// numbers (Swift `PlaneWorld --selftest flow` on an Apple M4, recorded in kSwift below).
+// numbers (Swift `PlaneWorld --selftest flow` on an Apple M4, recorded in kSwift below). Since the esoteric-pull /
+// wall-model / anisotropic-SDF solver those references are printed for comparison only; the checks are physical bands.
 //
 // Full-size runs (the Swift grids) need a hardware GPU. On a software adapter (WARP in CI) or with PW_FLOW_SMALL=1
 // every case runs on a coarser grid / shorter window; the numbers are then checked against physical bands and
@@ -210,6 +211,21 @@ void registerAll() {
         return d.cellsPerMeter == 8 && d.maxCellsPerAxis == 96 && d.collision == sim::CFDCollision::Regularized && d.updateEvery == 8;
     });
 
+    selftest::add("flow.sdf-thin-wing", [](Context& c) {
+        // A 10 m x 1.5 m NACA 0012 wing (18 cm thick) for a 0.19 m lattice: the anisotropic part grid must resolve the
+        // thickness (closed, signed), so the wing is a real airfoil and not a sub-cell slab. CPU only.
+        const float chord = 1.5f, span = 10.0f;
+        auto sd = PartSDF::build(shapes::geometry(shapes::nacaWing(chord, span)), 0.19f * 0.5f, 192, 0.19f);
+        if (!sd) { c.note("no sdf"); return false; }
+        const float xt = (0.30f - 0.25f) * chord;   // max thickness station
+        const float in = sd->sample({xt, 0, 0}), above = sd->sample({xt, 0.12f * chord, 0}), te = sd->sample({0.70f * chord, 0, 0});
+        c.note(fmt("sdf %dx%dx%d, h = (%.3f, %.3f, %.3f) m, thin %d: d(mid) %.3f, d(0.12c above) %.3f, d(trailing edge) %.3f m",
+                   sd->dims[0], sd->dims[1], sd->dims[2], sd->h3.x, sd->h3.y, sd->h3.z, int(sd->thin), double(in), double(above), double(te)));
+        bool ok = !sd->thin && in < -0.05f && above > 0.05f && above < 0.15f && te > -0.02f;
+        ok = ok && sd->h3.y < 0.03f && std::fabs(in + 0.09f) < 0.03f;   // half thickness 0.09 m
+        return ok;
+    });
+
     addGpu("flow.sphere-drag", [](Context& c) {
         // Re = UD/nu ~ 1.3e5 (subcritical, experiment C_D ~ 0.45-0.5). Swift grid: 16 cells per diameter.
         const bool sm = small();
@@ -221,9 +237,7 @@ void registerAll() {
                    cpm * 0.2, r.cells, cd, refName(), sm ? kSmallRef.sphereCd : kSwift.sphereCd, r.msPerUpdate, r.msPerLatticeStep, r.diag.maxLatticeMach, r.diag.massDrift));
         bool ok = !r.diag.diverged && cd > 0.25 && cd < 1.2;
         ok = ok && std::fabs(r.force.y) < 0.35 * std::fabs(r.force.x) && std::fabs(r.force.z) < 0.35 * std::fabs(r.force.x);
-        const double ref = sm ? kSmallRef.sphereCd : kSwift.sphereCd;
-        if (ref > 0 && !near(cd, ref, 0.10)) { c.note(fmt("C_D %.3f differs from the reference %.3f by more than 10%%", cd, ref)); ok = false; }
-        return ok;
+        return ok;   // the references are the old solver's numbers (informational): the check is the physical band
     });
 
     addGpu("flow.cube-drag", [](Context& c) {
@@ -233,7 +247,6 @@ void registerAll() {
         const double ref = sm ? kSmallRef.cubeCd : kSwift.cubeCd;
         c.note(fmt("cube face-on Re=1.3e5, %d cells/side: C_D = %.3f (%s %.3f, exp ~1.05)", sm ? 8 : 16, cd, refName(), ref));
         bool ok = !r.diag.diverged && cd > 0.6 && cd < 1.8;
-        if (ref > 0 && !near(cd, ref, 0.10)) { c.note(fmt("C_D %.3f differs from the reference %.3f by more than 10%%", cd, ref)); ok = false; }
         return ok;
     });
 
@@ -248,7 +261,6 @@ void registerAll() {
         c.note(fmt("NACA0012 AR2 a=+-6deg, %d cells/chord: C_L = %+.3f / %+.3f, slope %.2f /rad (%s %.2f, Helmbold %.2f), C_D(-6deg) %.3f",
                    sm ? 10 : 20, cls[0], cls[1], slope, refName(), ref, helm, cd));
         bool ok = !div && slope > 0.15 * helm && slope < 1.5 * helm;
-        if (ref > 0 && !near(slope, ref, 0.25)) { c.note(fmt("slope %.3f differs from the reference %.3f by more than 25%%", slope, ref)); ok = false; }
         return ok;
     });
 
@@ -261,7 +273,6 @@ void registerAll() {
         const double ref = sm ? kSmallRef.diskV : kSwift.diskV;
         c.note(fmt("actuator disk T=10 N R=0.15: v_disk = %.2f m/s down (%s %.2f, momentum theory %.2f), swirl %.2f m/s", v, refName(), ref, vi, sw));
         bool ok = !r.diag.diverged && v > 0.6 * vi && v < 1.4 * vi;
-        if (ref > 0 && !near(v, ref, 0.10)) { c.note(fmt("v_disk %.2f differs from the reference %.2f by more than 10%%", v, ref)); ok = false; }
         return ok;
     });
 
@@ -305,7 +316,6 @@ void registerAll() {
         }
         c.note(fmt("rotating bar w=40 rad/s: aero torque_y = %.4f N m (Swift %.4f; must oppose w)", ty, kSwift.barTorque));
         bool ok = ty < 0;
-        if (!sm && !near(ty, kSwift.barTorque, 0.30)) { c.note("torque differs from Swift by more than 30%"); ok = false; }
         return ok;
     });
 
@@ -398,7 +408,6 @@ void registerAll() {
                 const double v = double(sv.solidCellCount()) * std::pow(sv.dx(), 3);
                 c.note(fmt("%s%s: voxel volume %.5f m3 vs exact %.5f (Swift %.5f, dx %.4f)", cs.name, improved ? " [thin-only inflation]" : "", v, cs.vol,
                            cs.swift, sv.dx()));
-                if (!improved && !small() && !near(v, cs.swift, 0.03)) { c.note("voxel volume differs from Swift by more than 3%"); ok = false; }
                 if (improved && std::string(cs.name) != "naca" && !near(v, cs.vol, small() ? 0.08 : 0.03)) { c.note("closed body volume not within 3% of exact"); ok = false; }
             }
         return ok;
@@ -444,10 +453,10 @@ void registerAll() {
         if (!envOn("PW_FLOW_VALIDATE")) { c.note("skipped (set PW_FLOW_VALIDATE=1)"); return true; }
         using T = sim::CFDTurbulence;
         const struct { const char* tag; LBMAccuracy a; Tweak t; } variants[] = {
-            {"default (Swift)       ", {false, false}, {}},
-            {"depth-rule inflation  ", {true, false}, {}},
-            {"wall damping 4 cells  ", {false, false}, {T::Smagorinsky, 4, 0.17}},
-            {"both                  ", {true, false}, {T::Smagorinsky, 4, 0.17}}};
+            {"Swift choices         ", {false, false, false}, {}},
+            {"depth-rule inflation  ", {true, false, false}, {}},
+            {"wall model            ", {false, false, true}, {}},
+            {"all (default)         ", {true, true, true}, {T::Smagorinsky, 2, 0.17}}};
         for (const auto& v : variants) {
             double cd; RunResult r;
             if (!sphereCd(c, 80, nullptr, 0.3, cd, r, v.a, &v.t)) return false;

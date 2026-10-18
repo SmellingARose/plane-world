@@ -41,32 +41,56 @@ Float3 closestPointOnTriangle(const Float3& p, const Float3& a, const Float3& b,
 }
 } // namespace
 
-std::optional<PartSDF> PartSDF::build(const sim::AeroPartGeometry& g, float targetH, int maxCells) {
+std::optional<PartSDF> PartSDF::build(const sim::AeroPartGeometry& g, float targetH, int maxCells, float minBand) {
     if (g.positions.size() < 3 || g.indices.size() < 3) return std::nullopt;
     std::vector<Float3> P;
     P.reserve(g.positions.size());
     for (const auto& v : g.positions) P.push_back({v.x, v.y, v.z});
     Float3 lo = P[0], hi = P[0];
     for (const auto& p : P) { lo = vmin(lo, p); hi = vmax(hi, p); }
-    Float3 ext = hi - lo;
-    float maxExt = std::max(ext.x, std::max(ext.y, ext.z));
-    float h = std::max(targetH, maxExt / float(maxCells - 4));
-    h = std::max(h, 1e-4f);
-    const float band = 2 * h;
-    const Float3 o = lo - Float3(band, band, band);
-    const int nx = int(std::ceil((ext.x + 2 * band) / h)) + 1, ny = int(std::ceil((ext.y + 2 * band) / h)) + 1,
-              nz = int(std::ceil((ext.z + 2 * band) / h)) + 1;
+    const Float3 ext = hi - lo;
+    // Per-axis cell size: targetH, refined to >= 10 cells across short axes (wing thickness), capped by maxCells.
+    float hv[3], bandv[3];
+    const float e[3] = {ext.x, ext.y, ext.z};
+    for (int a = 0; a < 3; ++a) {
+        hv[a] = std::min(targetH, e[a] / 10.0f);
+        hv[a] = std::max(hv[a], e[a] / float(std::max(8, maxCells - 4)));
+        hv[a] = std::max(hv[a], std::max(1e-4f, 0.25f * targetH));   // zero-thickness sheets: a few cells across the band
+    }
+    auto countFor = [&](const float* hh, float* bb) {
+        double c = 1;
+        for (int a = 0; a < 3; ++a) {
+            bb[a] = std::max(2 * hh[a], minBand);   // >= 2 cells, and >= minBand
+            c *= std::ceil((e[a] + 2 * bb[a]) / hh[a]) + 1;
+        }
+        return c;
+    };
+    for (int it = 0; it < 8; ++it) {
+        const double c = countFor(hv, bandv);
+        if (c <= 1.5e6) break;
+        const float k = float(std::cbrt(c / 1.5e6)) * 1.05f;
+        for (float& x : hv) x *= k;
+    }
+    countFor(hv, bandv);
+    const Float3 h(hv[0], hv[1], hv[2]), band(bandv[0], bandv[1], bandv[2]);
+    const float hmin = std::min(hv[0], std::min(hv[1], hv[2]));
+    const float far = 4 * std::max(bandv[0], std::max(bandv[1], bandv[2]));
+    const Float3 o = lo - band;
+    const int nx = int(std::ceil((ext.x + 2 * band.x) / h.x)) + 1, ny = int(std::ceil((ext.y + 2 * band.y) / h.y)) + 1,
+              nz = int(std::ceil((ext.z + 2 * band.z) / h.z)) + 1;
     const std::size_t cnt = std::size_t(nx) * ny * nz;
-    std::vector<float> d(cnt, 4 * band);
+    std::vector<float> d(cnt, far);
     std::vector<uint8_t> parity(cnt, 0);
-    auto center = [&](int i, int j, int k) { return o + Float3(float(i) + 0.5f, float(j) + 0.5f, float(k) + 0.5f) * h; };
+    auto center = [&](int i, int j, int k) { return o + Float3((float(i) + 0.5f) * h.x, (float(j) + 0.5f) * h.y, (float(k) + 0.5f) * h.z); };
+    auto cellLo = [](float v, float o0, float hh, int n) { return std::max(0, std::min(n - 1, int(std::floor((v - o0) / hh - 0.5f)))); };
+    auto cellHi = [](float v, float o0, float hh, int n) { return std::max(0, std::min(n - 1, int(std::ceil((v - o0) / hh - 0.5f)))); };
     const std::size_t triCount = g.indices.size() / 3;
     for (std::size_t t = 0; t < triCount; ++t) {
         const Float3 a = P[g.indices[3 * t]], b = P[g.indices[3 * t + 1]], c = P[g.indices[3 * t + 2]];
-        const Float3 tlo = vmin(a, vmin(b, c)) - Float3(band, band, band), thi = vmax(a, vmax(b, c)) + Float3(band, band, band);
-        int i0 = std::max(0, int(std::floor((tlo.x - o.x) / h - 0.5f))), i1 = std::min(nx - 1, int(std::ceil((thi.x - o.x) / h - 0.5f)));
-        int j0 = std::max(0, int(std::floor((tlo.y - o.y) / h - 0.5f))), j1 = std::min(ny - 1, int(std::ceil((thi.y - o.y) / h - 0.5f)));
-        int k0 = std::max(0, int(std::floor((tlo.z - o.z) / h - 0.5f))), k1 = std::min(nz - 1, int(std::ceil((thi.z - o.z) / h - 0.5f)));
+        const Float3 tlo = vmin(a, vmin(b, c)) - band, thi = vmax(a, vmax(b, c)) + band;
+        const int i0 = cellLo(tlo.x, o.x, h.x, nx), i1 = cellHi(thi.x, o.x, h.x, nx);
+        const int j0 = cellLo(tlo.y, o.y, h.y, ny), j1 = cellHi(thi.y, o.y, h.y, ny);
+        const int k0 = cellLo(tlo.z, o.z, h.z, nz), k1 = cellHi(thi.z, o.z, h.z, nz);
         for (int k = k0; k <= k1; ++k)
             for (int j = j0; j <= j1; ++j)
                 for (int i = i0; i <= i1; ++i) {
@@ -77,14 +101,14 @@ std::optional<PartSDF> PartSDF::build(const sim::AeroPartGeometry& g, float targ
                 }
         float ylo = std::min(a.y, std::min(b.y, c.y)), yhi = std::max(a.y, std::max(b.y, c.y));
         float zlo = std::min(a.z, std::min(b.z, c.z)), zhi = std::max(a.z, std::max(b.z, c.z));
-        int ja = std::max(0, int(std::floor((ylo - o.y) / h - 0.5f))), jb = std::min(ny - 1, int(std::ceil((yhi - o.y) / h - 0.5f)));
-        int ka = std::max(0, int(std::floor((zlo - o.z) / h - 0.5f))), kb = std::min(nz - 1, int(std::ceil((zhi - o.z) / h - 0.5f)));
+        const int ja = cellLo(ylo, o.y, h.y, ny), jb = cellHi(yhi, o.y, h.y, ny);
+        const int ka = cellLo(zlo, o.z, h.z, nz), kb = cellHi(zhi, o.z, h.z, nz);
         for (int k = ka; k <= kb; ++k)
             for (int j = ja; j <= jb; ++j) {
-                float py = o.y + (float(j) + 0.5f) * h + 1.37e-5f * h, pz = o.z + (float(k) + 0.5f) * h + 2.11e-5f * h;
+                float py = o.y + (float(j) + 0.5f) * h.y + 1.37e-5f * h.y, pz = o.z + (float(k) + 0.5f) * h.z + 2.11e-5f * h.z;
                 float x;
                 if (!rayX(py, pz, a, b, c, x)) continue;
-                int istart = std::max(0, int(std::ceil((x - o.x) / h - 0.5f)));
+                int istart = std::max(0, int(std::ceil((x - o.x) / h.x - 0.5f)));
                 if (istart >= nx) continue;
                 std::size_t base = std::size_t(nx) * (std::size_t(j) + std::size_t(ny) * std::size_t(k));
                 for (int i = istart; i < nx; ++i) parity[base + std::size_t(i)] ^= 1;
@@ -100,18 +124,19 @@ std::optional<PartSDF> PartSDF::build(const sim::AeroPartGeometry& g, float targ
     float br = 0;
     for (const auto& p : P) br = std::max(br, length(p));
     PartSDF s;
-    s.partIndex = g.partIndex; s.origin = o; s.h = h; s.dims[0] = nx; s.dims[1] = ny; s.dims[2] = nz;
-    s.thin = inside == 0; s.boundRadius = br + band;
+    s.partIndex = g.partIndex; s.origin = o; s.h = hmin; s.h3 = h; s.dims[0] = nx; s.dims[1] = ny; s.dims[2] = nz;
+    s.thin = inside == 0; s.boundRadius = br + length(band); s.meshLo = lo; s.meshHi = hi;
+    s.band = std::min(bandv[0], std::min(bandv[1], bandv[2]));
     s.minValue = *std::min_element(d.begin(), d.end());
     s.values = std::move(d);
     return s;
 }
 
 float PartSDF::sample(const Float3& l) const {
-    Float3 u = Float3((l.x - origin.x) / h, (l.y - origin.y) / h, (l.z - origin.z) / h) - Float3(0.5f, 0.5f, 0.5f);
+    Float3 u = Float3((l.x - origin.x) / h3.x, (l.y - origin.y) / h3.y, (l.z - origin.z) / h3.z) - Float3(0.5f, 0.5f, 0.5f);
     const float n[3] = {float(dims[0]), float(dims[1]), float(dims[2])};
     if (u.x < 0 || u.y < 0 || u.z < 0 || u.x > n[0] - 1 || u.y > n[1] - 1 || u.z > n[2] - 1) {
-        Float3 lo = origin, hi = origin + Float3(n[0] * h, n[1] * h, n[2] * h);
+        Float3 lo = origin, hi = origin + Float3(n[0] * h3.x, n[1] * h3.y, n[2] * h3.z);
         Float3 dd = vmax(vmax(lo - l, l - hi), Float3());
         return length(dd) + 2 * h;
     }
