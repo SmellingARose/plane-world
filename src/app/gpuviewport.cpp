@@ -96,7 +96,7 @@ void GpuViewport::setTimeOfDay(double h) {
 }
 void GpuViewport::frameCraft() {
     const double r = AppController::instance() ? AppController::instance()->craftRadius() : 4;
-    m_goal.dist = std::max(3.0, r * 2.8); m_goal.height = 0; m_lookYaw = m_lookPitch = 0; update();
+    m_goal.dist = std::max(0.3, r * 2.8); m_goal.height = 0; m_lookYaw = m_lookPitch = 0; update();
 }
 void GpuViewport::resetView() { m_goal = Orbit{}; frameCraft(); }
 void GpuViewport::setView(const QString& n) {
@@ -219,7 +219,7 @@ void GpuViewport::mouseDoubleClickEvent(QMouseEvent* e) { frameCraft(); e->accep
 void GpuViewport::wheelEvent(QWheelEvent* e) {
     // pixelDelta (trackpads) for precise zoom, angleDelta (wheels) in 15 degree notches.
     double steps = !e->pixelDelta().isNull() ? e->pixelDelta().y() / 60.0 : e->angleDelta().y() / 120.0;
-    m_goal.dist = std::clamp(m_goal.dist * std::pow(0.88, steps), 1.5, 5000.0);
+    m_goal.dist = std::clamp(m_goal.dist * std::pow(0.88, steps), 0.15, 5000.0);
     update();
     e->accept();
 }
@@ -270,7 +270,7 @@ void GpuViewport::stepCamera(double dt) {
     if (m_keys & kRight) m_goal.yaw -= rate;
     if (m_keys & kUp) m_goal.pitch = std::min(1.45, m_goal.pitch + rate * 0.7);
     if (m_keys & kDown) m_goal.pitch = std::max(-0.15, m_goal.pitch - rate * 0.7);
-    if (m_keys & kIn) m_goal.dist = std::max(1.5, m_goal.dist * std::pow(0.4, dt));
+    if (m_keys & kIn) m_goal.dist = std::max(0.15, m_goal.dist * std::pow(0.4, dt));
     if (m_keys & kOut) m_goal.dist = std::min(5000.0, m_goal.dist * std::pow(2.5, dt));
     if (auto* app = AppController::instance()) {
         // follow the craft; chase mode swings the orbit behind the flight path (Swift updateFlyCamera)
@@ -362,7 +362,7 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
             if (m_craft != app->craftName())
                 QMetaObject::invokeMethod(this, "setInfo", Qt::QueuedConnection, Q_ARG(QString, QString::fromUtf8(pw::gpu::backendName(n->dev->caps().backend))),
                                           Q_ARG(QString, QString::fromStdString(n->dev->caps().adapter)), Q_ARG(QString, QString()), Q_ARG(QString, app->craftName()));
-            if (m_lastRevision < 0) { const double r = app->craftRadius(); m_goal.dist = m_cur.dist = std::max(3.0, r * 2.8); }
+            if (m_lastRevision < 0) { const double r = app->craftRadius(); m_goal.dist = m_cur.dist = std::max(0.3, r * 2.8); }
             m_lastRevision = n->revision;
         }
         app->partWorldPoses(n->poses);

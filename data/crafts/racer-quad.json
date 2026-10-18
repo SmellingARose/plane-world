@@ -2,11 +2,11 @@
  "name": "Racer quad",
  "parts": [
   {
-   "id": "p1",
+   "id": "b1",
    "type": "cylinder",
-   "name": "Battery pod",
-   "color": "#d8dce2",
-   "mass": 0.43,
+   "name": "Fuselage",
+   "color": "#23262c",
+   "mass": 0.15,
    "pos": [
     0,
     0,
@@ -15,11 +15,11 @@
    "rot": [
     0,
     0,
-    -40
+    -90
    ],
    "p": {
-    "r": 0.03,
-    "h": 0.16,
+    "r": 0.022,
+    "h": 0.11,
     "cd": 0.08
    },
    "servo": null,
@@ -27,24 +27,24 @@
    "motor": null
   },
   {
-   "id": "p2",
+   "id": "b2",
    "type": "cone",
-   "name": "Camera nose",
-   "color": "#d8dce2",
-   "mass": 0.05,
+   "name": "Canopy nose",
+   "color": "#e23a2e",
+   "mass": 0.02,
    "pos": [
-    0.0739,
-    0.0881,
+    0.08,
+    0,
     0
    ],
    "rot": [
     0,
     0,
-    -40
+    -90
    ],
    "p": {
-    "r": 0.03,
-    "h": 0.07,
+    "r": 0.022,
+    "h": 0.05,
     "cd": 0.05
    },
    "servo": null,
@@ -52,25 +52,152 @@
    "motor": null
   },
   {
-   "id": "p3",
+   "id": "b3",
    "type": "cone",
    "name": "Tail fairing",
-   "color": "#d8dce2",
-   "mass": 0.02,
+   "color": "#e23a2e",
+   "mass": 0.015,
    "pos": [
-    -0.0803,
-    -0.0958,
+    -0.085,
+    0,
     0
    ],
    "rot": [
     0,
     0,
-    140
+    90
    ],
    "p": {
-    "r": 0.03,
-    "h": 0.09,
+    "r": 0.022,
+    "h": 0.06,
     "cd": 0.05
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b4",
+   "type": "box",
+   "name": "Battery (6S)",
+   "color": "#2f6fd6",
+   "mass": 0.265,
+   "pos": [
+    -0.008,
+    0.036,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "sx": 0.075,
+    "sy": 0.028,
+    "sz": 0.034,
+    "cd": 0.12
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b5",
+   "type": "box",
+   "name": "Battery strap",
+   "color": "#111111",
+   "mass": 0.002,
+   "pos": [
+    -0.008,
+    0.036,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "sx": 0.012,
+    "sy": 0.03,
+    "sz": 0.036,
+    "cd": 0.01
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b6",
+   "type": "sphere",
+   "name": "Camera pod",
+   "color": "#23262c",
+   "mass": 0.012,
+   "pos": [
+    0.07,
+    0.016,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.012,
+    "cd": 0.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b7",
+   "type": "cylinder",
+   "name": "Camera lens",
+   "color": "#0b0d10",
+   "mass": 0.003,
+   "pos": [
+    0.081,
+    0.022,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    -60
+   ],
+   "p": {
+    "r": 0.0065,
+    "h": 0.01,
+    "cd": 0.01
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b8",
+   "type": "box",
+   "name": "Antenna",
+   "color": "#111111",
+   "mass": 0.002,
+   "pos": [
+    -0.06,
+    0.03,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    35
+   ],
+   "p": {
+    "sx": 0.004,
+    "sy": 0.05,
+    "sz": 0.004,
+    "cd": 0.3
    },
    "servo": null,
    "invert": false,
@@ -80,7 +207,7 @@
    "id": "p4",
    "type": "box",
    "name": "Arm FL",
-   "color": "#2a2d33",
+   "color": "#23262c",
    "mass": 0.025,
    "pos": [
     0.0442,
@@ -106,7 +233,7 @@
    "id": "p5",
    "type": "box",
    "name": "Arm FR",
-   "color": "#2a2d33",
+   "color": "#23262c",
    "mass": 0.025,
    "pos": [
     0.0442,
@@ -132,7 +259,7 @@
    "id": "p6",
    "type": "box",
    "name": "Arm RL",
-   "color": "#2a2d33",
+   "color": "#23262c",
    "mass": 0.025,
    "pos": [
     -0.0358,
@@ -158,7 +285,7 @@
    "id": "p7",
    "type": "box",
    "name": "Arm RR",
-   "color": "#2a2d33",
+   "color": "#23262c",
    "mass": 0.025,
    "pos": [
     -0.0358,
@@ -206,6 +333,31 @@
    "motor": null
   },
   {
+   "id": "b9",
+   "type": "cylinder",
+   "name": "Motor base FL",
+   "color": "#c9cdd3",
+   "mass": 0.001,
+   "pos": [
+    0.0842,
+    0.0,
+    -0.08
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.0105,
+    "h": 0.006,
+    "cd": 0.01
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
    "id": "p9",
    "type": "motor",
    "name": "Motor FL",
@@ -225,7 +377,8 @@
     "torque": 0.5,
     "vmax": 3000,
     "reversible": 0,
-    "cd": 0
+    "cd": 0,
+    "size": 0.04
    },
    "servo": null,
    "invert": false,
@@ -241,7 +394,7 @@
    "id": "p10",
    "type": "prop",
    "name": "Prop FL (CW)",
-   "color": "#333",
+   "color": "#ff6a1f",
    "mass": 0.006,
    "pos": [
     0.0842,
@@ -257,11 +410,38 @@
     "d": 0.127,
     "thrust": 18,
     "vmax": 70,
-    "spin": 1
+    "spin": 1,
+    "chord": 0.014,
+    "thick": 0.004
    },
    "servo": null,
    "invert": false,
    "motor": "p9"
+  },
+  {
+   "id": "b10",
+   "type": "cylinder",
+   "name": "Prop nut FL",
+   "color": "#e23a2e",
+   "mass": 0.001,
+   "pos": [
+    0.0842,
+    0.03,
+    -0.08
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.004,
+    "h": 0.008,
+    "cd": 0.01
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
   },
   {
    "id": "p11",
@@ -289,6 +469,31 @@
    "motor": null
   },
   {
+   "id": "b11",
+   "type": "cylinder",
+   "name": "Motor base FR",
+   "color": "#c9cdd3",
+   "mass": 0.001,
+   "pos": [
+    0.0842,
+    0.0,
+    0.08
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.0105,
+    "h": 0.006,
+    "cd": 0.01
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
    "id": "p12",
    "type": "motor",
    "name": "Motor FR",
@@ -308,7 +513,8 @@
     "torque": 0.5,
     "vmax": 3000,
     "reversible": 0,
-    "cd": 0
+    "cd": 0,
+    "size": 0.04
    },
    "servo": null,
    "invert": false,
@@ -324,7 +530,7 @@
    "id": "p13",
    "type": "prop",
    "name": "Prop FR (CCW)",
-   "color": "#333",
+   "color": "#ff6a1f",
    "mass": 0.006,
    "pos": [
     0.0842,
@@ -340,11 +546,38 @@
     "d": 0.127,
     "thrust": 18,
     "vmax": 70,
-    "spin": -1
+    "spin": -1,
+    "chord": 0.014,
+    "thick": 0.004
    },
    "servo": null,
    "invert": false,
    "motor": "p12"
+  },
+  {
+   "id": "b12",
+   "type": "cylinder",
+   "name": "Prop nut FR",
+   "color": "#e23a2e",
+   "mass": 0.001,
+   "pos": [
+    0.0842,
+    0.03,
+    0.08
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.004,
+    "h": 0.008,
+    "cd": 0.01
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
   },
   {
    "id": "p14",
@@ -372,6 +605,31 @@
    "motor": null
   },
   {
+   "id": "b13",
+   "type": "cylinder",
+   "name": "Motor base RL",
+   "color": "#c9cdd3",
+   "mass": 0.001,
+   "pos": [
+    -0.0758,
+    0.0,
+    -0.08
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.0105,
+    "h": 0.006,
+    "cd": 0.01
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
    "id": "p15",
    "type": "motor",
    "name": "Motor RL",
@@ -391,7 +649,8 @@
     "torque": 0.5,
     "vmax": 3000,
     "reversible": 0,
-    "cd": 0
+    "cd": 0,
+    "size": 0.04
    },
    "servo": null,
    "invert": false,
@@ -407,7 +666,7 @@
    "id": "p16",
    "type": "prop",
    "name": "Prop RL (CCW)",
-   "color": "#333",
+   "color": "#ff6a1f",
    "mass": 0.006,
    "pos": [
     -0.0758,
@@ -423,11 +682,38 @@
     "d": 0.127,
     "thrust": 18,
     "vmax": 70,
-    "spin": -1
+    "spin": -1,
+    "chord": 0.014,
+    "thick": 0.004
    },
    "servo": null,
    "invert": false,
    "motor": "p15"
+  },
+  {
+   "id": "b14",
+   "type": "cylinder",
+   "name": "Prop nut RL",
+   "color": "#e23a2e",
+   "mass": 0.001,
+   "pos": [
+    -0.0758,
+    0.03,
+    -0.08
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.004,
+    "h": 0.008,
+    "cd": 0.01
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
   },
   {
    "id": "p17",
@@ -455,6 +741,31 @@
    "motor": null
   },
   {
+   "id": "b15",
+   "type": "cylinder",
+   "name": "Motor base RR",
+   "color": "#c9cdd3",
+   "mass": 0.001,
+   "pos": [
+    -0.0758,
+    0.0,
+    0.08
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.0105,
+    "h": 0.006,
+    "cd": 0.01
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
    "id": "p18",
    "type": "motor",
    "name": "Motor RR",
@@ -474,7 +785,8 @@
     "torque": 0.5,
     "vmax": 3000,
     "reversible": 0,
-    "cd": 0
+    "cd": 0,
+    "size": 0.04
    },
    "servo": null,
    "invert": false,
@@ -490,7 +802,7 @@
    "id": "p19",
    "type": "prop",
    "name": "Prop RR (CW)",
-   "color": "#333",
+   "color": "#ff6a1f",
    "mass": 0.006,
    "pos": [
     -0.0758,
@@ -506,11 +818,194 @@
     "d": 0.127,
     "thrust": 18,
     "vmax": 70,
-    "spin": 1
+    "spin": 1,
+    "chord": 0.014,
+    "thick": 0.004
    },
    "servo": null,
    "invert": false,
    "motor": "p18"
+  },
+  {
+   "id": "b16",
+   "type": "cylinder",
+   "name": "Prop nut RR",
+   "color": "#e23a2e",
+   "mass": 0.001,
+   "pos": [
+    -0.0758,
+    0.03,
+    0.08
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.004,
+    "h": 0.008,
+    "cd": 0.01
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b17",
+   "type": "box",
+   "name": "Skid L",
+   "color": "#111111",
+   "mass": 0.006,
+   "pos": [
+    0.0,
+    -0.044,
+    -0.03
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "sx": 0.13,
+    "sy": 0.006,
+    "sz": 0.006,
+    "cd": 0.3
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b18",
+   "type": "box",
+   "name": "Skid strut L front",
+   "color": "#111111",
+   "mass": 0.003,
+   "pos": [
+    0.04,
+    -0.028,
+    -0.0255
+   ],
+   "rot": [
+    12,
+    0,
+    0
+   ],
+   "p": {
+    "sx": 0.006,
+    "sy": 0.034,
+    "sz": 0.005,
+    "cd": 0.3
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b19",
+   "type": "box",
+   "name": "Skid strut L rear",
+   "color": "#111111",
+   "mass": 0.003,
+   "pos": [
+    -0.04,
+    -0.028,
+    -0.0255
+   ],
+   "rot": [
+    12,
+    0,
+    0
+   ],
+   "p": {
+    "sx": 0.006,
+    "sy": 0.034,
+    "sz": 0.005,
+    "cd": 0.3
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b20",
+   "type": "box",
+   "name": "Skid R",
+   "color": "#111111",
+   "mass": 0.006,
+   "pos": [
+    0.0,
+    -0.044,
+    0.03
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "sx": 0.13,
+    "sy": 0.006,
+    "sz": 0.006,
+    "cd": 0.3
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b21",
+   "type": "box",
+   "name": "Skid strut R front",
+   "color": "#111111",
+   "mass": 0.003,
+   "pos": [
+    0.04,
+    -0.028,
+    0.0255
+   ],
+   "rot": [
+    -12,
+    0,
+    0
+   ],
+   "p": {
+    "sx": 0.006,
+    "sy": 0.034,
+    "sz": 0.005,
+    "cd": 0.3
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b22",
+   "type": "box",
+   "name": "Skid strut R rear",
+   "color": "#111111",
+   "mass": 0.003,
+   "pos": [
+    -0.04,
+    -0.028,
+    0.0255
+   ],
+   "rot": [
+    -12,
+    0,
+    0
+   ],
+   "p": {
+    "sx": 0.006,
+    "sy": 0.034,
+    "sz": 0.005,
+    "cd": 0.3
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
   },
   {
    "id": "p20",
@@ -536,7 +1031,8 @@
     "tz": 0,
     "kind": "attitude",
     "dir": "down",
-    "ref": ""
+    "ref": "",
+    "size": 0.05
    },
    "servo": null,
    "invert": false,
@@ -566,7 +1062,8 @@
     "tz": 0,
     "kind": "angularRate",
     "dir": "down",
-    "ref": ""
+    "ref": "",
+    "size": 0.05
    },
    "servo": null,
    "invert": false,
@@ -596,7 +1093,8 @@
     "tz": 0,
     "kind": "altitudeAGL",
     "dir": "down",
-    "ref": ""
+    "ref": "",
+    "size": 0.05
    },
    "servo": null,
    "invert": false,
@@ -626,7 +1124,8 @@
     "tz": 0,
     "kind": "verticalSpeed",
     "dir": "down",
-    "ref": ""
+    "ref": "",
+    "size": 0.05
    },
    "servo": null,
    "invert": false,
@@ -656,7 +1155,8 @@
     "tz": 0,
     "kind": "airspeed",
     "dir": "down",
-    "ref": ""
+    "ref": "",
+    "size": 0.05
    },
    "servo": null,
    "invert": false,
@@ -686,7 +1186,8 @@
     "tz": 0,
     "kind": "target",
     "dir": "down",
-    "ref": ""
+    "ref": "",
+    "size": 0.05
    },
    "servo": null,
    "invert": false,

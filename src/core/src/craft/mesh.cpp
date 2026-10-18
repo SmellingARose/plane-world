@@ -235,13 +235,15 @@ MeshData partMesh(const CraftPart& part) {
     case PartType::Wing: return airfoilWing(f("chord"), f("thick"), f("span"), f("camber"));
     case PartType::Servo: return box({0.14f, 0.08f, 0.08f});
     case PartType::Wheel: return rotated(cylinder(f("r"), f("r"), f("width")), rx[0], rx[1], rx[2], rx[3]);
-    case PartType::Motor: return rotZ(cylinder(0.22f, 0.25f, 0.5f, 16));
-    case PartType::Prop: return box({0.06f, f("d"), 0.14f});
+    // Motor / sensor / prop visuals default to sizes for ~1-10 m aircraft; the optional "size" (uniform scale) and
+    // prop "chord" / "thick" params let small craft (e.g. the 5-inch racer quad) use true-to-scale meshes.
+    case PartType::Motor: { const float s = float(part.param("size", 1)); return rotZ(cylinder(0.22f * s, 0.25f * s, 0.5f * s, 16)); }
+    case PartType::Prop: return box({float(part.param("thick", 0.06)), f("d"), float(part.param("chord", 0.14))});
     case PartType::Jet: return rotZ(cylinder(f("r") * 0.75f, f("r"), f("len")));
     case PartType::Tank: return rotZ(capsule(f("r"), std::max(0.01f, f("len") - 2 * f("r"))));
     case PartType::Solid: return rotZ(cylinder(f("r") * 0.8f, f("r"), f("len"), 16));
     case PartType::Cad: return triangleSoup(geo::floatsFromBase64(part.cad ? *part.cad : std::string()), f("scale"));
-    case PartType::Sensor: return sphere(0.06f);
+    case PartType::Sensor: return sphere(0.06f * float(part.param("size", 1)));
     case PartType::Unknown: break;
     }
     return box({0.2f, 0.2f, 0.2f});

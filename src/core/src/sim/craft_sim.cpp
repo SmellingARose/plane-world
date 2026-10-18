@@ -285,8 +285,8 @@ std::pair<Vec3d, Vec3d> CraftSim::bounds(const PartSpec& d) {
     case PartType::Wing: return {{p("chord"), p("thick"), p("span")}, {}};
     case PartType::Servo: return {{0.14, 0.08, 0.08}, {}};
     case PartType::Wheel: return {{2 * p("r"), 2 * p("r"), p("width")}, {}};
-    case PartType::Motor: return {{0.5, 0.5, 0.5}, {}};
-    case PartType::Prop: return {{0.06, p("d"), 0.14}, {}};
+    case PartType::Motor: return {Vec3d::splat(0.5 * d.param("size", 1)), {}};   // optional "size" scale (matches craft::partMesh)
+    case PartType::Prop: return {{d.param("thick", 0.06), p("d"), d.param("chord", 0.14)}, {}};
     case PartType::Jet: case PartType::Tank: case PartType::Solid: return {{p("len"), 2 * p("r"), 2 * p("r")}, {}};
     case PartType::Cad:
         if (d.cad) {
@@ -302,7 +302,7 @@ std::pair<Vec3d, Vec3d> CraftSim::bounds(const PartSpec& d) {
             }
         }
         return {Vec3d::splat(0.5), {}};
-    case PartType::Sensor: return {Vec3d::splat(0.12), {}};
+    case PartType::Sensor: return {Vec3d::splat(0.12 * d.param("size", 1)), {}};
     }
     return {Vec3d::splat(0.2), {}};
 }

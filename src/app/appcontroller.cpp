@@ -216,7 +216,7 @@ void AppController::documentEdited(bool) {
 void AppController::rebuildMeshCache() {
     m_pick.clear();
     m_pick.reserve(m_doc.parts.size());
-    double radius = 1;
+    double radius = 0.1;   // small craft (a 5-inch quad is ~0.15 m) must frame close
     for (const auto& p : m_doc.parts) {
         PickMesh pm;
         pc::MeshData md = pc::partMesh(p);
