@@ -10,7 +10,12 @@
 #include <set>
 #include <sstream>
 #include "pw/selftest.h"
+#include "pw/craft/document.h"
+#include "pw/craft/embedded_crafts.h"
+#include "pw/craft/outputs.h"
 #include "pw/sim/craft_sim.h"
+#include "pw/sim/craft_spec.h"
+#include "pw/sim/controls.h"
 #include "pw/sim/physics_selftests.h"
 
 namespace pw::sim {
@@ -308,6 +313,44 @@ void registerPhysicsTests() {
         const bool legacy = run(false), now = run(true);
         c.note(fmt("full aileron at 40 m/s: legacy model servo stall=%s, AC-pivot model servo stall=%s", legacy ? "yes" : "no", now ? "yes" : "no"));
         ex(!now, "aileron servo holds full deflection at 40 m/s with the AC-pivot hinge model");
+        return ex.ok;
+    });
+
+    selftest::add("physics.multirotor-fc", [](Context& c) {
+        // Racer quad under its "controls" block (multirotor controller): holds a hover, and each axis moves it the right way.
+        Expect ex{c};
+        craft::CraftDocument doc; std::string err;
+        for (const auto* b = craft::embedded::presets(); b->name; ++b)
+            if (std::string(b->name) == "Racer quad") craft::parseCraft({b->data, b->size}, doc, err);
+        const auto flight = craft::outputs::prepareForFlight(doc);
+        const ControlScheme scheme = ControlScheme::fromDocument(flight);
+        ex(scheme.controller == ControllerKind::Multirotor && scheme.axes.size() == 4, "racer quad declares a multirotor controller with 4 axes");
+        auto fly = [&](const char* axis, double secs, CraftSim& sim) {
+            sim.load(CraftSpec::fromDocument(flight));
+            sim.reset(sim.restingSpawn() + Vec3d{0, 20, 0});
+            ControlSystem cs; cs.load(scheme, sim);
+            SimEnvironment env; env.wind = {0, 0, 3};   // a light crosswind, like the default WORLD
+            const double dt = 1.0 / 120;
+            for (double t = 0; t < secs; t += dt) {
+                if (axis && t >= 1.5) cs.setAxis(cs.axisIndex(axis), 1);
+                cs.step(sim, [](const std::string&) { return false; }, dt);
+                sim.step(dt, env);
+            }
+        };
+        CraftSim h; fly(nullptr, 6, h);
+        const Vec3d hv = h.velocity();
+        c.note(fmt("hover: alt %.2f m, vy %.2f, |v| %.2f m/s (drifting with the wind), up.y %.3f, wy %.2f", h.position().y, hv.y, length(hv), h.orientation().act({0, 1, 0}).y, h.angularVelocityWorld().y));
+        ex(std::abs(hv.y) < 0.5 && h.orientation().act({0, 1, 0}).y > 0.98, "hover holds altitude and stays level");
+        CraftSim f; fly("pitch", 4, f);
+        CraftSim r; fly("roll", 4, r);
+        CraftSim cl; fly("throttle", 4, cl);
+        CraftSim y; fly("yaw", 3, y);
+        const double yawRate = y.angularVelocityWorld().y;   // turning right = negative rate about world up
+        c.note(fmt("pitch: vx %.1f, roll: vz %.1f, throttle: vy %.1f, yaw: rate %.2f rad/s", f.velocity().x, r.velocity().z, cl.velocity().y, yawRate));
+        ex(f.velocity().x > 3, "pitch axis flies forward (+x)");
+        ex(r.velocity().z > 3, "roll axis flies right (+z)");
+        ex(cl.velocity().y > 3, "throttle axis climbs");
+        ex(yawRate < -1.5, "yaw axis turns right");
         return ex.ok;
     });
 

@@ -61,16 +61,18 @@ edit the JSON directly.
 
 ### Controls (FLY keys)
 
-There is no output mixer: each keybind drives one output, so a keyboard cannot give pitch and roll. The
-keybinds give throttle and yaw only:
+The craft declares `"controls": { "controller": "multirotor" }`, so FLY flies it with the built-in angle-mode
+flight controller ([CONTROLS.md](CONTROLS.md)):
 
-| Keys | Outputs | Effect |
+| Keys | Axis | Effect |
 |---|---|---|
-| ↑ / ↓ (ramp) | `Motor FL`, `Motor RR` (CW pair) | Press both pairs together for throttle |
-| W / S (ramp) | `Motor FR`, `Motor RL` (CCW pair) | Run the pairs at different levels to yaw |
+| W / S | throttle | Climb / descend at up to 6 m/s; release to hold altitude |
+| A / D | yaw | Turn left / right |
+| ↑ / ↓ | pitch | Tilt forward / back (up to 35°); release to level |
+| ← / → | roll | Tilt left / right; release to level |
 
-The ramp rate is 0.25/s; hover is about 0.04. For stable flight in FLY, train `drone-hover` and use "Autopilot
-from evolved controller" (export the best craft from EVOLVE).
+It sits idle on the ground until you press W. The props are mounted flat; the controller handles the CoM / thrust
+offset itself.
 
 ### Experiments
 

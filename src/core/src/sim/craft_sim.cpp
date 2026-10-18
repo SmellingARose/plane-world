@@ -755,7 +755,8 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
                 double Rd = smax(0.05, P[i].kD / 2);
                 P[i].vi = aero::diskVelocity(Tn, rho, kPi * Rd * Rd, vax, P[i].kDucted);
             } else P[i].vi = 0;
-            double targetOmega = 2 * kPi * r.rps * std::fabs(thr) * (thr >= 0 ? 1 : -1) * P[i].kSpin;
+            const double spinFrac = tg.rotorSpeedLaw ? std::cbrt(std::fabs(thr)) : std::fabs(thr);   // ω ∝ P^(1/3) (FastAeroToggles::rotorSpeedLaw)
+            double targetOmega = 2 * kPi * r.rps * spinFrac * (thr >= 0 ? 1 : -1) * P[i].kSpin;
             double omegaPrev = P[i].omega;
             P[i].omega += (targetOmega - P[i].omega) * smin(1, h / 0.4);
             if (tg.spinReaction) T -= dir * (P[i].kIrot * (P[i].omega - omegaPrev) / h);   // spin-up reaction (h = dir I omega)

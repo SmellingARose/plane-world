@@ -30,8 +30,11 @@ struct FastAeroToggles {
     /// Mass / CoM / inertia follow fuel use every substep, including the burnout step. Off = legacy (every 10th
     /// substep while burning, so up to 9 substeps of propellant stayed in the mass after burnout).
     bool exactMass = true;
+    /// Fixed-pitch rotor speed follows power as ω ∝ P^(1/3) (P ∝ ω³, T ∝ Q ∝ ω²), so drag torque grows with thrust and
+    /// a multirotor can yaw by differential throttle. Off = legacy (ω ∝ throttle, which made torque = P/ω constant).
+    bool rotorSpeedLaw = true;
     /// Sets every correctness fix that changes trajectories back to the Swift-era behaviour (parity tests only).
-    FastAeroToggles& setSwiftLegacy() { hingeAtAC = false; staticFriction = false; spinReaction = false; finiteWingStall = false; exactMass = false; return *this; }
+    FastAeroToggles& setSwiftLegacy() { hingeAtAC = false; staticFriction = false; spinReaction = false; finiteWingStall = false; exactMass = false; rotorSpeedLaw = false; return *this; }
     bool operator==(const FastAeroToggles&) const = default;
 };
 

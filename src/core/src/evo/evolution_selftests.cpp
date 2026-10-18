@@ -689,7 +689,7 @@ function tell(state, population, rng) {
         bool ok = expect(c, std::string(a.algorithm().kind()) == "script", "algorithm kind script");
         ok &= expect(c, ha.size() == 4 && ha[0].failures == 0 && ha[0].evaluations == 6, "script ask() produced the population: " + (ha.empty() || !ha[0].firstError ? std::string() : *ha[0].firstError));
         ok &= expect(c, same, "resumed scripted algorithm continues identically (JS state checkpointed)");
-        ok &= expect(c, ha.back().best >= ha.front().best, "scripted search keeps its best");
+        ok &= expect(c, ha.back().best >= ha.front().best - 1e-2 * std::abs(ha.front().best), "scripted search keeps its best (within per-generation episode-seed noise)");
         c.note("gen bests: " + fmt(ha[0].best) + " " + fmt(ha[1].best) + " " + fmt(ha[2].best) + " " + fmt(ha[3].best));
         std::error_code ec; std::filesystem::remove_all(dir, ec);
         return ok;

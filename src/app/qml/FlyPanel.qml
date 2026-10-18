@@ -68,6 +68,30 @@ ColumnLayout {
         }
     }
 
+    // Pilot axes (pw/sim/controls.h): keys drive named axes, the craft's controller turns them into outputs.
+    PwSection {
+        visible: App.controller !== "direct"
+        title: "Pilot (" + App.controller + ")"
+        hint: App.controller === "multirotor" ? "Flight controller: throttle sets climb rate (release to hold altitude), arrows tilt (release to level), yaw turns." : ""
+        PwCard {
+            Repeater {
+                model: App.controlAxes
+                delegate: RowLayout {
+                    id: ax
+                    required property var modelData
+                    required property int index
+                    readonly property real v: App.axisValues[index] !== undefined ? App.axisValues[index] : 0
+                    Layout.fillWidth: true
+                    spacing: Theme.s1
+                    Label { text: ax.modelData.name; font.pixelSize: Theme.small; font.weight: Font.Medium; Layout.fillWidth: true }
+                    KeyHint { visible: ax.modelData.negLabel !== ""; raw: true; sequence: ax.modelData.negLabel; active: App.heldKeys.indexOf(ax.modelData.neg) >= 0 }
+                    KeyHint { visible: ax.modelData.posLabel !== ""; raw: true; sequence: ax.modelData.posLabel; active: App.heldKeys.indexOf(ax.modelData.pos) >= 0 }
+                    Label { text: Theme.signed(ax.v, 2); font.family: Theme.mono; font.pixelSize: Theme.small; color: Theme.accent; Layout.preferredWidth: 46; horizontalAlignment: Text.AlignRight }
+                }
+            }
+        }
+    }
+
     PwSection {
         title: "Controls (" + App.outputs.length + ")"
         hint: "Drag a slider or use its keys; held keys light up. Bind keys in BUILD › Outputs."
@@ -93,6 +117,7 @@ ColumnLayout {
                         Layout.fillWidth: true
                         from: oc.modelData.lo; to: oc.modelData.hi
                         value: oc.v
+                        enabled: !oc.modelData.owned   // driven by the flight controller
                         focusPolicy: Qt.TabFocus
                         onMoved: App.setOutputValue(oc.modelData.id, value)
                         TapHandler { onDoubleTapped: App.setOutputValue(oc.modelData.id, oc.modelData.lo <= 0 && oc.modelData.hi >= 0 ? 0 : oc.modelData.lo) }

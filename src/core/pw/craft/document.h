@@ -114,6 +114,7 @@ struct OutputKeybind {
     bool operator==(const OutputKeybind&) const = default;
 };
 std::optional<OutputKeybind> keybind(const CraftPart& p);
+std::optional<OutputKeybind> keybindFromJson(const Value& v);
 /// Sets or (when empty / nullopt) removes "keys".
 void setKeybind(CraftPart& p, const std::optional<OutputKeybind>& kb);
 Value toJson(const OutputKeybind& k);

@@ -324,16 +324,19 @@ bool saveCraftFile(const CraftDocument& d, const std::string& path, std::string&
 
 // ---------------------------------------------------------------- keybinds
 
+std::optional<OutputKeybind> keybindFromJson(const Value& v) {
+    if (!v.isObject()) return std::nullopt;
+    OutputKeybind k;
+    k.pos = jsonString(v["pos"]);
+    k.neg = jsonString(v["neg"]);
+    auto mode = jsonString(v["mode"]).value_or("spring");
+    k.mode = mode == "ramp" ? OutputKeybind::Mode::Ramp : OutputKeybind::Mode::Spring;
+    k.rate = jsonDouble(v["rate"]).value_or(k.mode == OutputKeybind::Mode::Ramp ? 0.8 : 3);
+    return k;
+}
 std::optional<OutputKeybind> keybind(const CraftPart& p) {
     const Value* v = p.extra.find("keys");
-    if (!v || !v->isObject()) return std::nullopt;
-    OutputKeybind k;
-    k.pos = jsonString((*v)["pos"]);
-    k.neg = jsonString((*v)["neg"]);
-    auto mode = jsonString((*v)["mode"]).value_or("spring");
-    k.mode = mode == "ramp" ? OutputKeybind::Mode::Ramp : OutputKeybind::Mode::Spring;
-    k.rate = jsonDouble((*v)["rate"]).value_or(k.mode == OutputKeybind::Mode::Ramp ? 0.8 : 3);
-    return k;
+    return v ? keybindFromJson(*v) : std::nullopt;
 }
 Value toJson(const OutputKeybind& k) {
     Value o = Value::object();

@@ -107,5 +107,6 @@ The app takes `--tab`, `--color-scheme`, `--size WxH`, `--command "<palette entr
 | [EVOLUTION.md](docs/EVOLUTION.md) | EVOLVE, experiment format, JavaScript API, algorithms, reward shaping |
 | [SCRIPTING.md](docs/SCRIPTING.md) | JavaScript engines (JavaScriptCore, QuickJS) and their differences |
 | [CRAFTS.md](docs/CRAFTS.md) | Bundled crafts and the ducted-rocket design |
+| [CONTROLS.md](docs/CONTROLS.md) | Keys → axes → controller → outputs: mix tables, the multirotor flight controller, adding a controller |
 | [PERF.md](docs/PERF.md) | Benchmarks and methodology |
 | [PACKAGING.md](docs/PACKAGING.md) | .dmg / .msi, signing, CI release |

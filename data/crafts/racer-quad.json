@@ -382,13 +382,7 @@
    },
    "servo": null,
    "invert": false,
-   "motor": null,
-   "keys": {
-    "pos": "up",
-    "neg": "down",
-    "mode": "ramp",
-    "rate": 0.25
-   }
+   "motor": null
   },
   {
    "id": "p10",
@@ -402,9 +396,9 @@
     -0.08
    ],
    "rot": [
-    -7.07,
     0,
-    97.07
+    0,
+    90
    ],
    "p": {
     "d": 0.127,
@@ -518,13 +512,7 @@
    },
    "servo": null,
    "invert": false,
-   "motor": null,
-   "keys": {
-    "pos": "w",
-    "neg": "s",
-    "mode": "ramp",
-    "rate": 0.25
-   }
+   "motor": null
   },
   {
    "id": "p13",
@@ -538,9 +526,9 @@
     0.08
    ],
    "rot": [
-    7.07,
     0,
-    97.07
+    0,
+    90
    ],
    "p": {
     "d": 0.127,
@@ -654,13 +642,7 @@
    },
    "servo": null,
    "invert": false,
-   "motor": null,
-   "keys": {
-    "pos": "w",
-    "neg": "s",
-    "mode": "ramp",
-    "rate": 0.25
-   }
+   "motor": null
   },
   {
    "id": "p16",
@@ -674,9 +656,9 @@
     -0.08
    ],
    "rot": [
-    -7.07,
     0,
-    82.93
+    0,
+    90
    ],
    "p": {
     "d": 0.127,
@@ -790,13 +772,7 @@
    },
    "servo": null,
    "invert": false,
-   "motor": null,
-   "keys": {
-    "pos": "up",
-    "neg": "down",
-    "mode": "ramp",
-    "rate": 0.25
-   }
+   "motor": null
   },
   {
    "id": "p19",
@@ -810,9 +786,9 @@
     0.08
    ],
    "rot": [
-    7.07,
     0,
-    82.93
+    0,
+    90
    ],
    "p": {
     "d": 0.127,
@@ -1193,5 +1169,8 @@
    "invert": false,
    "motor": null
   }
- ]
+ ],
+ "controls": {
+  "controller": "multirotor"
+ }
 }

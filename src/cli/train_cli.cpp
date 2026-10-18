@@ -157,7 +157,7 @@ int runTrain(const std::vector<std::string>& args) {
     // 2-D stall angle, lagged mass) used by the Swift reference runs in tools/train_parity.sh.
     if (has(args, "--swift-legacy")) {
         Value t = aero["toggles"].isObject() ? aero["toggles"] : Value::object();
-        for (const char* k : {"hingeAtAC", "staticFriction", "spinReaction", "finiteWingStall", "exactMass"}) t = with(t, k, Value::fromBool(false));
+        for (const char* k : {"hingeAtAC", "staticFriction", "spinReaction", "finiteWingStall", "exactMass", "rotorSpeedLaw"}) t = with(t, k, Value::fromBool(false));
         aero = with(aero, "toggles", t);
     }
     if (has(args, "--aero") || has(args, "--cfd-preset") || has(args, "--swift-legacy")) e = with(e, "aero", aero);

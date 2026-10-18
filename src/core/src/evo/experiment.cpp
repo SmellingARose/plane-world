@@ -114,6 +114,7 @@ AeroRunSettings aeroFromJson(const Value& v) {
         a.toggles.blockage = b("blockage", true); a.toggles.cadWash = b("cadWash", true); a.toggles.slipstream = b("slipstream", true); a.toggles.hingeAtAC = b("hingeAtAC", true);
         a.toggles.staticFriction = b("staticFriction", true); a.toggles.spinReaction = b("spinReaction", true);
         a.toggles.finiteWingStall = b("finiteWingStall", true); a.toggles.exactMass = b("exactMass", true);
+        a.toggles.rotorSpeedLaw = b("rotorSpeedLaw", true);
     }
     if (v["profile"].isString()) a.profile = v["profile"].str();
     else {
@@ -131,6 +132,7 @@ Value toJsonAero(const AeroRunSettings& a) {
     t.set("blockage", Value::fromBool(a.toggles.blockage)); t.set("cadWash", Value::fromBool(a.toggles.cadWash)); t.set("slipstream", Value::fromBool(a.toggles.slipstream)); t.set("hingeAtAC", Value::fromBool(a.toggles.hingeAtAC));
     t.set("staticFriction", Value::fromBool(a.toggles.staticFriction)); t.set("spinReaction", Value::fromBool(a.toggles.spinReaction));
     t.set("finiteWingStall", Value::fromBool(a.toggles.finiteWingStall)); t.set("exactMass", Value::fromBool(a.toggles.exactMass));
+    t.set("rotorSpeedLaw", Value::fromBool(a.toggles.rotorSpeedLaw));
     o.set("toggles", std::move(t));
     o.set("profile", Value::string(a.profile));
     return o;

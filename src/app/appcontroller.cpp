@@ -250,6 +250,7 @@ void AppController::reloadSim() {
     respawn();
     // keep slider values across edits in FLY; zero in BUILD
     m_values.assign(m_sim->outputs().size(), 0.0);
+    m_controls.load(sim::ControlScheme::fromDocument(m_flightDoc), *m_sim);
     applyAeroToSim();
 }
 
@@ -360,8 +361,10 @@ void AppController::rebuildOutputs() {
         m["rate"] = k.rate;
         m["bound"] = !k.isEmpty();
         m["conflict"] = (k.pos && isReservedKey(qs(*k.pos))) || (k.neg && isReservedKey(qs(*k.neg)));
+        const int si = m_sim ? m_sim->outputIndex(o.id) : -1;
+        m["owned"] = si >= 0 && m_controls.controller() != sim::ControllerKind::Direct && m_controls.ownsOutput(si);   // driven by the flight controller
         m_outputs.push_back(m);
-        m_outputSim.push_back(m_sim ? m_sim->outputIndex(o.id) : -1);
+        m_outputSim.push_back(si);
     }
     m_outputValues.clear();
     for (int si : m_outputSim) m_outputValues.push_back(si >= 0 && si < int(m_values.size()) ? m_values[std::size_t(si)] : 0.0);
@@ -764,12 +767,7 @@ bool AppController::isReservedKey(const QString& name) const {
 bool AppController::flyKey(QKeyEvent* e, bool press) {
     const QString name = keyName(e->key(), e->text());
     if (name.isEmpty()) return false;
-    bool bound = false;
-    for (const auto& o : m_outputs) {
-        const auto m = o.toMap();
-        if (m["pos"].toString() == name || m["neg"].toString() == name) { bound = true; break; }
-    }
-    if (bound) {
+    if (m_controls.usesKey(ss(name))) {
         if (press && m_ap) { setAutopilot(false); emit notify("Autopilot off: you have control", "info"); }
         if (press && !m_held.contains(name)) { m_held.insert(name); emit heldKeysChanged(); }
         if (!press && !e->isAutoRepeat() && m_held.remove(name)) emit heldKeysChanged();
@@ -827,6 +825,7 @@ void AppController::resetFlight() {
     respawn();
     std::fill(m_values.begin(), m_values.end(), 0.0);
     for (int i = 0; i < int(m_values.size()); ++i) m_sim->setOutput(i, 0.0);
+    m_controls.reset();
     if (m_backend && m_sim->isRunningFull()) m_backend->reset();
     for (auto& v : m_outputValues) v = 0.0;
     emit outputValuesChanged();
@@ -1037,7 +1036,10 @@ void AppController::frameTick() {
     if (logFrames) fprintf(stderr, "frame dt=%.2fms step=%.2fms work=%.2fms\n", dt * 1e3, step * 1e3, ft.nsecsElapsed() / 1e6);
     m_wallAccum += step;
     m_statAccum += step;
-    if (m_statAccum >= 0.1) { m_statAccum = 0; updateTelemetry(); }
+    if (m_statAccum >= 0.1) {
+        m_statAccum = 0; updateTelemetry();
+        if (m_ap || m_controls.controller() != sim::ControllerKind::Direct) syncOutputValues();
+    }
 }
 
 void AppController::tick() {
@@ -1051,29 +1053,47 @@ void AppController::tick() {
     if (m_statAccum >= 0.1) { m_statAccum = 0; updateTelemetry(); }
 }
 
-void AppController::applyKeybinds(double dt) {
-    bool changed = false;
-    for (int r = 0; r < int(m_outputs.size()); ++r) {
-        const auto m = m_outputs[r].toMap();
-        if (!m["bound"].toBool()) continue;
+void AppController::stepControls(double dt) {
+    if (m_ap) return;   // the evolved autopilot is flying; any bound key hands control back (flyKey)
+    const bool moved = m_controls.step(*m_sim, [this](const std::string& k) { return m_held.contains(qs(k)); }, dt);
+    if (moved && m_controls.controller() == sim::ControllerKind::Direct) syncOutputValues();
+}
+
+// Mirror the sim's output values into the FLY sliders (controllers and autopilots write them directly).
+void AppController::syncOutputValues() {
+    if (!m_sim) return;
+    const auto& outs = m_sim->outputs();
+    for (std::size_t i = 0; i < m_values.size() && i < outs.size(); ++i) m_values[i] = outs[i].value;
+    for (int r = 0; r < int(m_outputSim.size()); ++r) {
         const int si = m_outputSim[std::size_t(r)];
-        if (si < 0) continue;
-        pc::OutputKeybind k;
-        if (!m["pos"].toString().isEmpty()) k.pos = ss(m["pos"].toString());
-        if (!m["neg"].toString().isEmpty()) k.neg = ss(m["neg"].toString());
-        k.mode = m["mode"].toString() == "ramp" ? pc::OutputKeybind::Mode::Ramp : pc::OutputKeybind::Mode::Spring;
-        k.rate = m["rate"].toDouble();
-        const bool up = k.pos && m_held.contains(qs(*k.pos)), down = k.neg && m_held.contains(qs(*k.neg));
-        const double v0 = m_values[std::size_t(si)];
-        const double v = pc::stepKeybind(k, v0, m["lo"].toDouble(), m["hi"].toDouble(), up, down, dt);
-        if (v != v0) { m_values[std::size_t(si)] = v; m_sim->setOutput(si, v); m_outputValues[r] = v; changed = true; }
+        if (si >= 0 && si < int(outs.size())) m_outputValues[r] = outs[std::size_t(si)].value;
     }
-    if (changed) emit outputValuesChanged();
+    emit outputValuesChanged();
+}
+
+QVariantList AppController::controlAxes() const {
+    QVariantList l;
+    for (const auto& a : m_controls.axes()) {
+        QVariantMap m;
+        m["name"] = qs(a.name);
+        m["pos"] = a.keys.pos ? qs(*a.keys.pos) : QString(); m["neg"] = a.keys.neg ? qs(*a.keys.neg) : QString();
+        m["posLabel"] = a.keys.pos ? QString::fromUtf8(pc::keyDisplayName(a.keys.pos)) : QString();
+        m["negLabel"] = a.keys.neg ? QString::fromUtf8(pc::keyDisplayName(a.keys.neg)) : QString();
+        m["lo"] = a.lo; m["hi"] = a.hi;
+        l.push_back(m);
+    }
+    return l;
+}
+
+QVariantList AppController::axisValues() const {
+    QVariantList l;
+    for (const auto& a : m_controls.axes()) l.push_back(a.value);
+    return l;
 }
 
 void AppController::stepFly(double dt) {
     if (!m_sim) return;
-    applyKeybinds(dt);
+    stepControls(dt);
     if (m_ap) {   // evolved controller at its trained control rate (zero-order hold between ticks, like EVOLVE)
         const double period = 1 / m_ap->controlHz();
         m_apAccum += dt;

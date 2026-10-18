@@ -25,6 +25,7 @@
 #include "pw/evo/evaluator.h"
 #include "pw/geo.h"
 #include "pw/sim/cfd.h"
+#include "pw/sim/controls.h"
 #include "pw/sim/craft_sim.h"
 #include "pw/sim/fidelity.h"
 
@@ -70,6 +71,9 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList outputs READ outputs NOTIFY outputsChanged)          // structure (changes with the document)
     Q_PROPERTY(QVariantList outputValues READ outputValues NOTIFY outputValuesChanged)   // live values (FLY)
     Q_PROPERTY(QStringList heldKeys READ heldKeys NOTIFY heldKeysChanged)
+    Q_PROPERTY(QString controller READ controller NOTIFY outputsChanged)                  // "direct" | "multirotor" (pw/sim/controls.h)
+    Q_PROPERTY(QVariantList controlAxes READ controlAxes NOTIFY outputsChanged)          // pilot axes (structure)
+    Q_PROPERTY(QVariantList axisValues READ axisValues NOTIFY outputValuesChanged)       // live axis values
     Q_PROPERTY(QVariantList inputs READ inputs NOTIFY inputsChanged)
     // ---- FLY
     Q_PROPERTY(bool paused READ paused WRITE setPaused NOTIFY pausedChanged)
@@ -161,6 +165,9 @@ public:
     QStringList heldKeys() const;
     QVariantList inputs() const { return m_inputs; }
     Q_INVOKABLE void setOutputValue(const QString& id, double value);
+    QString controller() const { return QString::fromLatin1(pw::sim::controllerName(m_controls.controller())); }
+    QVariantList controlAxes() const;
+    QVariantList axisValues() const;
     bool autopilot() const { return m_ap != nullptr; }
     bool autopilotAvailable() const { return m_apCtx != nullptr; }
     void setAutopilot(bool on);
@@ -296,7 +303,8 @@ private:
     double m_frameEma = 0;
     double m_lastStep = 0;   // sim time advanced in the last frame (s)   // smoothed frame interval (s)   // measured wall time not yet simulated (drift correction for refresh snapping)
     void stepFly(double dt);
-    void applyKeybinds(double dt);
+    void stepControls(double dt);
+    void syncOutputValues();
     void updateTelemetry();
     void collectEquations();
     std::string newId();
@@ -350,6 +358,7 @@ private:
     pw::evo::ScriptRuntimeFactory m_apFactory;
     std::unique_ptr<pw::evo::EvalWorker> m_ap;   // bound to m_sim while the autopilot flies
     double m_apAccum = 0;
+    pw::sim::ControlSystem m_controls;   // keys -> axes -> controller -> outputs
     std::vector<double> m_values;   // output values (index = m_sim outputs)
     std::vector<int> m_outputSim;   // m_outputs row -> sim output index
     // aero
