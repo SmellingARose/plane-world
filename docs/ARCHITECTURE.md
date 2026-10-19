@@ -11,7 +11,7 @@ MSL / DXIL at build time, and a Qt 6 Quick app on top. One CMake project at the 
 | `src/gpu` | `pwgpu` | device, buffers, textures, graphics + compute pipelines, graphics and async-compute queues, fences, triple-buffered frames, GPU timestamps (`pw/gpu.h`); GPGPU layer for simulation kernels (`pw/compute.h`). Metal in Objective-C++, Direct3D 12 with a WARP fallback |
 | `src/render` | `pwrender` | frame graph, sky / aerial-perspective LUTs, cascaded shadows, PBR meshes, TAA, bloom, ACES, debug lines, `CraftRenderable` |
 | `src/env` | `pwenv`, `pwenv_render` | terrain (flat / procedural + GPU erosion / heightmap / real-world DEM tiles, sculpt + paint), FFT ocean, lakes, rivers, buoyancy, FLIP fluid zones, vegetation, grass; their renderables |
-| `src/flow` | `pwflow`, `pwflow_render` | lattice-Boltzmann CFD (`pw/flow/lbm.h`, see [CFD.md](CFD.md)) and the flow slice / tracer overlay |
+| `src/flow` | `pwflow`, `pwflow_fv`, `pwflow_render` | lattice-Boltzmann CFD (`pw/flow/lbm.h`, [CFD.md](CFD.md)); finite-volume Navier–Stokes CFD and the OpenFOAM reference (`pw/flow/ns.h`, `pw/flow/openfoam.h`, [CFD_NS.md](CFD_NS.md)); the flow slice / tracer overlay |
 | `src/app` | `pwapp` ("Plane World"), `pwuitests` | Qt Quick UI (`qml/`), `AppController` (BUILD / FLY), `WorldModel`, `EvolveModel`, `GpuViewport` / `WorldViewport` |
 | `src/cli` | `pwcli` | headless `--selftest`, `--train`, `--bench`, `--aero-compare`, `--gpu-smoke`, `--render-shot`, `--info` |
 | `shaders` | `pw_shaders` | Slang sources (`scene.slang`, `env/`, `flow/`), embedded per backend by `cmake/PWSlang*.cmake` |

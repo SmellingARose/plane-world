@@ -91,7 +91,9 @@ class AppController : public QObject {
     // ---- aero model
     Q_PROPERTY(QVariantList aeroModels READ aeroModels CONSTANT)
     Q_PROPERTY(QString aeroModel READ aeroModel WRITE setAeroModel NOTIFY aeroChanged)
-    Q_PROPERTY(bool fullModel READ fullModel NOTIFY aeroChanged)
+    Q_PROPERTY(bool fullModel READ fullModel NOTIFY aeroChanged)        // any CFD method (LBM or NS-FV)
+    Q_PROPERTY(QString cfdMethod READ cfdMethod NOTIFY aeroChanged)      // "lbm", "ns" or "" (fast)
+    Q_PROPERTY(QString cfdMethodLabel READ cfdMethodLabel NOTIFY aeroChanged)
     Q_PROPERTY(bool fullAvailable READ fullAvailable CONSTANT)
     Q_PROPERTY(QVariantMap fastToggles READ fastToggles NOTIFY aeroChanged)
     Q_PROPERTY(QString aeroError READ aeroError NOTIFY aeroChanged)
@@ -207,9 +209,14 @@ public:
     bool crashed() const { return m_sim && m_sim->crashed(); }
 
     QVariantList aeroModels() const;
-    QString aeroModel() const;   // profile id, "custom" or "full.<preset>"
+    QString aeroModel() const;   // profile id, "custom", "full.<preset>" (LBM) or "ns.<preset>" (Navier–Stokes FV)
     void setAeroModel(const QString& id);
-    bool fullModel() const { return m_aeroModel == "full"; }
+    bool fullModel() const { return m_aeroModel == "full" || m_aeroModel == "ns"; }
+    QString cfdMethod() const { return m_aeroModel == "full" ? "lbm" : m_aeroModel == "ns" ? "ns" : ""; }
+    QString cfdMethodLabel() const;
+    /// OpenFOAM offline reference: writes a case for the current craft at the current airspeed (>= 10 m/s) and pitch;
+    /// returns the case directory ("" on failure, with a notification).
+    Q_INVOKABLE QString exportOpenFoam();
     bool fullAvailable() const;
     QVariantMap fastToggles() const;
     Q_INVOKABLE void setFastToggle(const QString& key, bool on);

@@ -27,7 +27,7 @@ Rectangle {
             color: Theme.alpha(App.fullModel && App.aeroError === "" ? Theme.cfd : Theme.accent, 0.16)
             Text { id: mlabel; anchors.centerIn: parent; font.pixelSize: Theme.caption; font.weight: Font.DemiBold
                 color: App.fullModel && App.aeroError === "" ? Theme.cfd : Theme.accent
-                text: App.fullModel && App.aeroError === "" ? "FULL · CFD" : "FAST · analytic" }
+                text: App.fullModel && App.aeroError === "" ? (App.cfdMethod === "ns" ? "CFD · NS-FV URANS" : "CFD · LBM") : "FAST · analytic" }
             HoverHandler { id: mh }
             ToolTip.visible: mh.hovered; ToolTip.delay: Theme.tooltipDelay
             ToolTip.text: Theme.tip("Aero model in use (FLY › Aero model)", "Ctrl+Shift+M")

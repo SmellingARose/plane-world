@@ -1,8 +1,13 @@
 # Plane World
 
 A flight and vehicle physics sandbox: build crafts from parts or CAD, fly them over procedural or real terrain, and
-evolve controllers and designs. Two aero models: fast analytic models (strip-theory wings, momentum props,
-actuator-disk slipstream) that run far above real time, and full GPU lattice-Boltzmann CFD around the craft.
+evolve controllers and designs. Three kinds of aero, kept distinct:
+- **Fast (analytic):** strip-theory wings, momentum props and actuator-disk slipstream. Runs far above real time.
+- **CFD · Lattice Boltzmann:** real-time GPU CFD around the craft.
+- **CFD · Navier–Stokes FV:** a GPU finite-volume solver (URANS k-ω SST, multigrid). Slower, and closer to
+  wind-tunnel numbers.
+
+An offline **OpenFOAM reference** export is provided for checking all three.
 C++20 core, Qt 6 Quick UI, Metal and Direct3D 12 renderers with shaders written once in Slang.
 
 | BUILD | FLY |
@@ -88,7 +93,9 @@ on every push to `main`; a `v*` tag drafts a GitHub release.
 pwcli --train examples/experiments/hover-pid.json --generations 10 --out /tmp/hover   # headless training, all cores
 pwcli --train my.json --resume --out /tmp/hover            # continue from the checkpoint in --out
 pwcli --make-experiment "Neural controller" my.json        # preset -> editable experiment
-pwcli --aero-compare Trainer --speed 25 --alpha 4          # fast model vs CFD, per part
+pwcli --aero-compare Trainer --speed 25 --alpha 4          # fast model vs CFD (LBM), per part
+pwcli --aero-compare Trainer --speed 25 --alpha 4 --ns     # + Navier–Stokes FV column (--openfoam <case> adds OpenFOAM)
+pwcli --openfoam-export Trainer --speed 25 --alpha 4 --out cases/t25   # OpenFOAM reference case (--run if installed)
 pwcli --bench all                                          # benchmarks (--bench list)
 pwcli --info                                               # CPU features, GPU backend
 ```
@@ -104,6 +111,7 @@ The app takes `--tab`, `--color-scheme`, `--size WxH`, `--command "<palette entr
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Targets, threading, determinism, GPU backends and shaders, tests |
 | [PHYSICS.md](docs/PHYSICS.md) | Every fast-model equation with code location, validity and sources ([interactive explainer](docs/explainer.html)) |
 | [CFD.md](docs/CFD.md) | Lattice-Boltzmann method, settings, presets, diagnostics, training with CFD |
+| [CFD_NS.md](docs/CFD_NS.md) | Navier–Stokes finite-volume CFD (URANS k-ω SST), validation, LBM vs NS vs OpenFOAM, OpenFOAM reference |
 | [EVOLUTION.md](docs/EVOLUTION.md) | EVOLVE, experiment format, JavaScript API, algorithms, reward shaping |
 | [SCRIPTING.md](docs/SCRIPTING.md) | JavaScript engines (JavaScriptCore, QuickJS) and their differences |
 | [CRAFTS.md](docs/CRAFTS.md) | Bundled crafts and the ducted-rocket design |

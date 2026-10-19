@@ -1,5 +1,12 @@
 # Plane World: Full-flow model (GPU CFD)
 
+> **Three distinct ways to get aero forces.** *Fast (analytic)* formulas ([PHYSICS.md](PHYSICS.md));
+> *CFD · Lattice Boltzmann*, the GPU solver described on this page and the fastest CFD here; and
+> *CFD · Navier–Stokes FV*, a GPU finite-volume incompressible solver (projection + multigrid, URANS k-ω SST,
+> sharp immersed boundaries). The NS solver costs more per cell. On a uniform 20-cells/chord grid it gives a
+> symmetric AR-2 lift slope of 2.16 /rad (Helmbold 2.60) and plate skin friction within 3-12 %. There is also an offline **OpenFOAM reference** (case export + run + force import, not a
+> flight model). The last two, and the comparison table, are in [CFD_NS.md](CFD_NS.md).
+
 The aero model is a switch: **fast** (strip wings, momentum props, actuator-disk slipstream, Newtonian panels;
 see `docs/PHYSICS.md`) or **full** (a lattice-Boltzmann CFD solver on the GPU: Metal on macOS, D3D12 on
 Windows; Slang shaders in `shaders/flow`). Both FLY and training (`pwcli --train`, EVOLVE) can use either.

@@ -7,6 +7,7 @@
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QQmlEngine>
+#include <QRegularExpression>
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -17,6 +18,8 @@
 #include "pw/craft/meshcut.h"
 #include "pw/craft/outputs.h"
 #include "pw/flow/lbm.h"
+#include "pw/flow/ns.h"
+#include "pw/flow/openfoam.h"
 #include "pw/evo/evaluator.h"
 #include "evolvemodel.h"
 #include "worldmodel.h"
@@ -1189,34 +1192,90 @@ void AppController::updateTelemetry() {
 namespace {
 const sim::CFDQualityPreset kCfdPresets[] = {sim::CFDQualityPreset::Draft, sim::CFDQualityPreset::Medium,
                                              sim::CFDQualityPreset::High, sim::CFDQualityPreset::Ultra};
-bool cfdPresetFromId(const std::string& id, sim::CFDQualityPreset& out) {   // "full.medium" -> Medium
-    for (auto p : kCfdPresets) if (id == std::string("full.") + sim::toString(p)) { out = p; return true; }
+bool cfdPresetFromId(const std::string& id, sim::CFDQualityPreset& out, const char* prefix = "full.") {   // "full.medium" -> Medium
+    for (auto p : kCfdPresets) if (id == std::string(prefix) + sim::toString(p)) { out = p; return true; }
     return false;
 }
+const sim::CFDQualityPreset kNsPresets[] = {sim::CFDQualityPreset::Draft, sim::CFDQualityPreset::Medium, sim::CFDQualityPreset::High};
+const flow::NSTurbulence kNsModel = flow::NSTurbulence::KOmegaSST;   // default NS model (URANS)
+QString capitalized(const char* s) { QString n = QString::fromUtf8(s); if (!n.isEmpty()) n[0] = n[0].toUpper(); return n; }
 } // namespace
 
-// One list for FLY and EVOLVE (AeroModelPicker.qml): fast profiles, Full CFD presets, Custom.
+// One list for FLY and EVOLVE (AeroModelPicker.qml), grouped by method so the three kinds of aero are distinct:
+//   "Fast (analytic)" profiles | "CFD · Lattice Boltzmann" presets | "CFD · Navier–Stokes FV" presets | Custom.
+// (The OpenFOAM reference is an offline export, not a flight model: AeroPanel's export button.) EVOLVE lists only
+// the entries with "evolve" = true (training runs the LBM pool).
 QVariantList AppController::aeroModels() const {
     QVariantList l;
+    QString lastGroup;
+    auto add = [&](QVariantMap m, const QString& group, const QString& groupLabel, const QString& groupSummary) {
+        m["group"] = group; m["groupLabel"] = groupLabel; m["groupSummary"] = groupSummary;
+        m["firstInGroup"] = group != lastGroup;
+        lastGroup = group;
+        l.push_back(m);
+    };
+    const QString fastSum = "Closed-form strip / panel / momentum models. Microseconds per step, real time on any machine; accurate where the "
+                            "formulas hold (attached flow, moderate angles).";
     for (const auto& p : sim::fastAeroProfiles())
-        l.push_back(QVariantMap{{"id", qs(p.id)}, {"name", qs(p.name)}, {"summary", qs(p.summary)}, {"full", false}});
+        add({{"id", qs(p.id)}, {"name", qs(p.name)}, {"summary", qs(p.summary)}, {"full", false}, {"evolve", true}}, "fast", "Fast (analytic)", fastSum);
     const bool ok = fullAvailable();
+    const QString lbmSum = "Lattice-Boltzmann CFD on the GPU (D3Q19/27, LES, nested grid levels): the air is simulated around the craft every "
+                           "few physics steps. The fastest CFD here (real time on coarse settings), with a live flow slice; drag within ~20 %, "
+                           "lift sensitive to the wall model.";
     for (auto p : kCfdPresets) {
         const auto c = sim::CFDSettings::fromPreset(p);
-        QString name = qs(sim::toString(p)); name[0] = name[0].toUpper();
-        const QString summary = ok ? QString("GPU lattice-Boltzmann LES, %1 cells/m (max %2/axis), %3, CFD every %4 substep%5.")
+        const QString summary = ok ? QString("Lattice Boltzmann, %1 cells/m (max %2/axis), %3 LES, CFD every %4 substep%5. GPU, fastest CFD.")
                                          .arg(c.cellsPerMeter).arg(c.maxCellsPerAxis).arg(qs(sim::toString(c.lattice)).toUpper())
                                          .arg(c.updateEvery).arg(c.updateEvery == 1 ? "" : "s")
                                    : QString("Not available in this build (no CFD backend registered).");
-        l.push_back(QVariantMap{{"id", QString("full.") + sim::toString(p)}, {"name", "Full CFD · " + name}, {"summary", summary}, {"full", true}});
+        add({{"id", QString("full.") + sim::toString(p)}, {"name", "CFD · Lattice Boltzmann · " + capitalized(sim::toString(p))}, {"summary", summary},
+             {"full", true}, {"evolve", true}},
+            "lbm", "CFD · Lattice Boltzmann (real-time GPU)", lbmSum);
     }
-    l.push_back(QVariantMap{{"id", "custom"}, {"name", "Custom"}, {"full", false},
-                            {"summary", "Your own combination of fast-model effects."}});
+    const QString nsSum = QString("Finite-volume incompressible Navier–Stokes on the GPU, the textbook method: projection with multigrid pressure, "
+                                  "%1 with wall functions, sharp immersed boundaries. ~5-10x the LBM cost per cell (slower than real time above "
+                                  "Draft); best lift, skin friction and separation of the in-app methods.")
+                              .arg(qs(flow::turbulenceLabel(kNsModel)));
+    for (auto p : kNsPresets) {
+        const auto c = flow::nsSettingsFromPreset(p);
+        const QString summary = QString("Navier–Stokes FV · %1, %2 cells/m (max %3/axis), CFD every %4 substeps. GPU, slower, textbook method.")
+                                    .arg(qs(flow::turbulenceLabel(kNsModel))).arg(c.cellsPerMeter).arg(c.maxCellsPerAxis).arg(c.updateEvery);
+        add({{"id", QString("ns.") + sim::toString(p)}, {"name", "CFD · Navier–Stokes FV · " + capitalized(sim::toString(p))}, {"summary", summary},
+             {"full", true}, {"evolve", false}},
+            "ns", "CFD · Navier–Stokes finite volume (GPU, " + qs(flow::turbulenceLabel(kNsModel)) + ", slower)", nsSum);
+    }
+    add({{"id", "custom"}, {"name", "Custom"}, {"full", false}, {"evolve", true}, {"summary", "Your own combination of fast-model effects."}}, "custom", "Custom", "");
     return l;
+}
+
+QString AppController::cfdMethodLabel() const {
+    if (m_aeroModel == "full") return "CFD · Lattice Boltzmann";
+    if (m_aeroModel == "ns") return QString("CFD · Navier–Stokes FV · ") + qs(flow::turbulenceLabel(kNsModel));
+    return "Fast (analytic)";
+}
+
+QString AppController::exportOpenFoam() {
+    flow::openfoam::CaseOptions o;
+    if (m_sim) {
+        o.speed = std::max(10.0, length(m_sim->velocity()));
+        const Vec3d fwd = m_sim->orientation().act(Vec3d{1, 0, 0});
+        o.alphaDeg = std::asin(std::clamp(fwd.y, -1.0, 1.0)) * 180 / kPi;
+    }
+    QString name = qs(m_flightDoc.name.empty() ? std::string("craft") : m_flightDoc.name);
+    name.replace(QRegularExpression("[^A-Za-z0-9_-]"), "_");
+    const QString dir = QDir::homePath() + "/Documents/Plane World/OpenFOAM/" + name +
+                        QString("_%1ms_%2deg").arg(int(std::lround(o.speed))).arg(o.alphaDeg, 0, 'f', 1);
+    std::string err;
+    if (!flow::openfoam::exportCase(m_flightDoc, o, ss(dir), nullptr, &err)) { emit notify("OpenFOAM export failed: " + qs(err), "warn"); return {}; }
+    emit notify("OpenFOAM case written to " + dir + " (pimpleFoam, URANS k-ω SST). Run ./Allrun with OpenFOAM, then pwcli --aero-compare " + name +
+                    " --speed " + QString::number(int(std::lround(o.speed))) + " --ns --openfoam <dir>",
+                "info");
+    return dir;
 }
 
 QString AppController::aeroModel() const {
     if (m_aeroModel == "full") return QString("full.") + sim::toString(m_cfdSettings.preset);
+    if (m_aeroModel == "ns") return QString("ns.") + sim::toString(m_cfdSettings.preset);
     return qs(m_aeroModel);
 }
 
@@ -1225,22 +1284,24 @@ bool AppController::fullAvailable() const { return bool(sim::AeroBackendRegistry
 void AppController::setAeroModel(const QString& id) {
     std::string s = ss(id);
     sim::CFDQualityPreset preset;
-    if (cfdPresetFromId(s, preset)) {
-        if (m_cfdSettings.preset != preset) {
+    for (const char* kind : {"full", "ns"}) {
+        const std::string prefix = std::string(kind) + ".";
+        if (!cfdPresetFromId(s, preset, prefix.c_str())) continue;
+        if (m_cfdSettings.preset != preset || m_aeroModel != kind) {
             const auto vis = m_cfdSettings.visualization;
-            m_cfdSettings = sim::CFDSettings::fromPreset(preset);
+            m_cfdSettings = std::string(kind) == "ns" ? flow::nsSettingsFromPreset(preset) : sim::CFDSettings::fromPreset(preset);
             m_cfdSettings.visualization = vis;
-            if (m_aeroModel == "full") { applyAeroToSim(); emit aeroChanged(); return; }
+            if (m_aeroModel == kind) { applyAeroToSim(); emit aeroChanged(); return; }
         }
-        s = "full";
+        s = kind;
     }
     if (s == m_aeroModel) return;
     if (const auto* p = sim::fastAeroProfile(s)) m_toggles = p->toggles;
-    else if (s != "full" && s != "custom") return;
+    else if (s != "full" && s != "ns" && s != "custom") return;
     m_aeroModel = s;
     applyAeroToSim();
     emit aeroChanged();
-    emit notify("Aero model: " + (s == "full" ? QString("Full CFD") : sim::fastAeroProfile(s) ? qs(sim::fastAeroProfile(s)->name) : QString("Custom")), "info");
+    emit notify("Aero model: " + (s == "full" || s == "ns" ? cfdMethodLabel() : sim::fastAeroProfile(s) ? qs(sim::fastAeroProfile(s)->name) : QString("Custom")), "info");
 }
 
 QVariantMap AppController::fastToggles() const {
@@ -1253,7 +1314,7 @@ void AppController::setFastToggle(const QString& key, bool on) {
     if (key == "slipstream") t.slipstream = on; else if (key == "gyro") t.gyro = on; else if (key == "pFactor") t.pFactor = on;
     else if (key == "downwash") t.downwash = on; else if (key == "blockage") t.blockage = on; else if (key == "cadWash") t.cadWash = on;
     else return;
-    if (m_aeroModel != "full") {
+    if (m_aeroModel != "full" && m_aeroModel != "ns") {
         m_aeroModel = "custom";
         for (const auto& p : sim::fastAeroProfiles()) if (p.toggles == t) m_aeroModel = p.id;
     }
@@ -1266,12 +1327,23 @@ void AppController::applyAeroToSim() {
     m_sim->fastToggles = m_toggles;
     m_sim->slipstream = m_toggles.slipstream;
     QString err;
-    if (m_aeroModel == "full" && m_mode == "fly") {
-        if (!fullAvailable()) err = "No CFD backend in this build";
+    if ((m_aeroModel == "full" || m_aeroModel == "ns") && m_mode == "fly") {
+        const bool ns = m_aeroModel == "ns";
+        if (!ns && !fullAvailable()) err = "No CFD backend in this build";
         else {
+            // one backend at a time: the LBM from the registry, or the Navier–Stokes FV solver
+            const bool isNS = dynamic_cast<flow::NSSolver*>(m_backend.get()) != nullptr;
+            if (m_backend && isNS != ns) { m_sim->aeroModel = sim::AeroModel::Fast; m_sim->aeroBackend = nullptr; m_backend.reset(); }
             if (!m_backend) {
-                m_backend = sim::AeroBackendRegistry::makeFull()();
-                if (auto* s = dynamic_cast<flow::LBMSolver*>(m_backend.get())) s->nonBlockingCollect = true;   // FLY never waits on the GPU
+                if (ns) {
+                    auto n = std::make_unique<flow::NSSolver>();
+                    n->options.turbulence = kNsModel;
+                    n->nonBlockingCollect = true;   // FLY never waits on the GPU
+                    m_backend = std::move(n);
+                } else {
+                    m_backend = sim::AeroBackendRegistry::makeFull()();
+                    if (auto* s = dynamic_cast<flow::LBMSolver*>(m_backend.get())) s->nonBlockingCollect = true;   // FLY never waits on the GPU
+                }
             }
             std::string e;
             if (!m_backend || !m_backend->isAvailable()) err = "CFD backend unavailable (no compute GPU)";

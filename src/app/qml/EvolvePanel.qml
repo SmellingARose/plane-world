@@ -227,6 +227,7 @@ Rectangle {
                             Label { text: qsTr("Aero model"); color: Theme.textMuted; font.pixelSize: Theme.small }
                             AeroModelPicker {
                                 Layout.fillWidth: true
+                                evolveOnly: true
                                 currentId: !xp.aero ? "fast.plus" : xp.aero.model === "full" ? "full." + ((xp.aero.cfd && xp.aero.cfd.preset) || "medium") : (xp.aero.profile || "fast.plus")
                                 onPicked: (id) => ev.setAero(id)
                             }

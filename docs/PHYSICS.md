@@ -1,8 +1,9 @@
 # Plane World: Physics models and equations
 
 Every equation the **fast** aero model uses, where it lives in the C++ code, what it assumes and where it stops
-being valid. The **full** model (GPU lattice-Boltzmann CFD) is in `docs/CFD.md`, including the contract
-between the two models. In FLY, the EQUATIONS panel shows these formulas for the selected part with live values.
+being valid. The **full** models are CFD. The GPU lattice-Boltzmann solver (real time) is in `docs/CFD.md`, including
+the contract between the fast and full models. The GPU Navier–Stokes finite-volume solver (URANS k-ω SST, slower,
+textbook method) and the offline OpenFOAM reference are in `docs/CFD_NS.md`. In FLY, the EQUATIONS panel shows these formulas for the selected part with live values.
 
 Paths are relative to the repo root. `craft_sim.cpp` = `src/core/src/sim/craft_sim.cpp`, `aero.cpp` =
 `src/core/src/aero.cpp`. Line numbers drift; search for the function name if they do.

@@ -53,3 +53,20 @@ pw_add_slang_library(pwflow NAMESPACE pw::flow_shaders HEADER pw/flow_shaders.h
 add_library(pwflow_render STATIC render/flow_overlay.cpp)
 target_include_directories(pwflow_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/render)
 target_link_libraries(pwflow_render PUBLIC pwflow pwrender)
+
+# pwflow_fv: GPU finite-volume incompressible Navier–Stokes backend (pw/flow/ns.h, docs/CFD_NS.md) and the
+# OpenFOAM offline reference (case export / run / force import: pw/flow/openfoam.h; files + subprocess, not linked).
+add_library(pwflow_fv STATIC
+  src/fv_ns.cpp
+  src/fv_selftests.cpp
+  src/openfoam.cpp)
+target_include_directories(pwflow_fv PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${PROJECT_SOURCE_DIR}/shaders/include)
+target_link_libraries(pwflow_fv PUBLIC pwflow)
+set(PW_FV_ENTRIES "")
+foreach(e nsVoxelize nsShift nsMomentum nsIBM nsBC nsDivergence nsProject mgSmooth mgRestrict mgProlong mgCoarse mgResidual
+          nsTurbulence nsForces nsSample nsFill nsClear)
+  list(APPEND PW_FV_ENTRIES ${PROJECT_SOURCE_DIR}/shaders/flow/fv_ns.slang:${e}:compute)
+endforeach()
+pw_add_slang_library(pwflow_fv NAMESPACE pw::fv_shaders HEADER pw/fv_shaders.h
+  SHADERS ${PROJECT_SOURCE_DIR}/shaders/flow/fv_ns.slang
+  ENTRIES ${PW_FV_ENTRIES})

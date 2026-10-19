@@ -5,7 +5,9 @@
 //   pwcli --bench <name|all|list> [--reps N] [--json file]
 //   pwcli --train <experiment.json> [--generations N] [--out dir] [--resume] [--current-as-flat] [--aero m] [--cfd-preset p]
 //   pwcli --make-experiment "<preset>" <out.json> [--craft name]
-//   pwcli --aero-compare <craft|craft.json> [--speed V] [--alpha deg] [--cfd-preset p] ...   fast vs CFD per-part forces
+//   pwcli --aero-compare <craft|craft.json> [--speed V] [--alpha deg] [--cfd-preset p] [--ns] [--openfoam dir] ...
+//         per-part forces: fast (analytic) vs LBM vs Navier–Stokes FV vs OpenFOAM
+//   pwcli --openfoam-export <craft> --out <dir> [--speed V] [--alpha deg] [--steady] [--run] | --openfoam-run <dir>
 //   pwcli --info | --version
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +21,7 @@
 #include "pw/evo/train.h"
 #include "pw/selftest.h"
 #include "pw/flow/lbm.h"
+#include "pw/flow/ns.h"
 #include "pw/flow/overlay.h"
 #include "pw/env/env.h"
 #include "pw/env/render.h"
@@ -27,6 +30,7 @@ int runBench(const std::vector<std::string>& args);
 int runTrain(const std::vector<std::string>& args);
 int runMakeExperiment(const std::vector<std::string>& args);
 int runAeroCompare(const std::vector<std::string>& args);
+int runOpenFoam(const std::vector<std::string>& args);
 
 static const char* value(const std::vector<std::string>& a, const char* flag) {
     for (std::size_t i = 0; i + 1 < a.size(); ++i) if (a[i] == flag) return a[i + 1].c_str();
@@ -52,6 +56,7 @@ int main(int argc, char** argv) {
         pw::env::registerSelfTests();   // terrain.*, water.*, vegetation.*, env.*
         pw::envrender::registerSelfTests();   // envrender.* (terrain / water / vegetation through the renderer)
         pw::flow::registerSelfTests();        // flow.* (lattice-Boltzmann CFD)
+        pw::flow::registerFvSelfTests();      // ns.* (finite-volume Navier–Stokes CFD)
         pw::flow::registerRenderSelfTests();  // flowrender.* (flow overlay through the renderer)
         // GPU smoke as a self-test (skipped with a note when the machine has no usable GPU device).
         pw::selftest::add("gpu.smoke", [](pw::selftest::Context& c) {
@@ -95,6 +100,7 @@ int main(int argc, char** argv) {
     if (has(args, "--train")) { pw::evo::installTrainHandler(); return runTrain(args); }
     if (has(args, "--make-experiment")) return runMakeExperiment(args);
     if (has(args, "--aero-compare")) return runAeroCompare(args);
-    std::printf("usage: pwcli --selftest <name|all|list> | --gpu-smoke [--warp] | --bench <name|all|list> | --train <exp.json> | --make-experiment \"<preset>\" <out.json> | --aero-compare <craft> | --info | --version\n");
+    if (has(args, "--openfoam-export") || has(args, "--openfoam-run")) return runOpenFoam(args);
+    std::printf("usage: pwcli --selftest <name|all|list> | --gpu-smoke [--warp] | --bench <name|all|list> | --train <exp.json> | --make-experiment \"<preset>\" <out.json> | --aero-compare <craft> [--ns] [--openfoam dir] | --openfoam-export <craft> --out dir | --openfoam-run dir | --info | --version\n");
     return 2;
 }
