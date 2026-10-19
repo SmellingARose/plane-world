@@ -418,7 +418,7 @@ void registerFvAll() {
         cs.setVelocity({20, 0, 0}, {});
         NSSolver backend;
         CFDSettings s = nsSettingsFromPreset(sim::CFDQualityPreset::Draft);
-        if (small()) s.maxCellsPerAxis = 48;
+        // No small-grid cap: at 48 cells/axis (dx ~1.1 m) the Trainer is too coarse for a meaningful drag sign.
         if (!cs.enableFull(backend, flight, s, &err)) { c.note("enableFull: " + err); return false; }
         sim::SimEnvironment env;
         const double v0 = length(cs.velocity());

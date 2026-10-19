@@ -513,7 +513,9 @@ void registerAll() {
             cells[k] = solver.diagnostics().cellCount();
             c.note(fmt("%d level%s (%s): C_D %.3f, %lld cells, %.2f ms/update", s.levels, s.levels > 1 ? "s" : "", solver.layoutSummary().c_str(), cd[k], cells[k], ms[k]));
         }
-        return near(cd[1], cd[0], 0.03) && cells[1] < cells[0];
+        // Small grids (WARP CI) are coarser with a shorter averaging window, so the two layouts agree less closely
+        // (~4 %); full grids on real GPUs agree to < 1 % (RX 6700 XT D3D12: 1.012 vs 1.006, M4 Metal similar).
+        return near(cd[1], cd[0], sm ? 0.06 : 0.03) && cells[1] < cells[0];
     });
 
     addGpu("flow.regrid", [](Context& c) {
