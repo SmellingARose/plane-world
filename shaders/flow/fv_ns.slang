@@ -603,7 +603,7 @@ void mgProlong(uint3 id : SV_DispatchThreadID) {
     float acc = 0.0;
     for (int k = 0; k < 8; k++) {
         int3 bit = int3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
-        if (any(bit != 0 && o == 0)) continue;
+        if (any(bit * int3(o == 0) != 0)) continue;   // no vector && (HLSL 2021 rejects it)
         float w = 1.0;
         for (int a = 0; a < 3; a++) if (o[a] != 0) w *= bit[a] != 0 ? 0.25 : 0.75;
         acc += w * coarseValue(I + bit * o, dimC, D.c.w);
