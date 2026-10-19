@@ -63,6 +63,14 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      # pwcli on its own, uploaded before the tests so a failing run can still be re-tested on real hardware
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pwcli-${{ matrix.name }}
+          path: |
+            build/src/cli/pwcli*
+            build/src/cli/*.dll
+
       - name: Unit + parity tests (pwtests)
         env:
           PW_GPU_WARP: ${{ runner.os == 'Windows' && '1' || '' }}
