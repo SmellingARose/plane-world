@@ -8,14 +8,17 @@ namespace {
 inline Float3 vmin(const Float3& a, const Float3& b) { return {std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z)}; }
 inline Float3 vmax(const Float3& a, const Float3& b) { return {std::max(a.x, b.x), std::max(a.y, b.y), std::max(a.z, b.z)}; }
 
-/// x of the intersection of the line (y = py, z = pz) with the triangle, if any.
-bool rayX(float py, float pz, const Float3& a, const Float3& b, const Float3& c, float& x) {
-    float v0x = b.y - a.y, v0y = b.z - a.z, v1x = c.y - a.y, v1y = c.z - a.z, v2x = py - a.y, v2y = pz - a.z;
+inline float comp(const Float3& v, int a) { return a == 0 ? v.x : (a == 1 ? v.y : v.z); }
+
+/// Coordinate along axis a of the intersection of the line (axis b = pb, axis c = pc) with the triangle, if any.
+bool rayAxis(int a, int b, int c, float pb, float pc, const Float3& p0, const Float3& p1, const Float3& p2, float& t) {
+    float v0x = comp(p1, b) - comp(p0, b), v0y = comp(p1, c) - comp(p0, c), v1x = comp(p2, b) - comp(p0, b), v1y = comp(p2, c) - comp(p0, c);
+    float v2x = pb - comp(p0, b), v2y = pc - comp(p0, c);
     float den = v0x * v1y - v1x * v0y;
     if (std::fabs(den) < 1e-14f) return false;
     float u = (v2x * v1y - v1x * v2y) / den, v = (v0x * v2y - v2x * v0y) / den;
     if (u < 0 || v < 0 || u + v > 1) return false;
-    x = a.x + u * (b.x - a.x) + v * (c.x - a.x);
+    t = comp(p0, a) + u * (comp(p1, a) - comp(p0, a)) + v * (comp(p2, a) - comp(p0, a));
     return true;
 }
 
@@ -80,7 +83,6 @@ std::optional<PartSDF> PartSDF::build(const sim::AeroPartGeometry& g, float targ
               nz = int(std::ceil((ext.z + 2 * band.z) / h.z)) + 1;
     const std::size_t cnt = std::size_t(nx) * ny * nz;
     std::vector<float> d(cnt, far);
-    std::vector<uint8_t> parity(cnt, 0);
     auto center = [&](int i, int j, int k) { return o + Float3((float(i) + 0.5f) * h.x, (float(j) + 0.5f) * h.y, (float(k) + 0.5f) * h.z); };
     auto cellLo = [](float v, float o0, float hh, int n) { return std::max(0, std::min(n - 1, int(std::floor((v - o0) / hh - 0.5f)))); };
     auto cellHi = [](float v, float o0, float hh, int n) { return std::max(0, std::min(n - 1, int(std::ceil((v - o0) / hh - 0.5f)))); };
@@ -99,28 +101,46 @@ std::optional<PartSDF> PartSDF::build(const sim::AeroPartGeometry& g, float targ
                     std::size_t id = std::size_t(i) + std::size_t(nx) * (std::size_t(j) + std::size_t(ny) * std::size_t(k));
                     if (dist < d[id]) d[id] = dist;
                 }
-        float ylo = std::min(a.y, std::min(b.y, c.y)), yhi = std::max(a.y, std::max(b.y, c.y));
-        float zlo = std::min(a.z, std::min(b.z, c.z)), zhi = std::max(a.z, std::max(b.z, c.z));
-        const int ja = cellLo(ylo, o.y, h.y, ny), jb = cellHi(yhi, o.y, h.y, ny);
-        const int ka = cellLo(zlo, o.z, h.z, nz), kb = cellHi(zhi, o.z, h.z, nz);
-        for (int k = ka; k <= kb; ++k)
-            for (int j = ja; j <= jb; ++j) {
-                float py = o.y + (float(j) + 0.5f) * h.y + 1.37e-5f * h.y, pz = o.z + (float(k) + 0.5f) * h.z + 2.11e-5f * h.z;
-                float x;
-                if (!rayX(py, pz, a, b, c, x)) continue;
-                int istart = std::max(0, int(std::ceil((x - o.x) / h.x - 0.5f)));
-                if (istart >= nx) continue;
-                std::size_t base = std::size_t(nx) * (std::size_t(j) + std::size_t(ny) * std::size_t(k));
-                for (int i = istart; i < nx; ++i) parity[base + std::size_t(i)] ^= 1;
+    }
+    // Inside/outside: ray parity along each of the three axes, majority vote (a ray grazing a surface, e.g. along a
+    // wing's chord, or passing an edge can flip one axis' parity but rarely two). Rows that leave the grid "inside"
+    // (open CAD soup) count as outside for that axis.
+    const int n3[3] = {nx, ny, nz};
+    const float o3[3] = {o.x, o.y, o.z}, h3v[3] = {h.x, h.y, h.z};
+    auto at = [&](int ax, int i, int j, int k) {   // grid index of (i along ax, j along ax+1, k along ax+2)
+        int c[3];
+        c[ax] = i; c[(ax + 1) % 3] = j; c[(ax + 2) % 3] = k;
+        return std::size_t(c[0]) + std::size_t(nx) * (std::size_t(c[1]) + std::size_t(ny) * std::size_t(c[2]));
+    };
+    std::vector<uint8_t> votes(cnt, 0);
+    std::vector<uint8_t> parity(cnt);
+    for (int ax = 0; ax < 3; ++ax) {
+        const int b = (ax + 1) % 3, c = (ax + 2) % 3;
+        std::fill(parity.begin(), parity.end(), uint8_t(0));
+        for (std::size_t t = 0; t < triCount; ++t) {
+            const Float3 p0 = P[g.indices[3 * t]], p1 = P[g.indices[3 * t + 1]], p2 = P[g.indices[3 * t + 2]];
+            const float blo = std::min(comp(p0, b), std::min(comp(p1, b), comp(p2, b))), bhi = std::max(comp(p0, b), std::max(comp(p1, b), comp(p2, b)));
+            const float clo = std::min(comp(p0, c), std::min(comp(p1, c), comp(p2, c))), chi = std::max(comp(p0, c), std::max(comp(p1, c), comp(p2, c)));
+            const int ja = cellLo(blo, o3[b], h3v[b], n3[b]), jb = cellHi(bhi, o3[b], h3v[b], n3[b]);
+            const int ka = cellLo(clo, o3[c], h3v[c], n3[c]), kb = cellHi(chi, o3[c], h3v[c], n3[c]);
+            for (int k = ka; k <= kb; ++k)
+                for (int j = ja; j <= jb; ++j) {
+                    const float pb = o3[b] + (float(j) + 0.5f) * h3v[b] + 1.37e-5f * h3v[b], pc = o3[c] + (float(k) + 0.5f) * h3v[c] + 2.11e-5f * h3v[c];
+                    float x;
+                    if (!rayAxis(ax, b, c, pb, pc, p0, p1, p2, x)) continue;
+                    const int istart = std::max(0, int(std::ceil((x - o3[ax]) / h3v[ax] - 0.5f)));
+                    for (int i = istart; i < n3[ax]; ++i) parity[at(ax, i, j, k)] ^= 1;
+                }
+        }
+        for (int k = 0; k < n3[c]; ++k)
+            for (int j = 0; j < n3[b]; ++j) {
+                if (parity[at(ax, n3[ax] - 1, j, k)] != 1) {
+                    for (int i = 0; i < n3[ax]; ++i) votes[at(ax, i, j, k)] += parity[at(ax, i, j, k)];
+                }
             }
     }
-    for (int k = 0; k < nz; ++k)
-        for (int j = 0; j < ny; ++j) {
-            std::size_t base = std::size_t(nx) * (std::size_t(j) + std::size_t(ny) * std::size_t(k));
-            if (parity[base + std::size_t(nx) - 1] == 1) std::fill(parity.begin() + std::ptrdiff_t(base), parity.begin() + std::ptrdiff_t(base + std::size_t(nx)), 0);
-        }
     int inside = 0;
-    for (std::size_t i = 0; i < cnt; ++i) if (parity[i] == 1) { d[i] = -d[i]; ++inside; }
+    for (std::size_t i = 0; i < cnt; ++i) if (votes[i] >= 2) { d[i] = -d[i]; ++inside; }
     float br = 0;
     for (const auto& p : P) br = std::max(br, length(p));
     PartSDF s;

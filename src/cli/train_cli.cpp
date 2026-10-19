@@ -58,19 +58,20 @@ Value with(const Value& o, const std::string& key, Value v) {
 
 // CFDSettings.preset(p) as JSON (Swift Core/Fidelity.swift), full field set as the Swift encoder writes it.
 Value cfdPreset(const std::string& p, const Value& base) {
-    double cpm = 16, maxCells = 192, update = 4;
+    double cpm = 16, maxCells = 192, update = 4, levels = 3;
     std::string collision = "cumulant", lattice = "d3q19", turbulence = "smagorinsky";
-    if (p == "draft") { cpm = 8; maxCells = 96; collision = "regularized"; update = 8; }
+    if (p == "draft") { cpm = 8; maxCells = 96; collision = "regularized"; update = 8; levels = 2; }
     else if (p == "high") { cpm = 32; maxCells = 256; update = 2; }
-    else if (p == "ultra") { cpm = 64; maxCells = 384; lattice = "d3q27"; turbulence = "wale"; update = 1; }
+    else if (p == "ultra") { cpm = 64; maxCells = 384; lattice = "d3q27"; turbulence = "wale"; update = 1; levels = 4; }
     Value vis = Value::object();
     vis.set("enabled", Value::fromBool(false)); vis.set("field", Value::string("speed")); vis.set("particleCount", Value::number(4096));
     vis.set("particles", Value::fromBool(false)); vis.set("sliceAxis", Value::number(2)); vis.set("sliceOffset", Value::number(0));
     Value c = Value::object();
     c.set("cellsPerMeter", Value::number(cpm)); c.set("collision", Value::string(collision)); c.set("convergenceEvery", Value::number(200));
     c.set("ground", Value::fromBool(true)); c.set("lattice", Value::string(lattice)); c.set("latticeMach", Value::number(0.1));
-    c.set("maxCellsPerAxis", Value::number(maxCells)); c.set("maxMach", Value::number(0.3)); c.set("padDownstream", Value::number(2.5));
-    c.set("padLateral", Value::number(1)); c.set("padUpstream", Value::number(1)); c.set("preset", Value::string(p));
+    c.set("levels", Value::number(levels));
+    c.set("maxCellsPerAxis", Value::number(maxCells)); c.set("maxMach", Value::number(0.3)); c.set("padDownstream", Value::number(4));
+    c.set("blockageRatio", Value::number(0.03)); c.set("padUpstream", Value::number(2)); c.set("preset", Value::string(p));
     c.set("smagorinskyCs", Value::number(0.17)); c.set("substeps", Value::number(0)); c.set("turbulence", Value::string(turbulence));
     c.set("updateEvery", Value::number(update)); c.set("visualization", vis); c.set("wall", Value::string("interpolatedBounceBack"));
     (void)base;

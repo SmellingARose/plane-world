@@ -3,30 +3,38 @@
 // Kernels: shaders/flow/lbm_common.slang (Slang -> MSL on Apple, DXIL on Windows) through the pwgpu compute layer.
 //
 // One craft-following domain per LBMSolver:
-//   * world-axis-aligned box translating with the craft CoM (Galilean frame at the craft velocity; changes of that
-//     velocity enter as a uniform fictitious body force -rho a_frame), laid out on the first submit: fitted to the
-//     craft's posed bounding box plus padding (multiples of the craft's half size) on the dominant relative-flow
-//     direction (or the rotor wake axis). dx = min(1/cellsPerMeter, main-wing chord / chordCells), so the main wing
-//     gets 16 cells per chord, then coarsened to the cell budget (maxCellsPerAxis cubed, 2 maxCellsPerAxis per axis);
+//   * world-axis-aligned nested boxes translating with the craft CoM (Galilean frame at the craft velocity; changes of
+//     that velocity enter as a uniform fictitious body force -rho a_frame), laid out on the first submit. Level 0 is the
+//     outer box: padUpstream / padDownstream craft lengths up / downstream of the craft on the dominant relative-flow
+//     direction (or the rotor wake axis), its cross-section sized so the craft's frontal area blocks at most
+//     blockageRatio of it (and at least one craft length each side). Each finer level (refinement ratio 2, up to
+//     `levels`) is a box inside its parent; the finest holds the posed craft plus a margin (when a part leaves it the
+//     hierarchy is laid out again around the new pose and starts from the previous flow, sampled by lbmRegrid) at
+//     dx = min(1/cellsPerMeter, main-wing chord / chordCells), coarsened until all levels fit maxCellsPerAxis cubed.
+//     A level steps once, then its child twice; coarse/fine coupling rescales the non-equilibrium stress (see
+//     shaders/flow/lbm_common.slang). Outer faces: velocity inlet, convective outlet, zero-gradient lateral far field,
+//     with sponge layers;
 //   * D3Q19 / D3Q27; BGK, TRT ("mrt") or regularized collision; Smagorinsky or WALE LES; log-law wall model on the
 //     first fluid cell. `cumulant` is not implemented (as in Swift) and runs the regularized operator;
-//   * one population buffer, esoteric-pull streaming fused with collision (one kernel per LBM step), fp16 storage
-//     when the device supports 16-bit shader types (else fp32), SoA, 64-thread 1D groups;
+//   * one population buffer for all levels, esoteric-pull streaming fused with collision (one kernel per level step),
+//     populations stored relative to the far-field equilibrium, fp16 when the device supports 16-bit shader types
+//     (else fp32), SoA, 64-thread 1D groups;
 //   * parts re-voxelised every update from part-local anisotropic signed-distance grids; interpolated (Bouzidi)
 //     bounce-back with moving walls, exact also across sub-cell sheets (near-wall cells keep their last post-collision
 //     set in a wall-slot buffer); Galilean-invariant momentum exchange -> force + torque about the CoM per part;
-//   * rotors are actuator disks (axial thrust + swirl body force, Guo forcing);
-//   * ground = moving wall at the ground's velocity in the craft frame; far field = equilibrium shell + sponge;
+//   * rotors are actuator disks (axial thrust + swirl body force, Guo forcing) on the finest level;
+//   * ground = moving wall at the ground's velocity in the craft frame;
 //   * a 2x-coarser shadow domain runs alongside (convergenceEvery > 0) for the grid-convergence estimate.
-// Units: dt_lat = Ma cs dx / U_ref, nu_lat = nu dt/dx^2. The momentum exchanged per step is lattice momentum
-// (rho dx^3 * dx/dt per step dt), so F = F_lat rho dx^4/dt^2 and T = T_lat rho dx^5/dt^2 (lever arm in cells from the
-// CoM node), averaged over the steps of the update. submit(dt) advances floor(dt/dt_lat) LBM steps (remainder carried).
+// Units (per level; dt halves with dx): dt_lat = Ma cs dx / U_ref, nu_lat = nu dt/dx^2. The momentum exchanged per
+// step is lattice momentum (rho dx^3 * dx/dt per step dt), so F = F_lat rho dx^4/dt^2 and T = T_lat rho dx^5/dt^2
+// (finest level, lever arm in cells from the CoM node), averaged over the steps of the update. submit(dt) advances
+// floor(dt/dt_lat0) level-0 steps (remainder carried).
 //
 // Threading: one thread drives a solver (or a pool); solvers share the process-wide flow compute context, which has
 // its own queue (D3D12: own device + direct queue), so CFD overlaps rendering. submit/collect do not allocate after
-// the first submit of a layout (unless the domain diverges and is re-laid out). The readback is a few hundred bytes;
-// with nonBlockingCollect, collect() never waits for the GPU (while it is still busy the previous forces are returned
-// and the next submit waits instead).
+// the first submit of a layout (unless the domain diverges, or a part leaves the finest box and it is re-laid out).
+// The readback is a few hundred bytes; with nonBlockingCollect, collect() never waits for the GPU (while it is still
+// busy the previous forces are returned and the next submit waits instead).
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -87,13 +95,20 @@ public:
     double gpuMsPerLatticeStep() const { return msPerLatticeStep_; }
     int divergenceResets() const { return divergenceResets_; }
     const std::string& lastError() const { return lastError_; }
+    /// Finest level (the craft's): cell size (m).
     double dx() const { return dxM_; }
+    /// Level 0 (outer box): world position of node (0,0,0), cell size, nodes per axis. Particles use these coordinates.
     Vec3d gridOrigin() const { return gridOrigin_; }
+    double gridDx() const { return dx0_; }
     const int* dims() const { return dims_; }
+    int levelCount() const;
+    /// "outer 84x58x58 @ 3.01 cm | 61x61x73 @ 1.50 cm | ..." (coarsest first), empty before the first submit.
+    std::string layoutSummary() const;
 
     LBMAccuracy accuracy;
-    /// Target cells per main-wing chord (sets dx when finer than cellsPerMeter; the cell budget still applies).
-    int chordCells = 16;
+    /// Target cells per main-wing chord on the finest level (sets dx when finer than cellsPerMeter; the cell budget
+    /// still applies).
+    int chordCells = 32;
     /// collect() returns the previous forces instead of waiting while the GPU is still busy (real-time FLY).
     bool nonBlockingCollect = false;
     /// Population storage is fp16 (device supports 16-bit shader types and PW_FLOW_FP32 is not set).
@@ -109,7 +124,8 @@ public:
     bool readParticles(std::vector<Float4>& out);
     int particleCount() const { return settings_.visualization.particles ? particleN_ : 0; }
 
-    /// Debug (download the latest macro field; slow): solid node count, macro (u, rho) at a world point.
+    /// Debug (download the latest macro field; slow): solid node count of the finest level, macro (u, rho) at a world
+    /// point (finest level containing it).
     int solidCellCount();
     std::optional<Float4> debugMacro(const Vec3d& world);
     /// Total force on all parts (world, N) from the last collected update.
@@ -133,7 +149,7 @@ private:
     double msPerLatticeStep_ = 0;
     int divergenceResets_ = 0;
     std::string lastError_;
-    double dxM_ = 0;
+    double dxM_ = 0, dx0_ = 0;
     int dims_[3] = {0, 0, 0};
     Vec3d gridOrigin_;
     FlowSlice slice_;
@@ -148,6 +164,7 @@ private:
     /// Records the prepared update (and the shadow's) into the open recording of ctx_.
     void record();
     bool finishInflight();
+    void stepLevel(int level, int substep, bool last);
     void layout(const Vec3d& com, const Vec3d& velocity, const sim::AeroPartPose* poses, int poseCount,
                 const sim::AeroRotorSource* rotors, int rotorCount, const sim::AeroEnvironmentSample& env);
     void updateParams(const Vec3d& com, const Vec3d& velocity, const sim::AeroEnvironmentSample& env, const Vec3d& accel, int rotorCount);

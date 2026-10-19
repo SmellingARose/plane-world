@@ -1,17 +1,18 @@
 {
   "aero" : {
     "cfd" : {
+      "blockageRatio" : 0.03,
       "cellsPerMeter" : 16,
       "collision" : "cumulant",
       "convergenceEvery" : 200,
       "ground" : true,
       "lattice" : "d3q19",
+      "levels" : 3,
       "latticeMach" : 0.1,
       "maxCellsPerAxis" : 192,
       "maxMach" : 0.3,
-      "padDownstream" : 2.5,
-      "padLateral" : 1,
-      "padUpstream" : 1,
+      "padDownstream" : 4,
+      "padUpstream" : 2,
       "preset" : "medium",
       "smagorinskyCs" : 0.17,
       "substeps" : 0,

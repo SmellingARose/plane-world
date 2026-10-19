@@ -45,7 +45,7 @@ void FlowOverlay::update(LBMSolver& s) {
     tracers_.clear(); tracerAge_.clear();
     if (s.particleCount() > 0 && s.readParticles(raw_)) {
         const Vec3d o = s.gridOrigin();
-        const double dx = s.dx();
+        const double dx = s.gridDx();
         tracerRadius_ = std::max(0.002, double(tracerRadiusCells) * dx);
         tracers_.reserve(raw_.size()); tracerAge_.reserve(raw_.size());
         for (const Float4& p : raw_) {
@@ -147,7 +147,6 @@ void registerRenderSelfTests() {
         LBMSolver solver;
         sim::CFDSettings s = sim::CFDSettings::fromPreset(sim::CFDQualityPreset::Medium);
         s.cellsPerMeter = 40; s.maxCellsPerAxis = 64; s.collision = sim::CFDCollision::Regularized; s.convergenceEvery = 0;
-        s.padUpstream = 1.5; s.padDownstream = 3; s.padLateral = 1.5;
         s.visualization.enabled = true; s.visualization.field = sim::CFDField::Speed; s.visualization.sliceAxis = 2;
         s.visualization.particles = true; s.visualization.particleCount = 4096;
         if (!solver.configure({shapes::geometry(shapes::sphere(0.1f))}, s, &err)) { ctx.note("configure: " + err); return false; }

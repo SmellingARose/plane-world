@@ -2,7 +2,6 @@
 // (port of Sources/App/AeroCompareCLI.swift; same flags and table, so the two can be diffed).
 //   pwcli --aero-compare <craft name | craft.json> [--speed V] [--alpha deg] [--alt m] [--throttle 0..1]
 //         [--seconds s] [--cfd-preset draft|medium|high|ultra] [--cells-per-m N] [--max-cells N] [--convergence]
-//         [--accurate]   (pwflow accuracy options: depth-rule inflation)
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -60,7 +59,6 @@ int runAeroCompare(const std::vector<std::string>& args) {
     if (!sim.load(sim::CraftSpec::fromDocument(craft), &err)) { std::printf("error: %s\n", err.c_str()); return 1; }
     for (const auto& o : sim.outputs()) if (o.kind == sim::OutputKind::Motor) sim.setOutput(o.id, thr);
     flow::LBMSolver backend;
-    if (has(args, "--accurate")) backend.accuracy.thinOnlyInflation = true;
     if (!sim.enableFull(backend, craft, cfd, &err)) { std::printf("error: %s\n", err.c_str()); return 1; }
     sim::EquationCapture cap(4096);
     sim.equationCapture = &cap;
@@ -80,9 +78,10 @@ int runAeroCompare(const std::vector<std::string>& args) {
     const sim::CFDDiagnostics& d = backend.diagnostics();
     std::printf("craft %s  V=%.1f m/s  alpha=%.1f deg  alt=%.1f m  throttle=%.1f  held %.1f s sim in %.1f s wall (%.2fx real time)\n", craft.name.c_str(),
                 speed, alpha, alt, thr, secs, wall, secs / wall);
-    std::printf("CFD preset %s: grid %dx%dx%d dx=%.4f m  dt_lattice=%.2e s  maxMa=%.3f  massDrift=%.2e  gpu=%.2f ms/update  updates=%d%s", sim::toString(cfd.preset),
-                d.gridCells[0], d.gridCells[1], d.gridCells[2], d.dx, d.dtLattice, d.maxLatticeMach, d.massDrift, d.gpuMsPerStep, sim.fullAeroUpdates(),
-                d.diverged ? "  DIVERGED" : "");
+    std::printf("CFD preset %s: %d levels %s, %.2f M cells, dx=%.4f m (craft) / %.4f m (outer), blockage %.1f%%  dt_lattice=%.2e s  maxMa=%.3f  "
+                "massDrift=%.2e  gpu=%.2f ms/update  updates=%d%s", sim::toString(cfd.preset), d.levels, backend.layoutSummary().c_str(),
+                double(d.cellCount()) / 1e6, d.dx, d.dxOuter, d.blockage * 100, d.dtLattice, d.maxLatticeMach, d.massDrift, d.gpuMsPerStep,
+                sim.fullAeroUpdates(), d.diverged ? "  DIVERGED" : "");
     if (cfd.convergenceEvery > 0) std::printf("  coarseDelta=%.1f%%  richardson=%.1f%%", d.coarseDelta * 100, d.richardsonError * 100);
     std::printf("\npart                     | fast Fx    Fy    Fz (N)          | CFD Fx    Fy    Fz (N)           | |F| fast  |F| CFD   diff\n");
     Vec3d tf, tc;

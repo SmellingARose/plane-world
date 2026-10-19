@@ -713,8 +713,21 @@ function tell(state, population, rng) {
         bool ok = expect(c, std::string(a.algorithm().kind()) == "script", "algorithm kind script");
         ok &= expect(c, ha.size() == 4 && ha[0].failures == 0 && ha[0].evaluations == 6, "script ask() produced the population: " + (ha.empty() || !ha[0].firstError ? std::string() : *ha[0].firstError));
         ok &= expect(c, same, "resumed scripted algorithm continues identically (JS state checkpointed)");
-        ok &= expect(c, ha.back().best >= ha.front().best - 1e-2 * std::abs(ha.front().best), "scripted search keeps its best (within per-generation episode-seed noise)");
-        c.note("gen bests: " + fmt(ha[0].best) + " " + fmt(ha[1].best) + " " + fmt(ha[2].best) + " " + fmt(ha[3].best));
+        // The search keeps its best genome (tell() replaces it only on a higher fitness). Each generation scores on its
+        // own episode seeds (spawn jitter, wind, sensor noise), so compare the incumbents re-scored on one fixed seed
+        // (generation 0's): the best genome after each generation must never score lower than the one before it.
+        auto hall = a.hallOfFame();
+        std::vector<double> kept;
+        std::size_t inc = 0;
+        for (std::size_t g = 0; g < hall.size(); ++g) {
+            if (hall[g].fitness.total > hall[inc].fitness.total) inc = g;
+            kept.push_back(a.evaluator().evaluate({hall[inc].genome}, 0).at(0).total);
+        }
+        bool monotone = kept.size() == 4;
+        for (std::size_t g = 1; monotone && g < kept.size(); ++g) monotone = kept[g] >= kept[g - 1];
+        ok &= expect(c, monotone, "scripted search keeps its best (incumbent re-scored on a fixed seed never decreases)");
+        c.note("gen bests: " + fmt(ha[0].best) + " " + fmt(ha[1].best) + " " + fmt(ha[2].best) + " " + fmt(ha[3].best) + "; incumbent on a fixed seed: " +
+               (kept.size() == 4 ? fmt(kept[0]) + " " + fmt(kept[1]) + " " + fmt(kept[2]) + " " + fmt(kept[3]) : std::string("?")));
         std::error_code ec; std::filesystem::remove_all(dir, ec);
         return ok;
     });

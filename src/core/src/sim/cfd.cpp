@@ -32,11 +32,14 @@ CFDSettings CFDSettings::fromPreset(CFDQualityPreset p) {
     CFDSettings s;
     s.preset = p;
     switch (p) {
-    case CFDQualityPreset::Draft: s.cellsPerMeter = 8; s.maxCellsPerAxis = 96; s.collision = CFDCollision::Regularized; s.updateEvery = 8; break;
+    case CFDQualityPreset::Draft:
+        s.cellsPerMeter = 8; s.maxCellsPerAxis = 96; s.collision = CFDCollision::Regularized; s.updateEvery = 8; s.levels = 2;
+        break;
     case CFDQualityPreset::Medium: case CFDQualityPreset::Custom: break;
     case CFDQualityPreset::High: s.cellsPerMeter = 32; s.maxCellsPerAxis = 256; s.updateEvery = 2; break;
     case CFDQualityPreset::Ultra:
         s.cellsPerMeter = 64; s.maxCellsPerAxis = 384; s.lattice = CFDLattice::D3Q27; s.turbulence = CFDTurbulence::WALE; s.updateEvery = 1;
+        s.levels = 4;
         break;
     }
     return s;
@@ -50,7 +53,8 @@ CFDSettings CFDSettings::fromJSON(const json::Value& c) {
     s.maxCellsPerAxis = inum(c, "maxCellsPerAxis", s.maxCellsPerAxis);
     s.padUpstream = num(c, "padUpstream", s.padUpstream);
     s.padDownstream = num(c, "padDownstream", s.padDownstream);
-    s.padLateral = num(c, "padLateral", s.padLateral);
+    s.blockageRatio = num(c, "blockageRatio", s.blockageRatio);
+    s.levels = inum(c, "levels", s.levels);
     s.latticeMach = num(c, "latticeMach", s.latticeMach);
     s.maxMach = num(c, "maxMach", s.maxMach);
     s.lattice = decodeEnum(c["lattice"], kLattice, s.lattice);
@@ -85,16 +89,17 @@ json::Value CFDSettings::toJSON() const {
     vis.set("sliceAxis", Value::number(visualization.sliceAxis));
     vis.set("sliceOffset", Value::number(visualization.sliceOffset));
     Value c = Value::object();   // keys sorted like the Swift encoder (.sortedKeys)
+    c.set("blockageRatio", Value::number(blockageRatio));
     c.set("cellsPerMeter", Value::number(cellsPerMeter));
     c.set("collision", Value::string(toString(collision)));
     c.set("convergenceEvery", Value::number(convergenceEvery));
     c.set("ground", Value::fromBool(ground));
     c.set("lattice", Value::string(toString(lattice)));
+    c.set("levels", Value::number(levels));
     c.set("latticeMach", Value::number(latticeMach));
     c.set("maxCellsPerAxis", Value::number(maxCellsPerAxis));
     c.set("maxMach", Value::number(maxMach));
     c.set("padDownstream", Value::number(padDownstream));
-    c.set("padLateral", Value::number(padLateral));
     c.set("padUpstream", Value::number(padUpstream));
     c.set("preset", Value::string(toString(preset)));
     c.set("smagorinskyCs", Value::number(smagorinskyCs));

@@ -1,11 +1,11 @@
-// flow.* self-tests: port of Sources/Flow/FlowSelfTests.swift plus parity against the Swift solver's measured
-// numbers (Swift `PlaneWorld --selftest flow` on an Apple M4, recorded in kSwift below). Since the esoteric-pull /
-// wall-model / anisotropic-SDF solver those references are printed for comparison only; the checks are physical bands.
+// flow.* self-tests: port of Sources/Flow/FlowSelfTests.swift. The validation cases (sphere, cube, wing, actuator disk)
+// are checked against experiment / theory bands; the previous solvers' numbers (the Swift solver, kSwift, and the
+// uniform-grid C++ solver before local refinement, kUniform) are printed for comparison only.
 //
-// Full-size runs (the Swift grids) need a hardware GPU. On a software adapter (WARP in CI) or with PW_FLOW_SMALL=1
-// every case runs on a coarser grid / shorter window; the numbers are then checked against physical bands and
-// against the same small cases measured on Metal (kSmallRef: GPU results agree by tolerance, not bits).
-// PW_FLOW_VALIDATE=1 adds the per-preset sphere sweep (flow.validate) and the accuracy-option comparison.
+// Full-size runs need a hardware GPU. On a software adapter (WARP in CI) or with PW_FLOW_SMALL=1 every case runs on a
+// coarser grid / shorter window with wider bands, and prints the same small cases measured on Metal (kSmallRef: GPU
+// results agree by tolerance, not bits). PW_FLOW_VALIDATE=1 adds the resolution sweep (flow.validate) and the
+// accuracy-option comparison (flow.accuracy).
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -35,6 +35,12 @@ struct SwiftRef {
     double volSphere = 0.00444, volNaca = 0.00148, volBox = 0.00400;
 } const kSwift;
 
+// C++ solver before local refinement (uniform craft-fitted grid, Apple M4) on the same cases at 16 cells per diameter /
+// side and 20 cells per chord.
+struct UniformRef {
+    double sphereCd = 0.590, cubeCd = 1.529, wingClPos = 0.148, wingClNeg = -0.090, wingSlope = 1.14, diskV = 7.42;
+} const kUniform;
+
 // C++ solver on Metal (Apple M4) at the small grids: what WARP must reproduce within GPU tolerance.
 struct SmallRef {
     double sphereCd = 0, cubeCd = 0, wingSlope = 0, diskV = 0;
@@ -49,7 +55,7 @@ bool small() {
     gpu::ComputeContext* c = computeContext();
     return c && c->isSoftware();
 }
-const char* refName() { return small() ? "Metal small-grid ref" : "Swift"; }
+const char* refName() { return small() ? "Metal small-grid ref" : "uniform-grid solver"; }
 
 struct RunResult {
     Vec3d force, torque, sample;
@@ -61,11 +67,11 @@ struct RunResult {
 /// One fixed body in a uniform wind; time-averaged force / torque over the second half.
 bool run(LBMSolver& solver, const std::vector<AeroPartGeometry>& parts, const std::vector<AeroPartPose>& poses,
          const std::vector<AeroRotorSource>& rotors, const CFDSettings& s, const Vec3d& wind, double seconds, RunResult& res,
-         Context& ctx, double dt = 0.004) {
+         Context& ctx, double dt = 0.004, double nu = 1.5e-5) {
     std::string err;
     if (!solver.configure(parts, s, &err)) { ctx.note("configure failed: " + err); return false; }
     AeroEnvironmentSample env;
-    env.wind = wind;
+    env.wind = wind; env.nu = nu;
     const int count = std::max(int(poses.size()), 1);
     std::vector<sim::ForceTorque> forces(static_cast<std::size_t>(count));
     std::vector<Vec3d> vels(static_cast<std::size_t>(count));
@@ -95,19 +101,19 @@ CFDSettings bodySettings(double cpm, int maxCells = 128) {
     CFDSettings s = CFDSettings::fromPreset(sim::CFDQualityPreset::Medium);
     s.cellsPerMeter = cpm; s.maxCellsPerAxis = maxCells;
     s.collision = sim::CFDCollision::Regularized; s.turbulence = sim::CFDTurbulence::Smagorinsky;
-    s.padUpstream = 1.5; s.padDownstream = 3; s.padLateral = 1.5;
     s.convergenceEvery = 0;
     return s;
 }
 
 struct Tweak { sim::CFDTurbulence turb = sim::CFDTurbulence::Smagorinsky; double damping = 2; double cs = 0.17; };
-bool sphereCd(Context& ctx, double cpm, const CFDSettings* settings, double seconds, double& cd, RunResult& r, LBMAccuracy acc = {}, const Tweak* tw = nullptr) {
+bool sphereCd(Context& ctx, double cpm, const CFDSettings* settings, double seconds, double& cd, RunResult& r, LBMAccuracy acc = {}, const Tweak* tw = nullptr,
+              double nu = 1.5e-5) {
     const double D = 0.2, U = 10;
     CFDSettings s = settings ? *settings : bodySettings(cpm);
     LBMSolver solver;
     solver.accuracy = acc;
     if (tw) { s.turbulence = tw->turb; s.smagorinskyCs = tw->cs; solver.wallDampingCells = tw->damping; }
-    if (!run(solver, {shapes::geometry(shapes::sphere(float(D / 2)))}, {AeroPartPose{}}, {}, s, {U, 0, 0}, seconds, r, ctx)) return false;
+    if (!run(solver, {shapes::geometry(shapes::sphere(float(D / 2)))}, {AeroPartPose{}}, {}, s, {U, 0, 0}, seconds, r, ctx, 0.004, nu)) return false;
     cd = r.force.x / (0.5 * 1.225 * U * U * kPi * D * D / 4);
     return true;
 }
@@ -115,7 +121,6 @@ bool sphereCd(Context& ctx, double cpm, const CFDSettings* settings, double seco
 bool cubeCd(Context& ctx, double cpm, int maxCells, double seconds, double& cd, RunResult& r, LBMAccuracy acc = {}, const Tweak* tw = nullptr) {
     const double a = 0.2, U = 10;
     CFDSettings s = bodySettings(cpm, maxCells);
-    s.padUpstream = 1; s.padDownstream = 2; s.padLateral = 1.5;
     LBMSolver solver;
     solver.accuracy = acc;
     if (tw) { s.turbulence = tw->turb; s.smagorinskyCs = tw->cs; solver.wallDampingCells = tw->damping; }
@@ -125,8 +130,9 @@ bool cubeCd(Context& ctx, double cpm, int maxCells, double seconds, double& cd, 
     return true;
 }
 
-/// NACA 0012 wing, chord 0.15 m, span 0.3 m (AR 2), alpha = +-6 deg.
-bool wingSlope(Context& ctx, double cpm, int maxCells, double seconds, double cls[2], double& slope, double& cd, bool& diverged, LBMAccuracy acc = {}, const Tweak* tw = nullptr) {
+/// NACA 0012 wing, chord 0.15 m, span 0.3 m (AR 2), alpha = +-6 deg (time-averaged over the second half).
+bool wingSlope(Context& ctx, double cpm, int maxCells, double seconds, double cls[2], double& slope, double& cd, bool& diverged, LBMAccuracy acc = {}, const Tweak* tw = nullptr,
+               RunResult* last = nullptr) {
     const double c = 0.15, b = 0.3, U = 10, al = 6.0 * kPi / 180;
     AeroPartGeometry wing = shapes::geometry(shapes::nacaWing(float(c), float(b)));
     diverged = false;
@@ -135,7 +141,6 @@ bool wingSlope(Context& ctx, double cpm, int maxCells, double seconds, double cl
         AeroPartPose p;
         p.rotation = Quatd::angleAxis(-sgn * al, {0, 0, 1});   // +theta about z is nose-down
         CFDSettings s = bodySettings(cpm, maxCells);
-        s.padUpstream = 1; s.padDownstream = 2; s.padLateral = 1;
         LBMSolver solver;
         solver.accuracy = acc;
         if (tw) { s.turbulence = tw->turb; s.smagorinskyCs = tw->cs; solver.wallDampingCells = tw->damping; }
@@ -145,6 +150,7 @@ bool wingSlope(Context& ctx, double cpm, int maxCells, double seconds, double cl
         cls[i] = r.force.y / q;
         cd = r.force.x / q;   // as Swift: the last (alpha = -6 deg) run
         diverged = diverged || r.diag.diverged;
+        if (last) *last = r;
     }
     slope = (cls[0] - cls[1]) / (2 * al);
     return true;
@@ -227,40 +233,49 @@ void registerAll() {
     });
 
     addGpu("flow.sphere-drag", [](Context& c) {
-        // Re = UD/nu ~ 1.3e5 (subcritical, experiment C_D ~ 0.45-0.5). Swift grid: 16 cells per diameter.
+        // 32 cells per diameter on the finest level. The log-law wall model assumes a turbulent boundary layer, so the
+        // default solver is checked at Re 1e6 (supercritical, experiment C_D ~ 0.1-0.2); the laminar-separation regime
+        // at Re 1.3e5 (subcritical, C_D ~ 0.47) is checked with the wall model off.
         const bool sm = small();
-        const double cpm = sm ? 40 : 80;
+        const double cpm = sm ? 80 : 160;
         CFDSettings s = bodySettings(cpm, sm ? 64 : 128);
-        double cd; RunResult r;
-        if (!sphereCd(c, cpm, &s, sm ? 0.15 : 0.3, cd, r)) return false;
-        c.note(fmt("sphere Re=1.3e5, %.0f cells/D, %lld cells: C_D = %.3f (%s %.3f, exp ~0.47)  %.2f ms/update, %.3f ms/LBM step, max Ma_lat %.3f, drho %.2e",
-                   cpm * 0.2, r.cells, cd, refName(), sm ? kSmallRef.sphereCd : kSwift.sphereCd, r.msPerUpdate, r.msPerLatticeStep, r.diag.maxLatticeMach, r.diag.massDrift));
-        bool ok = !r.diag.diverged && cd > 0.25 && cd < 1.2;
-        ok = ok && std::fabs(r.force.y) < 0.35 * std::fabs(r.force.x) && std::fabs(r.force.z) < 0.35 * std::fabs(r.force.x);
-        return ok;   // the references are the old solver's numbers (informational): the check is the physical band
+        double cdT, cdL; RunResult rT, rL;
+        LBMAccuracy laminar;
+        laminar.wallModel = false;
+        if (!sphereCd(c, cpm, &s, sm ? 0.15 : 0.3, cdT, rT, {}, nullptr, 2e-6)) return false;
+        if (!sphereCd(c, cpm, &s, sm ? 0.15 : 0.3, cdL, rL, laminar)) return false;
+        c.note(fmt("sphere %.0f cells/D, %lld cells: Re 1e6 (wall model) C_D = %.3f (exp 0.1-0.2); Re 1.3e5 (no wall model) C_D = %.3f (%s %.3f, exp ~0.47); "
+                   "%.2f ms/update, %.3f ms/level-0 step, max Ma_lat %.3f", cpm * 0.2, rT.cells, cdT, cdL, refName(), sm ? kSmallRef.sphereCd : kUniform.sphereCd,
+                   rL.msPerUpdate, rL.msPerLatticeStep, rL.diag.maxLatticeMach));
+        bool ok = !rT.diag.diverged && !rL.diag.diverged && cdT > 0.05 && cdT < 0.35 && cdL > 0.3 && cdL < 0.8;
+        ok = ok && std::fabs(rL.force.y) < 0.35 * std::fabs(rL.force.x) && std::fabs(rL.force.z) < 0.35 * std::fabs(rL.force.x);
+        return ok;
     });
 
     addGpu("flow.cube-drag", [](Context& c) {
         const bool sm = small();
         double cd; RunResult r;
-        if (!cubeCd(c, sm ? 40 : 80, sm ? 64 : 96, sm ? 0.15 : 0.2, cd, r)) return false;
-        const double ref = sm ? kSmallRef.cubeCd : kSwift.cubeCd;
-        c.note(fmt("cube face-on Re=1.3e5, %d cells/side: C_D = %.3f (%s %.3f, exp ~1.05)", sm ? 8 : 16, cd, refName(), ref));
-        bool ok = !r.diag.diverged && cd > 0.6 && cd < 1.8;
+        if (!cubeCd(c, sm ? 80 : 160, sm ? 64 : 128, sm ? 0.15 : 0.3, cd, r)) return false;
+        const double ref = sm ? kSmallRef.cubeCd : kUniform.cubeCd;
+        c.note(fmt("cube face-on Re=1.3e5, %d cells/side, %lld cells: C_D = %.3f (%s %.3f, exp ~1.05)  %.2f ms/update", sm ? 16 : 32, r.cells, cd, refName(), ref,
+                   r.msPerUpdate));
+        bool ok = !r.diag.diverged && cd > 0.6 && cd < 1.6;
         return ok;
     });
 
     addGpu("flow.wing-lift-slope", [](Context& c) {
-        // Finite-wing slope: Helmbold 2 pi A / (2 + sqrt(A^2 + 4)) = 2.60 /rad for AR 2. At 20 cells/chord the boundary
-        // layer is unresolved, so lift is strongly under-predicted (as in Swift); the band guards sign and magnitude.
+        // Finite-wing slope: Helmbold 2 pi A / (2 + sqrt(A^2 + 4)) = 2.60 /rad for AR 2 (32 cells per chord on the finest
+        // level, time-averaged). Placement of the wing between lattice nodes still moves C_L by several 0.01 (see
+        // docs/CFD.md section 7), so the band guards sign, magnitude and gross asymmetry, not the 5 % target.
         const bool sm = small();
-        double cls[2], slope, cd; bool div;
-        if (!wingSlope(c, sm ? 67 : 133, sm ? 64 : 128, sm ? 0.08 : 0.12, cls, slope, cd, div)) return false;
+        double cls[2], slope, cd; bool div; RunResult r;
+        if (!wingSlope(c, sm ? 107 : 213, sm ? 96 : 160, sm ? 0.12 : 0.24, cls, slope, cd, div, {}, nullptr, &r)) return false;
         const double helm = 2 * kPi * 2 / (2 + std::sqrt(4.0 + 4));
-        const double ref = sm ? kSmallRef.wingSlope : kSwift.wingSlope;
-        c.note(fmt("NACA0012 AR2 a=+-6deg, %d cells/chord: C_L = %+.3f / %+.3f, slope %.2f /rad (%s %.2f, Helmbold %.2f), C_D(-6deg) %.3f",
-                   sm ? 10 : 20, cls[0], cls[1], slope, refName(), ref, helm, cd));
-        bool ok = !div && slope > 0.15 * helm && slope < 1.5 * helm;
+        const double ref = sm ? kSmallRef.wingSlope : kUniform.wingSlope;
+        const double asym = std::fabs(cls[0] + cls[1]) / (0.5 * (std::fabs(cls[0]) + std::fabs(cls[1])));
+        c.note(fmt("NACA0012 AR2 a=+-6deg, %d cells/chord, %lld cells: C_L = %+.3f / %+.3f (asymmetry %.0f%%), slope %.2f /rad (%s %.2f, Helmbold %.2f), "
+                   "C_D(-6deg) %.3f, %.1f ms/update", sm ? 16 : 32, r.cells, cls[0], cls[1], asym * 100, slope, refName(), ref, helm, cd, r.msPerUpdate));
+        bool ok = !div && slope > 0.5 * helm && slope < 2.0 * helm && asym < 0.3;
         return ok;
     });
 
@@ -270,8 +285,9 @@ void registerAll() {
         double v, sw; RunResult r;
         if (!diskVelocity(c, sm ? 26 : 40, sm ? 0.3 : 0.5, v, sw, r)) return false;
         const double vi = std::sqrt(10 / (2 * 1.225 * kPi * 0.15 * 0.15));
-        const double ref = sm ? kSmallRef.diskV : kSwift.diskV;
-        c.note(fmt("actuator disk T=10 N R=0.15: v_disk = %.2f m/s down (%s %.2f, momentum theory %.2f), swirl %.2f m/s", v, refName(), ref, vi, sw));
+        const double ref = sm ? kSmallRef.diskV : kUniform.diskV;
+        c.note(fmt("actuator disk T=10 N R=0.15: v_disk = %.2f m/s down (%s %.2f, momentum theory %.2f), swirl %.2f m/s, %.2f ms/update", v, refName(), ref, vi,
+                   sw, r.msPerUpdate));
         bool ok = !r.diag.diverged && v > 0.6 * vi && v < 1.4 * vi;
         return ok;
     });
@@ -301,7 +317,6 @@ void registerAll() {
         AeroPartPose p;
         p.angVel = {0, 40, 0};
         CFDSettings s = bodySettings(sm ? 40 : 60, 64);
-        s.padUpstream = 1; s.padDownstream = 1; s.padLateral = 1;
         LBMSolver solver;
         std::string err;
         if (!solver.configure({shapes::geometry(shapes::box({0.15f, 0.03f, 0.03f}))}, s, &err)) { c.note(err); return false; }
@@ -468,6 +483,67 @@ void registerAll() {
                        slope, wcd, r.msPerLatticeStep, (div || r.diag.diverged) ? " DIVERGED" : ""));
         }
         return true;
+    });
+
+    addGpu("flow.refinement", [](Context& c) {
+        // Coarse/fine coupling: a sphere at Re 200 (steady wake, C_D ~ 0.77) on one uniform grid and on three levels
+        // with the same finest dx and the same outer box (blockage-sized): the drag must agree within 3 %.
+        const bool sm = small();
+        double cd[2] = {0, 0};
+        long long cells[2] = {0, 0};
+        double ms[2] = {0, 0};
+        for (int k = 0; k < 2; ++k) {
+            CFDSettings s = bodySettings(sm ? 30 : 40, 128);
+            s.turbulence = sim::CFDTurbulence::None;
+            s.levels = k == 0 ? 1 : 3;
+            s.blockageRatio = 0.02;
+            LBMSolver solver;
+            std::string err;
+            if (!solver.configure({shapes::geometry(shapes::sphere(0.1f))}, s, &err)) { c.note(err); return false; }
+            AeroEnvironmentSample env;
+            env.wind = {10, 0, 0}; env.nu = 1e-2;
+            AeroPartPose p;
+            sim::ForceTorque f; Vec3d v;
+            const int n = sm ? 60 : 100;
+            for (int i = 0; i < n; ++i) {
+                solver.submit({}, {}, Quatd::identity(), &p, 1, nullptr, 0, env, 0.004);
+                solver.collect(&f, &v, 1);
+                if (i >= n - 20) { cd[k] += f.force.x / (0.5 * 1.225 * 100 * kPi * 0.01) / 20; ms[k] += solver.diagnostics().gpuMsPerStep / 20; }
+            }
+            cells[k] = solver.diagnostics().cellCount();
+            c.note(fmt("%d level%s (%s): C_D %.3f, %lld cells, %.2f ms/update", s.levels, s.levels > 1 ? "s" : "", solver.layoutSummary().c_str(), cd[k], cells[k], ms[k]));
+        }
+        return near(cd[1], cd[0], 0.03) && cells[1] < cells[0];
+    });
+
+    addGpu("flow.regrid", [](Context& c) {
+        // A bar in a 10 m/s wind turns 90 deg (span x -> z): it leaves the finest box, which is laid out again around the
+        // new pose starting from the current flow, so the wake behind it survives (a far-field restart would show u_inf).
+        const bool sm = small();
+        CFDSettings s = bodySettings(sm ? 80 : 120, 96);
+        LBMSolver solver;
+        std::string err;
+        if (!solver.configure({shapes::geometry(shapes::box({0.25f, 0.03f, 0.03f}))}, s, &err)) { c.note(err); return false; }
+        AeroEnvironmentSample env;
+        env.wind = {10, 0, 0};
+        AeroPartPose p;
+        sim::ForceTorque f; Vec3d v;
+        for (int i = 0; i < 40; ++i) { solver.submit({}, {}, Quatd::identity(), &p, 1, nullptr, 0, env, 0.004); solver.collect(&f, &v, 1); }
+        const std::string before = solver.layoutSummary();
+        const Vec3d probe{0.4, 0, 0};   // in the wake, inside every layout
+        const auto u0 = solver.debugMacro(probe);
+        p.rotation = Quatd::angleAxis(kPi / 2, {0, 1, 0});
+        solver.submit({}, {}, Quatd::identity(), &p, 1, nullptr, 0, env, 0.004);
+        solver.collect(&f, &v, 1);
+        const std::string after = solver.layoutSummary();
+        const auto u1 = solver.debugMacro(probe);
+        if (!u0 || !u1) { c.note("probe outside the grid"); return false; }
+        c.note("before: " + before);
+        c.note("after:  " + after);
+        c.note(fmt("wake probe u_x (lattice) before %.4f, one update after the re-layout %.4f; force %.2f N", double(u0->x), double(u1->x), f.force.x));
+        bool ok = before != after && std::isfinite(f.force.x) && !solver.diagnostics().diverged;
+        ok = ok && u1->x < 0.97f * float(0.1 * std::sqrt(1 / 3.0)) && u1->x < u0->x * 1.2f;   // wake deficit kept (u_inf = 0.0577 lattice)
+        return ok;
     });
 
     addGpu("flow.validate", [](Context& c) {

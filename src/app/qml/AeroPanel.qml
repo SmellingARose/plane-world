@@ -67,12 +67,12 @@ ColumnLayout {
                 font.family: Theme.mono; font.pixelSize: Theme.caption; color: Theme.textMuted; wrapMode: Text.WordWrap; Layout.fillWidth: true
             }
             PwSlider { label: "Resolution (cells / m)"; from: 4; to: 128; step: 1; decimals: 0; value: aero.c.cellsPerMeter || 16
-                tip: "Grid cells per metre. Cost grows ~ (cells/m)^4. The padded domain is coarsened if it exceeds Max cells/axis."
+                tip: "Cells per metre on the finest level (the craft's; the main wing also gets >= 32 cells per chord). Cost grows ~ (cells/m)^4. Coarsened if all levels exceed Max cells/axis cubed."
                 onCommitted: (v) => App.setCfd("cellsPerMeter", v) }
             Label {
                 readonly property bool capped: aero.d.dx > 0 && aero.d.dx > (aero.c.dxRequested || 0) * 1.02
                 visible: true
-                text: aero.d.dx > 0 ? "Effective dx " + (aero.d.dx * 100).toFixed(1) + " cm" + (capped ? " — capped by max cells/axis; raise it or shrink padding" : " — as requested")
+                text: aero.d.dx > 0 ? "Effective dx " + (aero.d.dx * 100).toFixed(1) + " cm" + (capped ? " — capped by max cells/axis; raise it, add a grid level or shrink the outer box" : " — as requested")
                                     : "Effective dx appears once a domain runs."
                 color: capped ? Theme.warn : Theme.textMuted; font.pixelSize: Theme.caption; wrapMode: Text.WordWrap; Layout.fillWidth: true
             }
@@ -82,11 +82,15 @@ ColumnLayout {
             PwSection {
                 title: "Domain, models & stepping"
                 expanded: false
-                PwPropertyRow { label: "Max cells/axis"; tip: "Caps grid size; the domain is shrunk (coarser dx) if the padded box would exceed it"
+                PwPropertyRow { label: "Max cells/axis"; tip: "Cell budget: all levels together hold at most this cubed; dx is coarsened to fit"
                     SpinBox { from: 32; to: 512; stepSize: 16; value: aero.c.maxCellsPerAxis || 192; editable: true; onValueModified: App.setCfd("maxCellsPerAxis", value) } }
-                PwSlider { label: "Pad upstream (× craft length)"; from: 0.25; to: 4; value: aero.c.padUpstream || 1; onCommitted: (v) => App.setCfd("padUpstream", v) }
-                PwSlider { label: "Pad downstream"; from: 0.5; to: 8; value: aero.c.padDownstream || 2.5; onCommitted: (v) => App.setCfd("padDownstream", v) }
-                PwSlider { label: "Pad lateral"; from: 0.25; to: 4; value: aero.c.padLateral || 1; onCommitted: (v) => App.setCfd("padLateral", v) }
+                PwPropertyRow { label: "Grid levels"; tip: "Nested boxes, each half the cell size of its parent; the finest holds the craft (1 = uniform grid)"
+                    SpinBox { from: 1; to: 4; value: aero.c.levels || 3; editable: true; onValueModified: App.setCfd("levels", value) } }
+                PwSlider { label: "Upstream (× craft length)"; from: 0.5; to: 6; value: aero.c.padUpstream || 2; onCommitted: (v) => App.setCfd("padUpstream", v) }
+                PwSlider { label: "Downstream (× craft length)"; from: 1; to: 10; value: aero.c.padDownstream || 4; onCommitted: (v) => App.setCfd("padDownstream", v) }
+                PwSlider { label: "Max blockage (frontal area / cross-section)"; from: 0.005; to: 0.1; step: 0.005; decimals: 3; value: aero.c.blockageRatio || 0.03
+                    tip: "The outer box's cross-section is sized so the craft blocks at most this fraction of it (and leaves one craft length each side)"
+                    onCommitted: (v) => App.setCfd("blockageRatio", v) }
                 PwSlider { label: "Max Mach (flag above)"; from: 0.1; to: 0.5; value: aero.c.maxMach || 0.3; onCommitted: (v) => App.setCfd("maxMach", v) }
                 PwPropertyRow { label: "Lattice"; tip: "D3Q27 is more isotropic (better at high Re) and ~40% more expensive"
                     ComboBox { model: ["D3Q19", "D3Q27"]; currentIndex: Math.max(0, model.map(s => s.toLowerCase()).indexOf((aero.c.lattice || "").toLowerCase())); onActivated: (i) => App.setCfd("lattice", model[i]) } }
@@ -118,8 +122,9 @@ ColumnLayout {
                 visible: aero.d.steps > 0
                 Layout.fillWidth: true
                 spacing: 2
-                PwStatRow { label: "Grid"; value: aero.d.grid ? aero.d.grid.join("×") + "  (" + (aero.d.cells / 1e6).toFixed(2) + " M)" : "–" }
-                PwStatRow { label: "dx / dt"; value: ((aero.d.dx || 0) * 100).toFixed(1) + " cm / " + (aero.d.dt || 0).toExponential(2) + " s" }
+                PwStatRow { label: "Grid"; value: aero.d.grid ? aero.d.grid.join("×") + " outer, " + (aero.d.levels || 1) + " level" + ((aero.d.levels || 1) > 1 ? "s" : "") + "  (" + (aero.d.cells / 1e6).toFixed(2) + " M cells)" : "–" }
+                PwStatRow { label: "dx craft / outer"; value: ((aero.d.dx || 0) * 100).toFixed(1) + " / " + ((aero.d.dxOuter || 0) * 100).toFixed(1) + " cm" }
+                PwStatRow { label: "dt (finest) · blockage"; value: (aero.d.dt || 0).toExponential(2) + " s · " + ((aero.d.blockage || 0) * 100).toFixed(1) + " %" }
                 PwStatRow { label: "Max lattice Mach"; value: Theme.fixed(aero.d.maxMach, 3); warn: aero.d.maxMach > (aero.c.maxMach || 0.3) }
                 PwStatRow { label: "Mass drift"; value: (aero.d.massDrift || 0).toExponential(2); warn: Math.abs(aero.d.massDrift || 0) > 1e-3 }
                 PwStatRow { label: "Coarse-grid Δ (force)"; value: aero.pct(aero.d.coarseDelta); warn: aero.d.coarseDelta > 0.1 }

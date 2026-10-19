@@ -1172,6 +1172,7 @@ void AppController::updateTelemetry() {
         QVariantMap dm;
         dm["grid"] = QVariantList{d.gridCells[0], d.gridCells[1], d.gridCells[2]};
         dm["cells"] = double(d.cellCount());
+        dm["levels"] = d.levels; dm["dxOuter"] = d.dxOuter; dm["blockage"] = d.blockage;
         dm["dx"] = d.dx; dm["dt"] = d.dtLattice; dm["maxMach"] = d.maxLatticeMach; dm["massDrift"] = d.massDrift;
         dm["coarseDelta"] = std::isfinite(d.coarseDelta) ? QVariant(d.coarseDelta) : QVariant();
         dm["richardson"] = std::isfinite(d.richardsonError) ? QVariant(d.richardsonError) : QVariant();
@@ -1288,7 +1289,8 @@ QVariantMap AppController::cfd() const {
     QVariantMap m;
     m["preset"] = sim::toString(c.preset);
     m["cellsPerMeter"] = c.cellsPerMeter; m["maxCellsPerAxis"] = c.maxCellsPerAxis;
-    m["padUpstream"] = c.padUpstream; m["padDownstream"] = c.padDownstream; m["padLateral"] = c.padLateral;
+    m["padUpstream"] = c.padUpstream; m["padDownstream"] = c.padDownstream; m["blockageRatio"] = c.blockageRatio;
+    m["levels"] = c.levels;
     m["latticeMach"] = c.latticeMach; m["maxMach"] = c.maxMach;
     m["lattice"] = sim::toString(c.lattice); m["collision"] = sim::toString(c.collision);
     m["turbulence"] = sim::toString(c.turbulence); m["smagorinskyCs"] = c.smagorinskyCs; m["wall"] = sim::toString(c.wall);
@@ -1323,7 +1325,8 @@ void AppController::setCfd(const QString& key, const QVariant& v) {
     else if (k == "maxCellsPerAxis") c.maxCellsPerAxis = std::clamp(v.toInt(), 16, 1024);
     else if (k == "padUpstream") c.padUpstream = v.toDouble();
     else if (k == "padDownstream") c.padDownstream = v.toDouble();
-    else if (k == "padLateral") c.padLateral = v.toDouble();
+    else if (k == "blockageRatio") c.blockageRatio = std::clamp(v.toDouble(), 0.001, 0.2);
+    else if (k == "levels") c.levels = std::clamp(v.toInt(), 1, 4);
     else if (k == "latticeMach") c.latticeMach = v.toDouble();
     else if (k == "maxMach") c.maxMach = v.toDouble();
     else if (k == "lattice") pick(c.lattice, sim::CFDLattice::D3Q19, sim::CFDLattice::D3Q27);

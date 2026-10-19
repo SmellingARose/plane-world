@@ -46,7 +46,11 @@ struct CFDSettings {
     CFDQualityPreset preset = CFDQualityPreset::Medium;
     double cellsPerMeter = 16;
     int maxCellsPerAxis = 192;
-    double padUpstream = 1, padDownstream = 2.5, padLateral = 1;
+    /// Outer box: upstream / downstream of the craft in craft lengths (bounding diameters); the cross-section is sized so
+    /// the craft's frontal area blocks at most `blockageRatio` of it (and leaves at least one craft length each side).
+    double padUpstream = 2, padDownstream = 4, blockageRatio = 0.03;
+    /// Grid levels (nested boxes, refinement ratio 2; 1 = uniform). The finest holds the craft, the coarsest the outer box.
+    int levels = 3;
     double latticeMach = 0.1, maxMach = 0.3;
     CFDLattice lattice = CFDLattice::D3Q19;
     CFDCollision collision = CFDCollision::Cumulant;
@@ -68,15 +72,19 @@ struct CFDSettings {
 
 /// "How good is it" numbers (Swift CFDDiagnostics).
 struct CFDDiagnostics {
-    int gridCells[3] = {0, 0, 0};
-    double dx = 0, dtLattice = 0;
+    int gridCells[3] = {0, 0, 0};     // outer (level-0) box
+    int levels = 0;
+    long long cells = 0;              // all levels
+    double dx = 0, dtLattice = 0;     // finest level (the craft's)
+    double dxOuter = 0;               // level 0
+    double blockage = 0;              // craft frontal area / outer box cross-section
     double maxLatticeMach = 0;
     double massDrift = 0;
     double coarseDelta = std::numeric_limits<double>::quiet_NaN(), richardsonError = std::numeric_limits<double>::quiet_NaN();
     double gpuMsPerStep = 0, cpuWaitMsPerStep = 0;
     int stepsRun = 0;
     bool diverged = false;
-    long long cellCount() const { return (long long)gridCells[0] * gridCells[1] * gridCells[2]; }
+    long long cellCount() const { return cells > 0 ? cells : (long long)gridCells[0] * gridCells[1] * gridCells[2]; }
 };
 
 /// Pose of one part for voxelisation (world space).
