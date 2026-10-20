@@ -26,7 +26,7 @@ Item {
     function cycleAero() {
         const l = App.aeroModels; let i = 0
         for (let k = 0; k < l.length; ++k) if (l[k].id === App.aeroModel) i = k
-        for (let s = 1; s <= l.length; ++s) { const m = l[(i + s) % l.length]; if (m.id !== "custom" && (!m.full || App.fullAvailable)) { App.aeroModel = m.id; return } }
+        for (let s = 1; s <= l.length; ++s) { const m = l[(i + s) % l.length]; if (m.id !== "custom") { App.aeroModel = m.id; return } }
     }
 
     readonly property var commands: {
@@ -64,10 +64,7 @@ Item {
             { name: "Fly: camera cockpit", shortcut: "", run: () => App.cameraMode = "cockpit" },
             { name: "Fly: toggle live equations", shortcut: "E", run: () => App.equationsLive = !App.equationsLive },
             { name: "Fly: show equations", shortcut: "", run: () => { App.equationsLive = true; cmds.showEquationsRequested() } },
-            { name: "Aero: cycle model", shortcut: "Ctrl+Shift+M", run: () => cmds.cycleAero() },
-            { name: "Aero: toggle flow slice", shortcut: "", run: () => App.setCfd("visEnabled", !App.cfd.visEnabled) },
-            { name: "Aero: flow slice horizontal", shortcut: "", run: () => { App.setCfd("visAxis", 1); App.setCfd("visEnabled", true) } },
-            { name: "Aero: flow slice vertical", shortcut: "", run: () => { App.setCfd("visAxis", 2); App.setCfd("visEnabled", true) } }
+            { name: "Aero: cycle model", shortcut: "Ctrl+Shift+M", run: () => cmds.cycleAero() }
         ]
         const l = App.aeroModels
         for (let i = 0; i < l.length; ++i) { const m = l[i]; c.push({ name: "Aero model: " + m.name, shortcut: "", run: () => App.aeroModel = m.id }) }

@@ -11,17 +11,15 @@ MSL / DXIL at build time, and a Qt 6 Quick app on top. One CMake project at the 
 | `src/gpu` | `pwgpu` | device, buffers, textures, graphics + compute pipelines, graphics and async-compute queues, fences, triple-buffered frames, GPU timestamps (`pw/gpu.h`); GPGPU layer for simulation kernels (`pw/compute.h`). Metal in Objective-C++, Direct3D 12 with a WARP fallback |
 | `src/render` | `pwrender` | frame graph, sky / aerial-perspective LUTs, cascaded shadows, PBR meshes, TAA, bloom, ACES, debug lines, `CraftRenderable` |
 | `src/env` | `pwenv`, `pwenv_render` | terrain (flat / procedural + GPU erosion / heightmap / real-world DEM tiles, sculpt + paint), FFT ocean, lakes, rivers, buoyancy, FLIP fluid zones, vegetation, grass; their renderables |
-| `src/flow` | `pwflow`, `pwflow_fv`, `pwflow_render` | lattice-Boltzmann CFD (`pw/flow/lbm.h`, [CFD.md](CFD.md)); finite-volume Navier–Stokes CFD and the OpenFOAM reference (`pw/flow/ns.h`, `pw/flow/openfoam.h`, [CFD_NS.md](CFD_NS.md)); the flow slice / tracer overlay |
 | `src/app` | `pwapp` ("Plane World"), `pwuitests` | Qt Quick UI (`qml/`), `AppController` (BUILD / FLY), `WorldModel`, `EvolveModel`, `GpuViewport` / `WorldViewport` |
-| `src/cli` | `pwcli` | headless `--selftest`, `--train`, `--bench`, `--aero-compare`, `--gpu-smoke`, `--render-shot`, `--info` |
-| `shaders` | `pw_shaders` | Slang sources (`scene.slang`, `env/`, `flow/`), embedded per backend by `cmake/PWSlang*.cmake` |
+| `src/cli` | `pwcli` | headless `--selftest`, `--train`, `--bench`, `--gpu-smoke`, `--render-shot`, `--info` |
+| `shaders` | `pw_shaders` | Slang sources (`scene.slang`, `env/`), embedded per backend by `cmake/PWSlang*.cmake` |
 | `data`, `examples` | | bundled crafts and experiment presets (embedded at build time), example crafts and experiments |
 | `tests` | `pwtests` | doctest suite; `tests/parity` (reference trajectories, unit samples, training histories) and `tests/render_ref` |
 | `packaging` | | `.dmg` and `.msi` scripts ([PACKAGING.md](PACKAGING.md)) |
 
-Dependencies point downward only: `pwcore` ← `pwgpu` ← `pwrender` ← `pwenv_render` / `pwflow_render` ← `pwapp`;
-`pwflow` and `pwenv` need `pwcore` + `pwgpu`. The CFD backend reaches `CraftSim` through
-`sim::AeroBackendRegistry` (`src/core/pw/sim/cfd.h`), so the core has no link-time dependency on the GPU.
+Dependencies point downward only: `pwcore` ← `pwgpu` ← `pwrender` ← `pwenv_render` ← `pwapp`; `pwenv` needs
+`pwcore` + `pwgpu`. The core has no link-time dependency on the GPU.
 
 ## UI
 
@@ -37,16 +35,14 @@ Every action is in the command palette (Ctrl/⌘+K, `AppCommands.qml`) with its 
 ## Threading
 
 - **GUI thread:** `AppController`, `WorldModel` and `EvolveModel` live here. FLY steps `CraftSim` from a display-rate
-  timer with 1 kHz substeps. Viewports read their render snapshot (document revision, part poses, flow solver) in
+  timer with 1 kHz substeps. Viewports read their render snapshot (document revision, part poses) in
   `updatePaintNode`, which Qt runs while the GUI thread is blocked, then record on Qt Quick's own Metal / D3D12 device
   and queue and composite the output texture without a copy.
 - **Job system** (`pw/jobs.h`): work-stealing, topology aware (Apple P/E clusters, Ryzen CCDs, Intel P/E). Used for
   CAD panel aero, terrain bakes and the training evaluator.
 - **Training:** `EvolutionRun` runs generations on a background thread; `SimEvaluator` spreads episodes over the job
-  system, one `EvalWorker` per thread with a zero-allocation episode loop. Full-CFD training uses one domain pool per
-  worker.
-- **GPU:** async compute for the sky LUTs and simulation kernels, joined to graphics by fences. CFD `submit` /
-  `collect` overlap GPU work with CPU physics, so CFD forces lag one update.
+  system, one `EvalWorker` per thread with a zero-allocation episode loop.
+- **GPU:** async compute for the sky LUTs and simulation kernels, joined to graphics by fences.
 - **World I/O:** real-world DEM tiles download on I/O threads into a disk cache.
 
 ## Determinism
@@ -61,8 +57,6 @@ Every action is in the command palette (Ctrl/⌘+K, `AppCommands.qml`) with its 
   compared with tolerances (1e-9 for the first second, 1e-6 over 3 s) and training generation 0 within 5 %.
 - Training results do not depend on the worker count: each episode seed derives from (run seed, generation,
   candidate, episode) via `EvoRNG::derive` (`src/core/src/evo/evaluator.cpp:288`), and results are written by index. `tools/train_parity.sh` checks 1 vs 4 workers.
-- GPU reductions in the CFD solver are 64-bit fixed point accumulated with integer atomics, so pooled domains equal a
-  single domain bit for bit on both APIs.
 
 ## GPU backends and shaders
 

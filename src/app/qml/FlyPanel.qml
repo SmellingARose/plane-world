@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// FLY inspector: flight controls, camera, output sliders with keybind badges, aero model + CFD, sensors, equations.
+// FLY inspector: flight controls, camera, output sliders with keybind badges, aero model, sensors, equations.
 ColumnLayout {
     id: fly
     spacing: Theme.s3

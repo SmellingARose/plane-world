@@ -87,7 +87,6 @@ jobs:
       - name: Self-tests (pwcli --selftest all)
         env:
           PW_SELFTEST_OUT: shots   # env scene screenshots (envrender.scene) land in the uploaded artefacts
-          PW_FLOW_SMALL: ${{ runner.os == 'Windows' && '1' || '' }}   # WARP: flow.* on coarse grids (full grids take minutes each)
         run: build/src/cli/pwcli --selftest all --verbose
 
       - name: Training parity vs reference histories (examples/experiments, 1 and 4 workers)

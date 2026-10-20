@@ -105,8 +105,6 @@ WorldRef worldRefFromJson(const Value& v) {
 }
 AeroRunSettings aeroFromJson(const Value& v) {
     AeroRunSettings a;
-    if (v["model"].isString() && (v["model"].str() == "fast" || v["model"].str() == "full")) a.model = v["model"].str();
-    if (v.has("cfd") && v["cfd"].isObject()) a.cfd = v["cfd"];
     if (v["toggles"].isObject()) {
         auto& t = v["toggles"];
         auto b = [&](const char* k, bool d) { return t[k].type() == Value::Type::Bool ? t[k].boolean() : d; };
@@ -119,14 +117,13 @@ AeroRunSettings aeroFromJson(const Value& v) {
     if (v["profile"].isString()) a.profile = v["profile"].str();
     else {
         a.profile = "custom";
-        if (a.model == "fast") for (auto& p : sim::fastAeroProfiles()) if (p.toggles == a.toggles) { a.profile = p.id; break; }
+        for (auto& p : sim::fastAeroProfiles()) if (p.toggles == a.toggles) { a.profile = p.id; break; }
     }
     return a;
 }
 Value toJsonAero(const AeroRunSettings& a) {
     Value o = Value::object();
     o.set("model", Value::string(a.model));
-    if (a.cfd) o.set("cfd", *a.cfd);
     Value t = Value::object();
     t.set("gyro", Value::fromBool(a.toggles.gyro)); t.set("pFactor", Value::fromBool(a.toggles.pFactor)); t.set("downwash", Value::fromBool(a.toggles.downwash));
     t.set("blockage", Value::fromBool(a.toggles.blockage)); t.set("cadWash", Value::fromBool(a.toggles.cadWash)); t.set("slipstream", Value::fromBool(a.toggles.slipstream)); t.set("hingeAtAC", Value::fromBool(a.toggles.hingeAtAC));

@@ -221,7 +221,7 @@ EvalWorker::EvalWorker(std::shared_ptr<const ExperimentContext> ctx, std::unique
     stopOnCrash_ = e.episode.stopOnCrash;
     runtime_->compile(e.scripts, e);
     baseSim_ = std::make_unique<sim::CraftSim>();
-    loadSim(*baseSim_, ctx_->craftSpec, ctx_->craft);
+    loadSim(*baseSim_, ctx_->craftSpec);
     sim_ = baseSim_.get();
     if (ctx_->mlpSizes.size() >= 2)
         mlp_ = std::make_unique<MLPPolicy>(ctx_->mlpSizes, e.genome.mlp ? e.genome.mlp->activation : "tanh", e.genome.mlp ? e.genome.mlp->outputActivation : "tanh");
@@ -233,22 +233,13 @@ EvalWorker::EvalWorker(std::shared_ptr<const ExperimentContext> ctx, std::unique
 }
 EvalWorker::~EvalWorker() = default;
 
-void EvalWorker::loadSim(sim::CraftSim& s, const sim::CraftSpec& spec, const craft::CraftDocument& doc) {
+void EvalWorker::loadSim(sim::CraftSim& s, const sim::CraftSpec& spec) {
     const auto& e = ctx_->experiment;
     std::string err;
     if (!s.load(spec, &err)) throw EvoError("invalid experiment: craft does not load: " + err);
     s.substepHz = e.episode.physicsHz;
     s.crashSpeed = e.episode.crashSpeed;
     s.fastToggles = e.aero.toggles; s.slipstream = e.aero.toggles.slipstream;
-    if (e.aero.model != "full") return;
-    // experiment.aero.cfd -> a configured CFD domain (Swift Evaluator.applyAero); the backend comes from pwflow's registry.
-    if (!fullBackend_) {
-        auto& make = sim::AeroBackendRegistry::makeFull();
-        if (!make) throw EvoError("invalid experiment: aero model 'full': the GPU CFD backend is not registered in this build");
-        fullBackend_ = make();
-    }
-    const sim::CFDSettings cs = e.aero.cfd ? sim::CFDSettings::fromJSON(*e.aero.cfd) : sim::CFDSettings{};
-    if (!s.enableFull(*fullBackend_, doc, cs, &err)) throw EvoError("invalid experiment: aero model 'full': " + err);
 }
 
 void EvalWorker::remap() {
@@ -270,7 +261,7 @@ craft::CraftDocument EvalWorker::prepare(const Genome& g) {
         if (ctx_->designRange.first >= 0) doc = design::apply(e.genome.design, g.values.data() + ctx_->designRange.first, doc);
         doc = runtime_->decode(g, ctx_->layout, doc);
         auto s = std::make_unique<sim::CraftSim>();
-        loadSim(*s, sim::CraftSpec::fromDocument(doc), doc);
+        loadSim(*s, sim::CraftSpec::fromDocument(doc));
         designSim_ = std::move(s);
         sim_ = designSim_.get();
         remap();

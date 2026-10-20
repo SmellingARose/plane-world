@@ -1,7 +1,7 @@
 # Plane World: performance
 
-CPU micro-benchmarks for the C++ build, from `pwcli --bench` (`src/cli/bench.cpp`). GPU work (CFD, rendering) is
-not covered here; CFD timings are in `docs/CFD.md` §6.
+CPU micro-benchmarks for the C++ build, from `pwcli --bench` (`src/cli/bench.cpp`). GPU work (rendering) is
+not covered here.
 
 ## How to measure
 

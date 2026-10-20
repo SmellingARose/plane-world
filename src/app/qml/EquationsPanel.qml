@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 // FLY › EQUATIONS: the fast-model equations evaluated this frame for one part (or all), with every symbol's live value
-// and the resulting force / moment. Full model: fast vs CFD comparison for the part first.
+// and the resulting force / moment.
 PwSection {
     id: eq
     title: "Equations"
@@ -24,16 +24,6 @@ PwSection {
             currentIndex: Math.max(0, indexOfValue(App.equationsPart))
             onActivated: (i) => App.equationsPart = model[i].id
             ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: "Equations are captured for this part (the BUILD selection carries over)"
-        }
-        ColumnLayout {
-            visible: App.fullModel && App.equationsPart !== ""
-            Layout.fillWidth: true
-            spacing: 2
-            Label { text: "Fast vs CFD (this part, aero only)"; font.weight: Font.DemiBold; font.pixelSize: Theme.small }
-            PwStatRow { label: "Fast |F|"; value: App.comparison.fast !== undefined ? Theme.num(App.comparison.fast) + " N" : "–" }
-            PwStatRow { label: "CFD |F| (momentum exchange)"; value: App.comparison.cfd !== undefined ? Theme.num(App.comparison.cfd) + " N" : "–" }
-            PwStatRow { label: "Difference"; value: App.comparison.diff !== undefined ? App.comparison.diff.toFixed(1) + " %" : "no CFD force yet"
-                warn: Math.abs(App.comparison.diff || 0) > 20 }
         }
         PwEmptyState {
             visible: !App.equationsLive || App.equations.length === 0

@@ -14,7 +14,6 @@
 #include "pw/craft/library.h"
 #include "pw/evo/script.h"
 #include "pw/json.h"
-#include "pw/sim/cfd.h"
 #include "pw/sim/craft_sim.h"
 #include "pw/sim/craft_spec.h"
 #include "worldmodel.h"
@@ -213,13 +212,7 @@ void EvolveModel::setAero(const QString& id) {
     auto& a = d.aero;
     if (const auto* p = sim::fastAeroProfile(s)) { a.model = "fast"; a.profile = p->id; a.toggles = p->toggles; }
     else if (s == "custom") { a.model = "fast"; a.profile = "custom"; }
-    else if (s.rfind("full.", 0) == 0) {
-        bool found = false;
-        for (auto p : {sim::CFDQualityPreset::Draft, sim::CFDQualityPreset::Medium, sim::CFDQualityPreset::High, sim::CFDQualityPreset::Ultra})
-            if (s == std::string("full.") + sim::toString(p)) { a.cfd = sim::CFDSettings::fromPreset(p).toJSON(); found = true; }
-        if (!found) return;
-        a.model = "full";
-    } else return;
+    else return;
     setDoc(d, true);
 }
 

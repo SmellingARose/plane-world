@@ -128,7 +128,7 @@ public:
     Q_INVOKABLE void duplicate();
     Q_INVOKABLE void refreshLibrary();
     Q_INVOKABLE QVariantList algorithmSchema(const QString& kind) const;
-    Q_INVOKABLE void setAero(const QString& id);   // AeroModelPicker id: fast profile, "custom" or "full.<preset>"
+    Q_INVOKABLE void setAero(const QString& id);   // AeroModelPicker id: fast profile or "custom"
     Q_INVOKABLE void setPreset(const QString& genomePreset);   // what evolves; adjusts controller mode + script
     Q_INVOKABLE void toggleIO(const QString& which, const QString& name, bool on);   // "inputs" | "outputs"
     Q_INVOKABLE void setInputScale(const QString& name, double scale);

@@ -1,9 +1,7 @@
 # Plane World: Physics models and equations
 
 Every equation the **fast** aero model uses, where it lives in the C++ code, what it assumes and where it stops
-being valid. The **full** models are CFD. The GPU lattice-Boltzmann solver (real time) is in `docs/CFD.md`, including
-the contract between the fast and full models. The GPU Navier–Stokes finite-volume solver (URANS k-ω SST, slower,
-textbook method) and the offline OpenFOAM reference are in `docs/CFD_NS.md`. In FLY, the EQUATIONS panel shows these formulas for the selected part with live values.
+being valid. In FLY, the EQUATIONS panel shows these formulas for the selected part with live values.
 
 Paths are relative to the repo root. `craft_sim.cpp` = `src/core/src/sim/craft_sim.cpp`, `aero.cpp` =
 `src/core/src/aero.cpp`. Line numbers drift; search for the function name if they do.
@@ -152,9 +150,6 @@ measurements of Plane World itself.
 | Actuator-disk prop-wing interaction | lift about 4 % (pitching moment poor) | [6] |
 | Newtonian panels at low speed | no clean published figure (a hypersonic model, used here for order of magnitude) | — |
 | RANS | lift about 5 % including near stall (single code); drag code-to-code scatter ±40 counts (2σ, DPW-I) | [7], [8] |
-| Lattice-Boltzmann (Ahmed body) | drag 4.7 % on a fine grid vs 32.5 % on a coarse grid | [10] |
-
-The LBM row is why `docs/CFD.md` insists on watching the grid-convergence estimate: resolution dominates CFD error.
 
 Sources:
 1. IOP Conf. Ser. Mater. Sci. Eng. 645 012017, doi:10.1088/1757-899X/645/1/012017

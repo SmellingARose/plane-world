@@ -197,8 +197,7 @@ replay of any generation or archive cell in the viewport, and export of a craft 
 FLY offers "Autopilot from evolved controller" for such crafts.
 
 **Aero model picker** (`EvolvePanel.qml:158`) is the same `AeroModelPicker` list as FLY
-(`src/app/appcontroller.cpp:954`): Fast · classic, Fast · slipstream, Fast+ (all effects), Full CFD ·
-Draft/Medium/High/Ultra, Custom. The choice is stored in the experiment's `aero` object (§8).
+(`src/app/appcontroller.cpp:954`): Fast · classic, Fast · slipstream, Fast+ (all effects), Custom. The choice is stored in the experiment's `aero` object (§8).
 
 ## 7. Determinism, threading, files
 
@@ -224,14 +223,12 @@ per episode, candidate and generation.
 
 ```json
 "aero": { "model": "fast", "profile": "fast.plus",
-          "toggles": { "gyro": true, "pFactor": true, "downwash": true, "blockage": true, "cadWash": true, "slipstream": true },
-          "cfd": { "preset": "medium" } }
+          "toggles": { "gyro": true, "pFactor": true, "downwash": true, "blockage": true, "cadWash": true, "slipstream": true } }
 ```
 
-`model` is `fast` or `full`. `profile` is a picker id (`fast.classic`, `fast.slipstream`, `fast.plus`,
-`full.draft` … `full.ultra`, or `custom`); when missing it is inferred from the toggles
-(`src/core/src/evo/experiment.cpp:106`). Missing `aero` means fast with all toggles on. Full mode gives each worker
-its own CFD domain and is far slower than fast (see `docs/CFD.md`).
+`model` is always `fast` (older files may say `full`, from the removed CFD mode; they load as fast, and a `cfd` key
+is ignored). `profile` is a picker id (`fast.classic`, `fast.slipstream`, `fast.plus` or `custom`); when missing it is
+inferred from the toggles (`src/core/src/evo/experiment.cpp`). Missing `aero` means fast with all toggles on.
 
 ## 9. Headless training CLI
 
@@ -243,8 +240,7 @@ build/src/cli/pwcli --train my.json --generations 120 --resume --out /tmp/run   
 
 Options (`src/cli/train_cli.cpp`): `--generations N`, `--population N`, `--workers N` (1 = single core),
 `--seed N`, `--out DIR` (default: the experiment's run directory), `--resume`, `--current-as-flat`,
-`--aero fast|full|<picker id>` (e.g. `fast.slipstream`; `cfd.<preset>` selects full CFD),
-`--cfd-preset draft|medium|high|ultra|custom`, `--script-engine auto|quickjs|jsc`.
+`--aero fast|<picker id>` (e.g. `fast.slipstream`), `--script-engine auto|quickjs|jsc`.
 
 - One line per generation: best, mean, median, failures, sims/s, sim-s per wall-s and the best candidate's terms
   (NEAT adds `species=`, MAP-Elites/novelty `coverage=`).

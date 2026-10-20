@@ -22,7 +22,7 @@ qt_add_qml_module(pwapp
   VERSION 1.0
   QML_FILES ${PW_APP_QML}
 )
-target_link_libraries(pwapp PRIVATE Qt6::Quick Qt6::QuickControls2 pwcore pwgpu pwrender pwflow pwflow_render pwflow_fv pwenv pwenv_render)   # pwenv: WORLD (P5b)
+target_link_libraries(pwapp PRIVATE Qt6::Quick Qt6::QuickControls2 pwcore pwgpu pwrender pwenv pwenv_render)   # pwenv: WORLD (P5b)
 
 if(WIN32)
   # Deploy Qt next to the exe for CI artefacts (windeployqt from the same Qt install).

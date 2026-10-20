@@ -4,7 +4,7 @@
 // (no copies, same queue ordering), so the interface never costs frame time. Owner: P5a (BUILD / FLY).
 //
 // Scene: ground + the App craft (AppController document, posed from the simulation), selection box and move gizmo
-// in BUILD, CFD flow overlay in FLY (Full model with the slice enabled).
+// in BUILD.
 //
 // Camera: orbit around the craft (BUILD, FLY orbit), chase (FLY, swings behind the flight path) or cockpit.
 // Mouse: drag to orbit, right-drag pans height, wheel / pinch to zoom. BUILD: click picks a part, drag a gizmo arrow

@@ -6,11 +6,10 @@
 //         nudges coalesce into one step), parts library, CAD import, auto-rig, mesh cut, outputs + keybinds, inputs.
 //  FLY    CraftSim stepped on the GUI thread at the display rate (1 kHz substeps), output sliders, keyboard output
 //         bindings (an application event filter, so bindings work whatever has focus except text fields), camera
-//         modes, telemetry HUD, aero model picker (fast profiles + Full CFD from the AeroBackendRegistry),
-//         CFD settings / diagnostics / flow overlay, EQUATIONS with live values, perf for the status bar.
+//         modes, telemetry HUD, aero model picker (fast profiles), EQUATIONS with live values, perf for the status bar.
 //
 // Threading: everything lives on the GUI thread. GpuViewport reads the render snapshot (document revision,
-// per-part world poses, selection, flow solver) in updatePaintNode, which Qt runs while the GUI thread is blocked.
+// per-part world poses, selection) in updatePaintNode, which Qt runs while the GUI thread is blocked.
 #include <QElapsedTimer>
 #include <QObject>
 #include <QSet>
@@ -24,7 +23,6 @@
 #include "pw/craft/document.h"
 #include "pw/evo/evaluator.h"
 #include "pw/geo.h"
-#include "pw/sim/cfd.h"
 #include "pw/sim/controls.h"
 #include "pw/sim/craft_sim.h"
 #include "pw/sim/fidelity.h"
@@ -34,7 +32,6 @@ class QKeyEvent;
 struct WorldScene;
 namespace pw::evo { class HeadlessObstacles; }
 class QJSEngine;
-namespace pw::flow { class LBMSolver; }
 
 class AppController : public QObject {
     Q_OBJECT
@@ -91,19 +88,11 @@ class AppController : public QObject {
     // ---- aero model
     Q_PROPERTY(QVariantList aeroModels READ aeroModels CONSTANT)
     Q_PROPERTY(QString aeroModel READ aeroModel WRITE setAeroModel NOTIFY aeroChanged)
-    Q_PROPERTY(bool fullModel READ fullModel NOTIFY aeroChanged)        // any CFD method (LBM or NS-FV)
-    Q_PROPERTY(QString cfdMethod READ cfdMethod NOTIFY aeroChanged)      // "lbm", "ns" or "" (fast)
-    Q_PROPERTY(QString cfdMethodLabel READ cfdMethodLabel NOTIFY aeroChanged)
-    Q_PROPERTY(bool fullAvailable READ fullAvailable CONSTANT)
     Q_PROPERTY(QVariantMap fastToggles READ fastToggles NOTIFY aeroChanged)
-    Q_PROPERTY(QString aeroError READ aeroError NOTIFY aeroChanged)
-    Q_PROPERTY(QVariantMap cfd READ cfd NOTIFY aeroChanged)
-    Q_PROPERTY(QVariantMap cfdDiagnostics READ cfdDiagnostics NOTIFY cfdDiagnosticsChanged)
     // ---- equations
     Q_PROPERTY(bool equationsLive READ equationsLive WRITE setEquationsLive NOTIFY equationsChanged)
     Q_PROPERTY(QString equationsPart READ equationsPart WRITE setEquationsPart NOTIFY equationsChanged)
     Q_PROPERTY(QVariantList equations READ equations NOTIFY equationsChanged)
-    Q_PROPERTY(QVariantMap comparison READ comparison NOTIFY equationsChanged)
 
 public:
     explicit AppController(QObject* parent = nullptr);
@@ -209,29 +198,16 @@ public:
     bool crashed() const { return m_sim && m_sim->crashed(); }
 
     QVariantList aeroModels() const;
-    QString aeroModel() const;   // profile id, "custom", "full.<preset>" (LBM) or "ns.<preset>" (Navier–Stokes FV)
+    QString aeroModel() const;   // fast profile id or "custom"
     void setAeroModel(const QString& id);
-    bool fullModel() const { return m_aeroModel == "full" || m_aeroModel == "ns"; }
-    QString cfdMethod() const { return m_aeroModel == "full" ? "lbm" : m_aeroModel == "ns" ? "ns" : ""; }
-    QString cfdMethodLabel() const;
-    /// OpenFOAM offline reference: writes a case for the current craft at the current airspeed (>= 10 m/s) and pitch;
-    /// returns the case directory ("" on failure, with a notification).
-    Q_INVOKABLE QString exportOpenFoam();
-    bool fullAvailable() const;
     QVariantMap fastToggles() const;
     Q_INVOKABLE void setFastToggle(const QString& key, bool on);
-    QString aeroError() const { return m_aeroError; }
-    QVariantMap cfd() const;
-    Q_INVOKABLE void setCfd(const QString& key, const QVariant& value);
-    Q_INVOKABLE void setCfdPreset(const QString& preset);
-    QVariantMap cfdDiagnostics() const { return m_cfdDiag; }
 
     bool equationsLive() const { return m_eqLive; }
     void setEquationsLive(bool on);
     QString equationsPart() const { return QString::fromStdString(m_eqPart); }
     void setEquationsPart(const QString& id);
     QVariantList equations() const { return m_equations; }
-    QVariantMap comparison() const { return m_comparison; }
 
     // ---- render snapshot (GpuViewport, GUI thread blocked)
     const pw::craft::CraftDocument& document() const { return m_doc; }
@@ -248,8 +224,6 @@ public:
     bool selectedBox(pw::Vec3d corners[8], pw::Vec3d& origin) const;
     /// Ray pick against part meshes; returns the part id or "".
     QString pick(const pw::Vec3d& origin, const pw::Vec3d& dir) const;
-    pw::flow::LBMSolver* flowSolver() const;
-    bool flowVisible() const { return fullModel() && m_cfdSettings.visualization.enabled && m_mode == "fly"; }
 
 signals:
     void modeChanged();
@@ -269,7 +243,6 @@ signals:
     void cameraModeChanged();
     void telemetryChanged();
     void aeroChanged();
-    void cfdDiagnosticsChanged();
     void equationsChanged();
     void worldChanged();
     /// Transient message for the toast ("info" | "good" | "warn" | "bad").
@@ -330,7 +303,7 @@ private:
     QVariantList m_parts, m_library, m_outputs, m_outputValues, m_inputs, m_equations;
     std::vector<pw::craft::CraftDocument> m_libraryDocs;
     std::vector<std::string> m_libraryPaths;
-    QVariantMap m_selectedMap, m_telemetry, m_perf, m_cfdDiag, m_comparison;
+    QVariantMap m_selectedMap, m_telemetry, m_perf;
     QStringList m_warnings, m_rigReport;
     QString m_massSummary;
     double m_radius = 3;
@@ -350,7 +323,6 @@ private:
     pw::Vec3d m_prevPos;
     bool m_flyInWorld = true, m_hasFlyFrom = false, m_worldConnected = false;
     double m_flyFromX = 0, m_flyFromZ = 0, m_flyFromHeading = 0;
-    std::unique_ptr<pw::sim::AeroBackend> m_backend;
     pw::sim::EquationCapture m_capture{512};
     pw::sim::SimEnvironment m_env;
     QTimer m_timer;
@@ -371,8 +343,6 @@ private:
     // aero
     std::string m_aeroModel = pw::sim::kDefaultAeroProfile;
     pw::sim::FastAeroToggles m_toggles;
-    pw::sim::CFDSettings m_cfdSettings;
-    QString m_aeroError;
     bool m_eqLive = true;
     std::string m_eqPart;
 };

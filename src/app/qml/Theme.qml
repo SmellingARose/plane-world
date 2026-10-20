@@ -89,7 +89,6 @@ QtObject {
     readonly property color warn: dark ? "#d29922" : "#9a6700"
     readonly property color bad: dark ? "#f85149" : "#cf222e"
     readonly property color info: dark ? "#58a6ff" : "#0969da"
-    readonly property color cfd: dark ? "#39c5bb" : "#0f8a83"    // Full / CFD identity (status bar, aero picker)
     // axis colours (gizmos, vectors): +X forward red, +Y up green, +Z right blue
     readonly property color axisX: "#e5534b"
     readonly property color axisY: "#57ab5a"

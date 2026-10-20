@@ -19,5 +19,3 @@ target_link_libraries(pwtests PRIVATE pwrender)
 target_compile_definitions(pwtests PRIVATE PW_RENDER_REF_DIR="${PROJECT_SOURCE_DIR}/tests/render_ref")
 target_sources(pwtests PRIVATE test_env.cpp)   # P3b: terrain / water / vegetation
 target_link_libraries(pwtests PRIVATE pwenv pwenv_render)
-target_sources(pwtests PRIVATE test_flow.cpp)   # P4: lattice-Boltzmann CFD
-target_link_libraries(pwtests PRIVATE pwflow pwflow_render)

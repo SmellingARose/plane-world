@@ -1,7 +1,7 @@
 // pwcli --train / --make-experiment (port of Swift App/TrainCLI.swift; same flags, messages and override rules).
 //   pwcli --make-experiment "<preset>" <out.json> [--craft <name>]
 //   pwcli --train <experiment.json> [--generations N] [--population N] [--workers N] [--seed N] [--out dir] [--resume]
-//         [--current-as-flat] [--aero fast|full|<profile id>] [--cfd-preset draft|medium|high|ultra]
+//         [--current-as-flat] [--aero fast|<profile id>]
 //         [--script-engine auto|jsc|quickjs]                                   (C++ only: pick the JS engine)
 // The overrides are applied to the experiment document here; the run itself is the evolution core's
 // (pw::train::handler(), registered by pw/evolution).
@@ -56,33 +56,9 @@ Value with(const Value& o, const std::string& key, Value v) {
     return out;
 }
 
-// CFDSettings.preset(p) as JSON (Swift Core/Fidelity.swift), full field set as the Swift encoder writes it.
-Value cfdPreset(const std::string& p, const Value& base) {
-    double cpm = 16, maxCells = 192, update = 4, levels = 3;
-    std::string collision = "cumulant", lattice = "d3q19", turbulence = "smagorinsky";
-    if (p == "draft") { cpm = 8; maxCells = 96; collision = "regularized"; update = 8; levels = 2; }
-    else if (p == "high") { cpm = 32; maxCells = 256; update = 2; }
-    else if (p == "ultra") { cpm = 64; maxCells = 384; lattice = "d3q27"; turbulence = "wale"; update = 1; levels = 4; }
-    Value vis = Value::object();
-    vis.set("enabled", Value::fromBool(false)); vis.set("field", Value::string("speed")); vis.set("particleCount", Value::number(4096));
-    vis.set("particles", Value::fromBool(false)); vis.set("sliceAxis", Value::number(2)); vis.set("sliceOffset", Value::number(0));
-    Value c = Value::object();
-    c.set("cellsPerMeter", Value::number(cpm)); c.set("collision", Value::string(collision)); c.set("convergenceEvery", Value::number(200));
-    c.set("ground", Value::fromBool(true)); c.set("lattice", Value::string(lattice)); c.set("latticeMach", Value::number(0.1));
-    c.set("levels", Value::number(levels));
-    c.set("maxCellsPerAxis", Value::number(maxCells)); c.set("maxMach", Value::number(0.3)); c.set("padDownstream", Value::number(4));
-    c.set("blockageRatio", Value::number(0.03)); c.set("padUpstream", Value::number(2)); c.set("preset", Value::string(p));
-    c.set("smagorinskyCs", Value::number(0.17)); c.set("substeps", Value::number(0)); c.set("turbulence", Value::string(turbulence));
-    c.set("updateEvery", Value::number(update)); c.set("visualization", vis); c.set("wall", Value::string("interpolatedBounceBack"));
-    (void)base;
-    return c;
-}
-bool isCfdPreset(const std::string& p) { return p == "draft" || p == "medium" || p == "high" || p == "ultra"; }
-
 std::string profileList() {
     std::string s;
     for (auto& p : pw::sim::fastAeroProfiles()) s += (s.empty() ? "" : ", ") + p.id;
-    for (const char* c : {"cfd.draft", "cfd.medium", "cfd.high", "cfd.ultra"}) s += std::string(", ") + c;
     return s;
 }
 
@@ -114,8 +90,8 @@ int runMakeExperiment(const std::vector<std::string>& args) {
 int runTrain(const std::vector<std::string>& args) {
     const char* path = value(args, "--train");
     if (!path) {
-        std::printf("usage: pwcli --train <experiment.json> [--generations N] [--out dir] [--resume] [--current-as-flat] [--aero fast|full] "
-                    "[--cfd-preset draft|medium|high|ultra] [--script-engine auto|jsc|quickjs]\n");
+        std::printf("usage: pwcli --train <experiment.json> [--generations N] [--out dir] [--resume] [--current-as-flat] [--aero fast|<profile id>] "
+                    "[--script-engine auto|jsc|quickjs]\n");
         return 2;
     }
     auto parsed = pw::json::parseFile(path);
@@ -136,23 +112,12 @@ int runTrain(const std::vector<std::string>& args) {
             aero = with(aero, "model", Value::string("fast"));
             aero = with(aero, "toggles", toggles(p->toggles));
             aero = with(aero, "profile", Value::string(s));
-        } else if (s.rfind("cfd.", 0) == 0 && isCfdPreset(s.substr(4))) {
-            aero = with(aero, "model", Value::string("full"));
-            aero = with(aero, "cfd", cfdPreset(s.substr(4), aero["cfd"]));
-            aero = with(aero, "profile", Value::string(s));
-        } else if (s == "fast" || s == "full") {
+        } else if (s == "fast") {
             aero = with(aero, "model", Value::string(s));
         } else {
-            std::printf("error: --aero must be fast, full or a model id: %s\n", profileList().c_str());
+            std::printf("error: --aero must be fast or a model id: %s\n", profileList().c_str());
             return 2;
         }
-    }
-    if (const char* pr = value(args, "--cfd-preset")) {
-        if (!isCfdPreset(pr) && std::string(pr) != "custom") {
-            std::printf("error: --cfd-preset must be one of [\"draft\", \"medium\", \"high\", \"ultra\", \"custom\"]\n");
-            return 2;
-        }
-        aero = with(aero, "cfd", cfdPreset(pr, aero["cfd"]));
     }
     // --swift-legacy: the pre-validation mechanics (legacy hinge load, viscous-only friction, no spin reaction,
     // 2-D stall angle, lagged mass) used by the Swift reference runs in tools/train_parity.sh.
@@ -161,7 +126,7 @@ int runTrain(const std::vector<std::string>& args) {
         for (const char* k : {"hingeAtAC", "staticFriction", "spinReaction", "finiteWingStall", "exactMass", "rotorSpeedLaw"}) t = with(t, k, Value::fromBool(false));
         aero = with(aero, "toggles", t);
     }
-    if (has(args, "--aero") || has(args, "--cfd-preset") || has(args, "--swift-legacy")) e = with(e, "aero", aero);
+    if (has(args, "--aero") || has(args, "--swift-legacy")) e = with(e, "aero", aero);
 
     pw::script::Engine engine = pw::script::Engine::Auto;
     if (const char* se = value(args, "--script-engine")) {

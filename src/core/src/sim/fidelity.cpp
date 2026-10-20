@@ -51,9 +51,6 @@ const EquationInfo& equationInfo(EquationID id) {
          "engineering wake-shadow model (assumed constants); angular-momentum flux conservation for coaxial rotors"},
         {"CAD panels in wash", "V_rel,k = v_body + ω × r_k − (V_wind + Σ wakes(p_k) + Σ horseshoes(p_k))  per panel",
          {"panels", "mean |wash| (m/s)", "max |wash| (m/s)"}, "superposition of the slipstream and downwash models per panel"},
-        {"CFD force (momentum exchange)", "F = Σ_boundary links (f_i + f_ī)·c_i  (lattice → SI: ρ·dx⁴/dt²);  Δ% = (|F_cfd| − |F_fast|)/|F_fast|",
-         {"fast Fx (N)", "fast Fy (N)", "fast Fz (N)", "fast Mx (N·m)", "fast My (N·m)", "fast Mz (N·m)", "|F_fast| (N)", "|F_cfd| (N)", "Δ|F| (%)"},
-         "Ladd 1994 momentum-exchange method (PWFlow)"},
         {"Body drag (projected area)", "D = ½ρV²·C_d·A_proj,  A_proj = |v̂ₓ|s_y s_z + |v̂_y|s_x s_z + |v̂_z|s_x s_y,  C_d ×= 1 + 6(M − 0.8)² above M 0.8",
          {"ρ (kg/m³)", "V (m/s)", "C_d", "A_proj (m²)", "D (N)"}, "bluff-body drag with box projected area (Hoerner, Fluid-Dynamic Drag)"},
     };

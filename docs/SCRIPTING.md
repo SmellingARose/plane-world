@@ -61,5 +61,5 @@ for both engines, and that QuickJS's own heap gets none either).
 
 `pwcli --make-experiment "<preset>" out.json [--craft name]` writes a preset (`src/cli/train_cli.cpp:98`); the
 preset documents are in `data/experiments/`. `pwcli --train` accepts `--generations --population --workers --seed
---out --resume --current-as-flat --aero --cfd-preset --script-engine` (`src/cli/train_cli.cpp:114-179`) and hands
+--out --resume --current-as-flat --aero --script-engine` (`src/cli/train_cli.cpp:114-179`) and hands
 the request to the evolution core (`src/core/src/evo/train.cpp`).

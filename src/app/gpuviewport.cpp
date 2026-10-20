@@ -10,7 +10,6 @@
 #include <memory>
 #include "appcontroller.h"
 #include "pw/craft/document.h"
-#include "pw/flow/overlay.h"
 #include "pw/gpu.h"
 #include "pw/render/craft_renderable.h"
 #include "pw/render/renderer.h"
@@ -40,7 +39,6 @@ struct ViewportNode : QSGSimpleTextureNode {
     std::unique_ptr<pw::render::GpuMesh> ground;
     pw::render::MeshRenderable groundR{-1};
     std::unique_ptr<pw::render::CraftRenderable> craft;
-    std::unique_ptr<pw::flow::FlowOverlay> flow;
     std::unique_ptr<QSGTexture> tex;   // wrapper of renderer->output()
     pw::gpu::Texture* wrapped = nullptr;
     int revision = -1;
@@ -62,7 +60,6 @@ struct ViewportNode : QSGSimpleTextureNode {
     }
     ~ViewportNode() override {
         tex.reset();
-        if (renderer && flow) renderer->remove(flow.get());
         renderer.reset();   // waits for the GPU
         vegR.reset(); waterR.reset(); terrainR.reset();
     }
@@ -338,8 +335,6 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
         n->groundAdded = true;
         n->craft = std::make_unique<pw::render::CraftRenderable>(*n->dev);
         n->renderer->add(n->craft.get());
-        n->flow = std::make_unique<pw::flow::FlowOverlay>(*n->dev);
-        if (n->flow->ok()) n->renderer->add(n->flow.get());
         QMetaObject::invokeMethod(this, "setInfo", Qt::QueuedConnection,
                                   Q_ARG(QString, QString::fromUtf8(pw::gpu::backendName(n->dev->caps().backend))),
                                   Q_ARG(QString, QString::fromStdString(n->dev->caps().adapter)), Q_ARG(QString, QString()),
@@ -368,10 +363,6 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
         }
         app->partWorldPoses(n->poses);
         n->craft->setPartPoses(n->poses);
-        if (n->flow->ok()) {
-            if (auto* s = app->flowVisible() ? app->flowSolver() : nullptr) n->flow->update(*s);
-            else n->flow->clear();
-        }
     }
 
     // ---- world (FLY over the WORLD tab's world); BUILD keeps the neutral flat ground

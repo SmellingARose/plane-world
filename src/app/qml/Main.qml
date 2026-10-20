@@ -26,7 +26,7 @@ ApplicationWindow {
                    { title: "Parts", rows: [["Wings, props, jets, rockets, wheels, servos, CAD bodies", ""]] } ],
         "FLY":   [ { title: "Flight", rows: [["Launch / reset", "R"], ["Pause", "Space"], ["Camera", "C"]] },
                    { title: "World", rows: [["Flies in the WORLD tab's world", ""], ["Edit world", "Ctrl+3"]] },
-                   { title: "Aero model", rows: [["Fast · classic", ""], ["Fast · slipstream", ""], ["Fast+ (all effects)", ""], ["Full CFD presets", ""]] },
+                   { title: "Aero model", rows: [["Fast · classic", ""], ["Fast · slipstream", ""], ["Fast+ (all effects)", ""]] },
                    { title: "Outputs", rows: [["Per-output sliders and key bindings", ""]] } ],
         "WORLD": [ { title: "Terrain", rows: [["Heightfield, water, vegetation", ""], ["Undo", "Ctrl+Z"]] },
                    { title: "Use it", rows: [["Fly here", "Ctrl+Shift+2"]] },

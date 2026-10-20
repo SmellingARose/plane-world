@@ -24,10 +24,10 @@ Rectangle {
             visible: bar.tab === "BUILD" || bar.tab === "FLY"
             radius: 3
             implicitWidth: mlabel.implicitWidth + 10; implicitHeight: mlabel.implicitHeight + 2
-            color: Theme.alpha(App.fullModel && App.aeroError === "" ? Theme.cfd : Theme.accent, 0.16)
+            color: Theme.alpha(Theme.accent, 0.16)
             Text { id: mlabel; anchors.centerIn: parent; font.pixelSize: Theme.caption; font.weight: Font.DemiBold
-                color: App.fullModel && App.aeroError === "" ? Theme.cfd : Theme.accent
-                text: App.fullModel && App.aeroError === "" ? (App.cfdMethod === "ns" ? "CFD · NS-FV URANS" : "CFD · LBM") : "FAST · analytic" }
+                color: Theme.accent
+                text: "FAST · analytic" }
             HoverHandler { id: mh }
             ToolTip.visible: mh.hovered; ToolTip.delay: Theme.tooltipDelay
             ToolTip.text: Theme.tip("Aero model in use (FLY › Aero model)", "Ctrl+Shift+M")
@@ -36,7 +36,7 @@ Rectangle {
             visible: bar.tab === "FLY"
             color: Theme.textMuted; font.pixelSize: Theme.caption; font.family: Theme.mono
             text: (App.paused ? "paused" : "sim ×" + Theme.fixed(App.perf.rtf, 2)) + "  ·  " + (App.perf.substepHz || 0).toFixed(0) + " Hz  ·  sim "
-                  + Theme.fixed(App.perf.simMs, 2) + " ms" + (App.perf.full ? "  ·  CFD " + Theme.fixed(App.perf.cfdMs, 2) + " ms" : "")
+                  + Theme.fixed(App.perf.simMs, 2) + " ms"
         }
         Text {
             color: Theme.textMuted; font.pixelSize: Theme.caption; font.family: Theme.mono

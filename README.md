@@ -31,13 +31,9 @@ The app is not signed by a paid developer account, so the first time:
 ## About
 
 A flight and vehicle physics sandbox: build crafts from parts or CAD, fly them over procedural or real terrain, and
-evolve controllers and designs. Three kinds of aero, kept distinct:
-- **Fast (analytic):** strip-theory wings, momentum props and actuator-disk slipstream. Runs far above real time.
-- **CFD · Lattice Boltzmann:** real-time GPU CFD around the craft.
-- **CFD · Navier–Stokes FV:** a GPU finite-volume solver (URANS k-ω SST, multigrid). Slower, and closer to
-  wind-tunnel numbers.
+evolve controllers and designs. Aero forces come from fast analytic models: strip-theory wings, momentum props and
+actuator-disk slipstream, running far above real time.
 
-An offline **OpenFOAM reference** export is provided for checking all three.
 C++20 core, Qt 6 Quick UI, Metal and Direct3D 12 renderers with shaders written once in Slang.
 
 | BUILD | FLY |
@@ -45,13 +41,11 @@ C++20 core, Qt 6 Quick UI, Metal and Direct3D 12 renderers with shaders written 
 | ![BUILD](docs/screens/build.jpg) | ![FLY](docs/screens/fly.jpg) |
 | **WORLD** | **EVOLVE** |
 | ![WORLD](docs/screens/world.jpg) | ![EVOLVE](docs/screens/evolve.jpg) |
-| **FLY, Full CFD with a speed slice** | **FLY, live EQUATIONS** |
-| ![FLY full CFD](docs/screens/fly-full.jpg) | ![EQUATIONS](docs/screens/equations.jpg) |
 
 - **BUILD:** parts (wings, servos, props, motors, jets, solids, tanks, wheels, sensors, primitives), CAD import
   (STL / OBJ / glTF / GLB; USD / USDZ on macOS) with auto-rig, mesh cut, outputs with key bindings, undo / redo.
-- **FLY:** 1 kHz physics, chase / orbit / cockpit cameras, per-output sliders, HUD, aero model picker, CFD settings
-  and diagnostics, flow slice overlay, and the EQUATIONS panel (every fast-model equation with live values).
+- **FLY:** 1 kHz physics, chase / orbit / cockpit cameras, per-output sliders, HUD, aero model picker and the
+  EQUATIONS panel (every fast-model equation with live values).
 - **WORLD:** flat, procedural (GPU erosion), heightmap or real-world terrain; sculpt and paint; ocean, lakes, rivers,
   vegetation, props and breakables; sky and wind. New → *Manhattan (Midtown)* builds a detailed, flyable Midtown.
 - **EVOLVE:** GA, CMA-ES, sep-CMA-ES, OpenAI-ES, NEAT, MAP-Elites, novelty search or your own algorithm in JavaScript;
@@ -117,7 +111,7 @@ build/src/cli/pwcli --selftest all                        # self-test registry (
 
 Installers: `packaging/macos/make_dmg.sh build` and `packaging/windows/make_msi.sh build`
 ([docs/PACKAGING.md](docs/PACKAGING.md)). CI (`.github/workflows/ci.yml`) builds, tests and packages both platforms
-on every push to `main`; a `v*` tag drafts a GitHub release.
+on every push to `main`; a `v*` tag publishes a GitHub release.
 
 ## Command line
 
@@ -125,14 +119,11 @@ on every push to `main`; a `v*` tag drafts a GitHub release.
 pwcli --train examples/experiments/hover-pid.json --generations 10 --out /tmp/hover   # headless training, all cores
 pwcli --train my.json --resume --out /tmp/hover            # continue from the checkpoint in --out
 pwcli --make-experiment "Neural controller" my.json        # preset -> editable experiment
-pwcli --aero-compare Trainer --speed 25 --alpha 4          # fast model vs CFD (LBM), per part
-pwcli --aero-compare Trainer --speed 25 --alpha 4 --ns     # + Navier–Stokes FV column (--openfoam <case> adds OpenFOAM)
-pwcli --openfoam-export Trainer --speed 25 --alpha 4 --out cases/t25   # OpenFOAM reference case (--run if installed)
 pwcli --bench all                                          # benchmarks (--bench list)
 pwcli --info                                               # CPU features, GPU backend
 ```
 
-`--train` also takes `--workers`, `--population`, `--seed`, `--aero fast|full`, `--cfd-preset`, `--script-engine`.
+`--train` also takes `--workers`, `--population`, `--seed`, `--aero <profile>`, `--script-engine`.
 The app takes `--tab`, `--color-scheme`, `--size WxH`, `--command "<palette entry>"` (or `"wait <s>"`, run in order) and
 `--screenshot out.png --quit-after <s>` (how the screenshots above were made).
 
@@ -142,8 +133,6 @@ The app takes `--tab`, `--color-scheme`, `--size WxH`, `--command "<palette entr
 |---|---|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Targets, threading, determinism, GPU backends and shaders, tests |
 | [PHYSICS.md](docs/PHYSICS.md) | Every fast-model equation with code location, validity and sources ([interactive explainer](docs/explainer.html)) |
-| [CFD.md](docs/CFD.md) | Lattice-Boltzmann method, settings, presets, diagnostics, training with CFD |
-| [CFD_NS.md](docs/CFD_NS.md) | Navier–Stokes finite-volume CFD (URANS k-ω SST), validation, LBM vs NS vs OpenFOAM, OpenFOAM reference |
 | [EVOLUTION.md](docs/EVOLUTION.md) | EVOLVE, experiment format, JavaScript API, algorithms, reward shaping |
 | [SCRIPTING.md](docs/SCRIPTING.md) | JavaScript engines (JavaScriptCore, QuickJS) and their differences |
 | [CRAFTS.md](docs/CRAFTS.md) | Bundled crafts and the ducted-rocket design |
