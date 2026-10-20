@@ -1,5 +1,6 @@
-# CI: macOS arm64 (Metal) + Windows x64 (MSVC, Direct3D 12 / WARP). A tag v<version> (matching project(VERSION) in
-# CMakeLists.txt) also publishes a GitHub release with the two installers.
+# CI: macOS arm64 (Metal) + Windows x64 (MSVC, Direct3D 12 / WARP). Pushes and pull requests build, test and package.
+# A tag v<version> (matching project(VERSION) in CMakeLists.txt) only builds, packages and publishes a GitHub release
+# with the two installers: the tests already ran on main, so a release takes minutes instead of an hour.
 name: ci
 on:
   push:
@@ -65,7 +66,7 @@ jobs:
           echo "$RUNNER_TEMP/slang/bin" >> "$GITHUB_PATH"
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPW_BUILD_TESTS=${{ github.ref_type == 'tag' && 'OFF' || 'ON' }}
 
       - name: Build
         run: cmake --build build
@@ -79,37 +80,42 @@ jobs:
             build/src/cli/*.dll
 
       - name: Unit + parity tests (pwtests)
+        if: github.ref_type != 'tag'
         env:
           PW_GPU_WARP: ${{ runner.os == 'Windows' && '1' || '' }}
           PW_SHOT_DIR: ${{ github.workspace }}/shots
         run: mkdir -p shots && build/tests/pwtests
 
       - name: Self-tests (pwcli --selftest all)
+        if: github.ref_type != 'tag'
         env:
           PW_SELFTEST_OUT: shots   # env scene screenshots (envrender.scene) land in the uploaded artefacts
         run: build/src/cli/pwcli --selftest all --verbose
 
       - name: Training parity vs reference histories (examples/experiments, 1 and 4 workers)
+        if: github.ref_type != 'tag'
         run: bash tools/train_parity.sh build/src/cli/pwcli ${{ runner.os == 'Windows' && 'loose' || 'exact' }}
 
       - name: Direct3D 12 WARP smoke test
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && github.ref_type != 'tag'
         run: build/src/cli/pwcli --gpu-smoke --warp
 
       - name: Renderer screenshot (WARP Direct3D 12)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && github.ref_type != 'tag'
         run: build/src/cli/pwcli --render-shot shots/pwcli-warp-640x360.png --warp
 
       - name: Metal smoke test
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && github.ref_type != 'tag'
         run: build/src/cli/pwcli --gpu-smoke || echo "::warning::no Metal device on this runner"
 
       - name: WORLD / EVOLVE view models (pwuitests)
+        if: github.ref_type != 'tag'
         env:
           QT_QPA_PLATFORM: offscreen
         run: build/src/app/pwuitests
 
       - name: Benchmarks
+        if: github.ref_type != 'tag'
         run: build/src/cli/pwcli --bench all --reps 1 --json build/bench.json
 
       - name: Deploy app
@@ -120,6 +126,7 @@ jobs:
           fi
 
       - name: App launch smoke (screenshot)
+        if: github.ref_type != 'tag'
         env:
           QSG_RHI_PREFER_SOFTWARE_RENDERER: "1"
         run: |
@@ -131,6 +138,7 @@ jobs:
           ls -la app-${{ matrix.name }}.png
 
       - name: App launch smoke, WORLD and EVOLVE tabs
+        if: github.ref_type != 'tag'
         env:
           QSG_RHI_PREFER_SOFTWARE_RENDERER: "1"
         run: |
@@ -156,6 +164,7 @@ jobs:
           packaging/windows/make_msi.sh build dist
 
       - name: Installer smoke (install, launch, uninstall)
+        if: github.ref_type != 'tag'
         env:
           QSG_RHI_PREFER_SOFTWARE_RENDERER: "1"
         run: |
@@ -179,7 +188,7 @@ jobs:
         run: |
           mkdir -p dist
           rm -rf dist/stage
-          cp installed-${{ matrix.name }}.png dist/
+          cp installed-${{ matrix.name }}.png dist/ 2>/dev/null || true   # smoke screenshots and benchmarks: not on tags
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             ditto -c -k --keepParent "build/src/app/Plane World.app" "dist/PlaneWorld-${{ matrix.name }}.zip"
             cp build/src/cli/pwcli dist/
@@ -187,7 +196,7 @@ jobs:
             cp build/src/cli/pwcli.exe dist/
             pwsh -Command 'Compress-Archive -Path "build/deploy/*" -DestinationPath "dist/PlaneWorld-${{ matrix.name }}.zip"'
           fi
-          cp build/bench.json dist/bench-${{ matrix.name }}.json
+          cp build/bench.json dist/bench-${{ matrix.name }}.json 2>/dev/null || true
           cp app-${{ matrix.name }}*.png dist/ 2>/dev/null || true
           cp shots/*.png dist/ 2>/dev/null || true
 

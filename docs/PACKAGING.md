@@ -13,14 +13,15 @@ README's `releases/latest/download/...` links always fetch the newest release.
 `.github/workflows/ci.yml`: every push to `main` builds both installers and smoke-tests them: the .dmg is mounted, the app copied out and
 launched (screenshot `installed-macos-arm64.png`); the .msi is installed silently with `msiexec /qn`, the installed
 `pwcli --info` and app launch are run (screenshot), then it is uninstalled and the removal checked. Pushing a tag
-`v*` runs the same jobs plus `release`, which publishes a GitHub release with the two installers attached.
+`v*` builds and packages both installers without the tests, benchmarks and smoke runs (they already ran on `main`),
+then `release` publishes a GitHub release with the two installers attached.
 
 ## Making a release
 
 1. Bump `project(PlaneWorld VERSION x.y.z)` in `CMakeLists.txt`, commit and push to `main`.
 2. Tag that commit and push the tag: `git tag vx.y.z && git push origin vx.y.z`. CI stops at once if the tag and
    `CMakeLists.txt` disagree.
-3. About an hour later the release is live and the README's download links point at it. If a job fails, delete the tag
+3. A few minutes later the release is live and the README's download links point at it. If a job fails, delete the tag
    (`git push origin :vx.y.z && git tag -d vx.y.z`), fix, and tag again.
 
 ## macOS: Developer ID signing + notarization (needs your Apple ID)
