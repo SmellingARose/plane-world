@@ -4,7 +4,7 @@ import QtQuick.Layouts
 
 // WORLD tab: live world viewport with a floating tool palette + the WORLD inspector.
 // Keys (while this tab is shown): 1–9 / P / L / O pick tools, Esc back to Look, Ctrl+Z / Ctrl+Shift+Z undo / redo,
-// Ctrl+S save, Ctrl+Shift+S save as, Ctrl+O open, Ctrl+G generate terrain.
+// Ctrl+S save, Ctrl+Shift+S save as, Ctrl+O saved worlds, Ctrl+G generate terrain.
 SplitView {
     id: page
     property bool inspectorVisible: true
@@ -16,9 +16,9 @@ SplitView {
     Shortcut { sequence: "Esc"; enabled: page.visible && wm.tool !== "orbit"; onActivated: wm.tool = "orbit" }
     Shortcut { sequences: [StandardKey.Undo]; enabled: page.visible; onActivated: wm.undo() }
     Shortcut { sequences: [StandardKey.Redo, "Ctrl+Shift+Z"]; enabled: page.visible; onActivated: wm.redo() }
-    Shortcut { sequences: [StandardKey.Save]; enabled: page.visible; onActivated: wm.save() }
-    Shortcut { sequence: "Ctrl+Shift+S"; enabled: page.visible; onActivated: panel.saveFileAs() }
-    Shortcut { sequences: [StandardKey.Open]; enabled: page.visible; onActivated: panel.openFile() }
+    Shortcut { sequences: [StandardKey.Save]; enabled: page.visible && !wm.busy; onActivated: WorldFlow.save() }
+    Shortcut { sequence: "Ctrl+Shift+S"; enabled: page.visible && !wm.busy; onActivated: WorldFlow.saveAs() }
+    Shortcut { sequences: [StandardKey.Open]; enabled: page.visible; onActivated: WorldFlow.manage() }
     Shortcut { sequence: "Ctrl+Shift+2"; enabled: page.visible && !wm.busy; onActivated: panel.flyHere() }
     Shortcut { sequence: "Ctrl+G"; enabled: page.visible && !wm.busy; onActivated: wm.generate() }
 

@@ -49,10 +49,13 @@ struct EvoWorld {
     world::HeadlessWorld base;
     std::shared_ptr<const HeadlessObstacles> obstacles;   // null = none
     static std::shared_ptr<const EvoWorld> flat();
-    /// Resolve an experiment's WorldRef: "flat", "file", "inline"; "current" uses `current` (the app's live world)
+    /// Resolve one WorldRef of experiment `e`: "flat", "file", "inline"; "current" uses `current` (the app's live world)
     /// or fails with a message (the CLI passes flat when asked to).
-    static std::shared_ptr<const EvoWorld> resolve(const ExperimentDocument& e, const std::string& experimentPath,
+    static std::shared_ptr<const EvoWorld> resolve(const WorldRef& ref, const ExperimentDocument& e, const std::string& experimentPath,
                                                    std::shared_ptr<const EvoWorld> current, std::vector<std::string>* notes = nullptr);
+    /// Every training world of `e`, in order.
+    static std::vector<std::shared_ptr<const EvoWorld>> resolveAll(const ExperimentDocument& e, const std::string& experimentPath,
+                                                                   std::shared_ptr<const EvoWorld> current, std::vector<std::string>* notes = nullptr);
     sim::SimEnvironment makeEnvironment(const Vec3d& wind, double time = 0) const;
     double surfaceHeight(double x, double z) const { return base.surfaceHeight(x, z); }
 };
@@ -60,13 +63,23 @@ struct EvoWorld {
 /// Resolved run: craft, world, genome layout, I/O maps. Immutable after buildLayout; shared by workers.
 class ExperimentContext {
 public:
-    ExperimentContext(ExperimentDocument e, craft::CraftDocument flightCraft, std::shared_ptr<const EvoWorld> world);   // throws
+    ExperimentContext(ExperimentDocument e, craft::CraftDocument flightCraft, std::vector<std::shared_ptr<const EvoWorld>> worlds);   // throws
+    ExperimentContext(ExperimentDocument e, craft::CraftDocument flightCraft, std::shared_ptr<const EvoWorld> world)
+        : ExperimentContext(std::move(e), std::move(flightCraft), std::vector<std::shared_ptr<const EvoWorld>>{std::move(world)}) {}
     /// Native layout (preset) + script genome(base) hook. Called once by the run.
     void buildLayout(ScriptRuntime& orchestrator);
     ExperimentDocument experiment;
     craft::CraftDocument craft;
     sim::CraftSpec craftSpec;
-    std::shared_ptr<const EvoWorld> world;
+    std::vector<std::shared_ptr<const EvoWorld>> worlds;   // one per experiment.worlds entry, never empty
+    const EvoWorld& primaryWorld() const { return *worlds.front(); }
+    /// Indices into `worlds` that generation `generation` trains in (experiment.worldSchedule), ascending.
+    std::vector<int> generationWorlds(int generation) const;
+    /// Episodes each candidate flies in a generation: episodesPerCandidate in each of its worlds.
+    int episodesPerGeneration(int generation) const;
+    /// The world of episode `episode` (0 .. episodesPerGeneration - 1): episodes run world by world.
+    int episodeWorldIndex(int generation, int episode) const;
+    const EvoWorld& episodeWorld(int generation, int episode) const { return *worlds[static_cast<std::size_t>(episodeWorldIndex(generation, episode))]; }
     GenomeLayout layout;
     std::vector<std::string> termNames, inputNames, outputNames;
     std::vector<std::pair<double, double>> outputRanges;
@@ -132,6 +145,7 @@ private:
     int policyMode_ = 0;   // 0 script only, 1 mlp, 2 neat
     bool stopOnCrash_ = true;
     double liveSx_ = 0, liveSz_ = 0;
+    const EvoWorld* world_ = nullptr;   // the current episode's world (fillState samples its surface)
 };
 
 class SimEvaluator {

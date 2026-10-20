@@ -389,7 +389,7 @@ ExperimentDocument neuralExperiment(double duration = 20, int episodes = 1) {
     e.population = 16; e.generations = 3;
     e.episode.duration = duration; e.episode.episodesPerCandidate = episodes;
     e.checkpointEvery = 0;
-    e.world.source = "flat";
+    e.worlds = {WorldRef{"flat"}};
     return e;
 }
 std::unique_ptr<EvolutionRun> makeRun(ExperimentDocument e, int workers = 0, std::string dir = {}) {
@@ -603,6 +603,58 @@ void registerRunTests() {
         c.note(b);
         char sw[32]; std::snprintf(sw, sizeof sw, "%.2f…%.2f", lo, hi);
         return ok & expect(c, !kExact || std::string(sw) == "-3.93…-3.71", "same fitness range as the Swift self-test");
+    });
+    selftest::add("evolution.multi-world", [](Context& c) -> bool {
+        // schedule: which worlds each generation trains in
+        auto e = neuralExperiment(3, 2);
+        e.worlds = {WorldRef{"flat"}, WorldRef{"flat"}, WorldRef{"flat"}};
+        std::vector<std::shared_ptr<const EvoWorld>> three{EvoWorld::flat(), EvoWorld::flat(), EvoWorld::flat()};
+        auto ctxFor = [&](const std::string& mode, int per) {
+            ExperimentDocument x = e; x.worldSchedule.mode = mode; x.worldSchedule.perGeneration = per;
+            return std::make_shared<ExperimentContext>(x, trainer(), three);
+        };
+        bool ok = expect(c, ctxFor("all", 1)->generationWorlds(7) == std::vector<int>{0, 1, 2}, "all: every world");
+        ok &= expect(c, ctxFor("all", 1)->episodesPerGeneration(0) == 6, "all: 2 episodes in each of 3 worlds");
+        auto rot = ctxFor("rotate", 1);
+        ok &= expect(c, rot->generationWorlds(0) == std::vector<int>{0} && rot->generationWorlds(4) == std::vector<int>{1}, "rotate: one in turn");
+        auto smp = ctxFor("sample", 2);
+        std::set<std::vector<int>> picks;
+        for (int g = 0; g < 12; ++g) {
+            auto w = smp->generationWorlds(g);
+            ok &= expect(c, w.size() == 2 && w[0] < w[1] && w == smp->generationWorlds(g), "sample: 2 distinct, sorted, repeatable");
+            picks.insert(w);
+        }
+        ok &= expect(c, picks.size() > 1, "sample: the pick changes between generations");
+        ok &= expect(c, ctxFor("all", 1)->episodeWorldIndex(0, 3) == 1, "episodes run world by world");
+        // evaluation over several worlds: episode count and worker-count independence
+        ExperimentDocument m = e; m.worldSchedule.mode = "all";
+        m.workers = 1;
+        EvolutionRun r1(m, trainer(), three, "mw", {}, [] { return nativeNeuralRuntime(); });
+        m.workers = 0;
+        EvolutionRun rN(m, trainer(), three, "mw", {}, [] { return nativeNeuralRuntime(); });
+        EvoRNG rng(9);
+        std::vector<Genome> pop;
+        for (int i = 0; i < 6; ++i) { Genome g; g.id = uint64_t(i + 1); g.values = r1.layout().randomValues(rng); pop.push_back(g); }
+        auto f1 = r1.evaluator().evaluate(pop, 2), fN = rN.evaluator().evaluate(pop, 2);
+        bool same = true, counts = true;
+        for (std::size_t i = 0; i < pop.size(); ++i) { same &= f1[i].total == fN[i].total; counts &= !f1[i].error && f1[i].episodes == 6; }
+        ok &= expect(c, counts, "6 episodes per candidate: " + (f1[0].error ? *f1[0].error : std::string()));
+        ok &= expect(c, same, "1 worker vs all workers identical");
+        // reward functions see which world an episode is in
+        ExperimentDocument js = e; js.worldSchedule.mode = "rotate"; js.episode.episodesPerCandidate = 1;
+        js.scripts.source = "function fitness(ctx) { return { fitness: ctx.info.world * 100 + ctx.info.worldCount }; }";
+        js.workers = 1;
+        EvolutionRun rj(js, trainer(), three, "mw-js", {});
+        std::vector<Genome> one(pop.begin(), pop.begin() + 1);
+        double g0 = rj.evaluator().evaluate(one, 0)[0].total, g1 = rj.evaluator().evaluate(one, 1)[0].total;
+        ok &= expect(c, g0 == 3 && g1 == 103, "ctx.info.world / worldCount: gen 0 -> " + json::formatNumber(g0) + ", gen 1 -> " + json::formatNumber(g1));
+        // file format: one world keeps the old shape, several add "worlds" + "worldSchedule"
+        ExperimentDocument single = neuralExperiment();
+        Value sj = single.toJson();
+        ok &= expect(c, !sj.has("worlds") && !sj.has("worldSchedule") && sj["world"]["source"].str() == "flat", "single world: unchanged format");
+        ExperimentDocument back = ExperimentDocument::fromJson(m.toJson());
+        ok &= expect(c, back.worlds.size() == 3 && back.worldSchedule.mode == "all", "several worlds round-trip");
+        return ok;
     });
     selftest::add("evolution.run-checkpoint-resume", [](Context& c) -> bool {
         std::string dir = tempDir("resume");

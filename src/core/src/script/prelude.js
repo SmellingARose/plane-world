@@ -161,7 +161,7 @@ function __bind(IN, OUT, T, SUM, inJSON, outJSON, termJSON, stateJSON) {
   });
   c.state = st;
   c.info = {};
-  [["generation", 3], ["candidate", 4], ["episode", 5], ["duration", 8]].forEach(function (p) {
+  [["generation", 3], ["candidate", 4], ["episode", 5], ["duration", 8], ["world", 12], ["worldCount", 13]].forEach(function (p) {
     Object.defineProperty(c.info, p[0], { enumerable: true, get: function () { return S[p[1]]; } });
   });
   Object.defineProperty(c.info, "seed", { enumerable: true, get: function () { return S[7] * 4294967296 + S[6]; } });

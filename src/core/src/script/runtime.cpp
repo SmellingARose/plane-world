@@ -23,7 +23,7 @@ constexpr double kLongBudget = 2000;
 
 // Scalar slots shared with JS (__S). Keep in sync with prelude.js.
 enum Slot { sT = 0, sDt = 1, sTick = 2, sGeneration = 3, sCandidate = 4, sEpisode = 5, sSeedLo = 6, sSeedHi = 7,
-            sDuration = 8, sDoneReason = 9, sGenomeID = 10, sPhase = 11, sStateBase = 16 };
+            sDuration = 8, sDoneReason = 9, sGenomeID = 10, sPhase = 11, sWorld = 12, sWorldCount = 13, sStateBase = 16 };
 constexpr int kStateCount = 27;
 constexpr int kSlotCount = sStateBase + kStateCount;
 
@@ -352,7 +352,7 @@ public:
         const EpisodeInfo& i = f.info;
         S[sDt] = i.controlDt; S[sGeneration] = i.generation; S[sCandidate] = i.candidate; S[sEpisode] = i.episode;
         S[sSeedLo] = double(uint32_t(i.seed)); S[sSeedHi] = double(uint32_t(i.seed >> 32));
-        S[sDuration] = i.duration; S[sDoneReason] = 0;
+        S[sDuration] = i.duration; S[sDoneReason] = 0; S[sWorld] = i.world; S[sWorldCount] = i.worldCount;
         writeState(f);
         try { engine_->callPinned(pinBegin_, episodeBudget()); }
         catch (const detail::EngineFailure& e) { raise(e.error, "init", episodeBudget()); }

@@ -3,6 +3,7 @@
 //     round trip.
 //   * EvolveModel: path edits through the document, preset switching, I/O toggles, script check (good + error line),
 //     a short training run, replay (bit-identical to training), export with the embedded controller.
+//   * World library: save by name, clash detection, newest-first list; EVOLVE training worlds (add / change / schedule).
 //   * JsHighlighter helpers (indent, comment toggle, hook detection).
 // Runs with QT_QPA_PLATFORM=offscreen; PW_DATA_DIR points the libraries at a temp folder.
 #include <QGuiApplication>
@@ -101,6 +102,53 @@ static void testWorld(const QString& dir) {
     CHECK(w.objects().size() == 1);
 }
 
+// Saving by name and the saved-worlds list (deleting is not tested: it would move a file to the real Trash).
+static void testWorldLibrary() {
+    WorldModel& w = *WorldModel::instance();
+    w.newWorld("flat");
+    CHECK(w.waitIdle(120000));
+    CHECK(w.filePath().isEmpty());
+    CHECK(w.saveToLibrary("Alpha"));
+    CHECK(w.name() == "Alpha" && !w.dirty());
+    CHECK(!w.libraryHas("Alpha"));   // the open world's own file is not a clash
+    QVariantList info = w.libraryInfo();
+    bool alphaCurrent = false;
+    for (auto& v : info) { auto m = v.toMap(); if (m["name"] == "Alpha") alphaCurrent = m["current"].toBool(); }
+    CHECK(alphaCurrent);
+    w.newWorld("flat");
+    CHECK(w.waitIdle(120000));
+    CHECK(w.libraryHas("Alpha"));    // a new world saving as "Alpha" would replace it
+    CHECK(w.saveToLibrary("Beta"));
+    QStringList names;
+    for (auto& v : w.libraryInfo()) names << v.toMap()["name"].toString();
+    CHECK(names.contains("Alpha") && names.contains("Beta"));
+    CHECK(names.indexOf("Beta") < names.indexOf("Alpha"));   // newest first
+}
+
+// EVOLVE training worlds: add, change, schedule, remove.
+static void testTrainingWorlds() {
+    EvolveModel& e = *EvolveModel::instance();
+    e.newFromPreset("Neural controller");
+    CHECK(e.worlds().size() == 1);
+    e.replaceWorld(0, "flat");
+    CHECK(e.worlds()[0].toMap()["kind"] == "flat");
+    e.addWorld("saved", "Alpha");
+    e.addWorld("open");
+    CHECK(e.worlds().size() == 3);
+    CHECK(e.worlds()[1].toMap()["kind"] == "saved" && e.worlds()[1].toMap()["label"] == "Alpha");
+    CHECK(!e.worlds()[1].toMap()["missing"].toBool());
+    CHECK(e.worlds()[2].toMap()["kind"] == "open");
+    e.setWorldSchedule("sample", 9);
+    CHECK(e.worldSchedule()["mode"] == "sample" && e.worldSchedule()["perGeneration"].toInt() == 3);
+    CHECK(e.document().toJson().has("worlds"));
+    e.removeWorld(0);
+    CHECK(e.worlds().size() == 2 && e.worldSchedule()["perGeneration"].toInt() == 2);
+    e.removeWorld(0);
+    e.removeWorld(0);   // the last world stays
+    CHECK(e.worlds().size() == 1 && e.worlds()[0].toMap()["kind"] == "open");
+    CHECK(!e.document().toJson().has("worlds"));
+}
+
 static void testEvolve(const QString& dir) {
     EvolveModel& e = *EvolveModel::instance();
     CHECK(e.presets().size() == 3);
@@ -113,13 +161,14 @@ static void testEvolve(const QString& dir) {
     e.set("episode.duration", 4.0);
     e.set("population", 8);
     e.set("generations", 2);
-    e.set("world.source", "flat");
+    e.replaceWorld(0, "flat");
     e.set("workers", 2);
     e.set("episode.episodesPerCandidate", 1);   // replay can then be compared bit for bit
     e.set("name", "UI test");   // ASCII: pwcore paths are narrow std::string (non-ASCII run dirs break on Windows, see todos)
     CHECK(std::abs(e.document().episode.duration - 4.0) < 1e-12);
     CHECK(e.document().population == 8);
     CHECK(e.get("world.source").toString() == "flat");
+    CHECK(e.worlds().size() == 1 && e.worlds()[0].toMap()["kind"] == "flat");
     CHECK(e.dirty());
     // algorithm schema and kind change
     CHECK(!e.algorithmSchema("ga").isEmpty());
@@ -190,7 +239,9 @@ int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
     std::printf("[ui] highlighter\n"); testHighlighter();
     std::printf("[ui] world\n"); testWorld(tmp.path());
+    std::printf("[ui] world library\n"); testWorldLibrary();
     std::printf("[ui] evolve\n"); testEvolve(tmp.path());
+    std::printf("[ui] training worlds\n"); testTrainingWorlds();
     std::printf("pwuitests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

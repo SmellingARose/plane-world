@@ -4,7 +4,9 @@
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
+#include <QLocale>
 #include <QThread>
 #include <QUrl>
 #include <algorithm>
@@ -79,9 +81,43 @@ QString WorldModel::libraryDir() const { return QString::fromStdString(craft::li
 
 void WorldModel::refreshLibrary() {
     QStringList l;
-    for (auto& p : craft::library::listWorlds()) l << QFileInfo(QString::fromStdString(p)).completeBaseName();
+    std::vector<QFileInfo> files;
+    for (auto& p : craft::library::listWorlds()) {
+        files.emplace_back(QString::fromStdString(p));
+        l << files.back().completeBaseName();
+    }
     l.sort(Qt::CaseInsensitive);
-    if (l != m_library) { m_library = l; emit libraryChanged(); }
+    std::stable_sort(files.begin(), files.end(), [](const QFileInfo& a, const QFileInfo& b) { return a.lastModified() > b.lastModified(); });
+    const QString current = m_path.isEmpty() ? QString() : QFileInfo(m_path).absoluteFilePath();
+    QVariantList info;
+    for (const auto& f : files)
+        info << QVariantMap{{"name", f.completeBaseName()}, {"path", f.absoluteFilePath()},
+                            {"modified", QLocale().toString(f.lastModified(), QLocale::ShortFormat)},
+                            {"current", f.absoluteFilePath() == current}};
+    if (l != m_library || info != m_libraryInfo) { m_library = l; m_libraryInfo = info; emit libraryChanged(); }
+}
+
+bool WorldModel::libraryHas(const QString& name) const {
+    const QString p = QFileInfo(libraryPath(name)).absoluteFilePath();
+    return QFileInfo::exists(p) && p != QFileInfo(m_path).absoluteFilePath();
+}
+
+bool WorldModel::saveToLibrary(const QString& name) {
+    const QString n = name.trimmed();
+    if (n.isEmpty()) return false;
+    m_doc.name = n.toStdString();
+    m_path = QFileInfo(libraryPath(n)).absoluteFilePath();
+    QDir().mkpath(QFileInfo(m_path).absolutePath());
+    return save();
+}
+
+bool WorldModel::removeFromLibrary(const QString& name) {
+    const QString p = QFileInfo(libraryPath(name)).absoluteFilePath();
+    if (!QFileInfo::exists(p) || !QFile::moveToTrash(p)) { setStatus(tr("Could not move %1 to the Trash").arg(name)); return false; }
+    if (p == QFileInfo(m_path).absoluteFilePath()) { m_path.clear(); markDirty(); }
+    refreshLibrary();
+    setStatus(tr("Moved %1 to the Trash").arg(name));
+    return true;
 }
 
 QString WorldModel::libraryPath(const QString& name) const {
@@ -214,6 +250,7 @@ void WorldModel::newWorld(const QString& preset) {
     buildAsync(d, tr("Building new world…"), true);
     m_dirty = false;
     emit docChanged();
+    refreshLibrary();
 }
 
 bool WorldModel::open(const QString& pathOrUrl) {
@@ -225,6 +262,7 @@ bool WorldModel::open(const QString& pathOrUrl) {
     buildAsync(d, tr("Opening %1…").arg(QFileInfo(p).fileName()), true);
     m_dirty = false;
     emit docChanged();
+    refreshLibrary();
     return true;
 }
 

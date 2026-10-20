@@ -75,9 +75,8 @@ std::shared_ptr<const EvoWorld> EvoWorld::flat() {
     w->base = world::HeadlessWorld::flat();
     return w;
 }
-std::shared_ptr<const EvoWorld> EvoWorld::resolve(const ExperimentDocument& e, const std::string& experimentPath,
+std::shared_ptr<const EvoWorld> EvoWorld::resolve(const WorldRef& ref, const ExperimentDocument& e, const std::string& experimentPath,
                                                   std::shared_ptr<const EvoWorld> current, std::vector<std::string>* notes) {
-    const WorldRef& ref = e.world;
     if (ref.source == "flat") return flat();
     std::filesystem::path base = experimentPath.empty() ? std::filesystem::path() : std::filesystem::path(experimentPath).parent_path();
     world::WorldDocument doc; std::string baseDir;
@@ -109,6 +108,13 @@ std::shared_ptr<const EvoWorld> EvoWorld::resolve(const ExperimentDocument& e, c
     if (w->base.water && notes) notes->push_back("water surfaces are sampled for spawn heights only; headless buoyancy is not in the C++ core yet");
     return w;
 }
+std::vector<std::shared_ptr<const EvoWorld>> EvoWorld::resolveAll(const ExperimentDocument& e, const std::string& experimentPath,
+                                                                  std::shared_ptr<const EvoWorld> current, std::vector<std::string>* notes) {
+    std::vector<std::shared_ptr<const EvoWorld>> out;
+    for (const auto& ref : e.worlds) out.push_back(resolve(ref, e, experimentPath, current, notes));
+    if (out.empty()) out.push_back(flat());
+    return out;
+}
 sim::SimEnvironment EvoWorld::makeEnvironment(const Vec3d& wind, double time) const {
     sim::SimEnvironment env;
     env.terrain = base.terrain.get();
@@ -118,18 +124,48 @@ sim::SimEnvironment EvoWorld::makeEnvironment(const Vec3d& wind, double time) co
 }
 
 // MARK: - context
-ExperimentContext::ExperimentContext(ExperimentDocument e, craft::CraftDocument c, std::shared_ptr<const EvoWorld> w)
-    : experiment(std::move(e)), craft(std::move(c)), world(std::move(w)) {
+ExperimentContext::ExperimentContext(ExperimentDocument e, craft::CraftDocument c, std::vector<std::shared_ptr<const EvoWorld>> w)
+    : experiment(std::move(e)), craft(std::move(c)), worlds(std::move(w)) {
     if (experiment.crafts.size() > 1)
         throw EvoError("invalid experiment: experiment lists " + std::to_string(experiment.crafts.size()) +
                        " crafts; only one craft per episode is supported (multi-craft episodes are not implemented). Remove the extra crafts.");
-    if (!world) world = EvoWorld::flat();
+    for (auto& x : worlds) if (!x) x = EvoWorld::flat();
+    if (worlds.empty()) worlds.push_back(EvoWorld::flat());
     craftSpec = sim::CraftSpec::fromDocument(craft);
     sim::CraftSim probe;
     std::string err;
     if (!probe.load(craftSpec, &err)) throw EvoError("invalid experiment: craft does not load: " + err);
     for (auto& i : probe.inputs()) inputNames.push_back(i.name);
     for (auto& o : probe.outputs()) { outputNames.push_back(o.name); outputRanges.push_back({o.lo, o.hi}); }
+}
+
+std::vector<int> ExperimentContext::generationWorlds(int generation) const {
+    const int n = int(worlds.size());
+    const auto& s = experiment.worldSchedule;
+    if (n <= 1) return {0};
+    if (s.mode == "rotate") return {((generation % n) + n) % n};
+    std::vector<int> all(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i) all[static_cast<std::size_t>(i)] = i;
+    if (s.mode != "sample") return all;
+    // the same random pick for every candidate of the generation (partial Fisher-Yates on a derived stream)
+    const int k = std::clamp(s.perGeneration, 1, n);
+    EvoRNG rng(EvoRNG::derive(experiment.seed, {generation, -2}));
+    for (int i = 0; i < k; ++i) {
+        int j = i + int(rng.uniform(0, 1) * double(n - i));
+        std::swap(all[static_cast<std::size_t>(i)], all[static_cast<std::size_t>(std::min(j, n - 1))]);
+    }
+    all.resize(static_cast<std::size_t>(k));
+    std::sort(all.begin(), all.end());
+    return all;
+}
+int ExperimentContext::episodesPerGeneration(int generation) const {
+    return std::max(1, experiment.episode.episodesPerCandidate) * int(generationWorlds(generation).size());
+}
+int ExperimentContext::episodeWorldIndex(int generation, int episode) const {
+    if (worlds.size() <= 1) return 0;
+    const auto set = generationWorlds(generation);
+    const int per = std::max(1, experiment.episode.episodesPerCandidate);
+    return set[static_cast<std::size_t>(std::clamp(episode / per, 0, int(set.size()) - 1))];
 }
 
 void ExperimentContext::buildLayout(ScriptRuntime& rt) {
@@ -336,7 +372,7 @@ Fitness EvalWorker::aggregate(const EpisodeResult* eps, int count) const {
 }
 
 Fitness EvalWorker::evaluate(const Genome& g, int generation, int candidate) {
-    int n = std::max(1, ctx_->experiment.episode.episodesPerCandidate);
+    int n = ctx_->episodesPerGeneration(generation);
     std::vector<EpisodeResult> eps; eps.reserve(static_cast<std::size_t>(n));
     try { prepare(g); } catch (const std::exception& ex) { return Fitness::failed(ex.what()); }
     for (int ep = 0; ep < n; ++ep) {
@@ -348,7 +384,8 @@ Fitness EvalWorker::evaluate(const Genome& g, int generation, int candidate) {
 
 void EvalWorker::fillState(const sim::SimEnvironment& env, double sx, double sz) {
     const Vec3d& p = sim_->position();
-    frame_.state = captureState(*sim_, env.time, ctx_->world->surfaceHeight(p.x, p.z), sx, sz);
+    const EvoWorld& w = world_ ? *world_ : ctx_->primaryWorld();
+    frame_.state = captureState(*sim_, env.time, w.surfaceHeight(p.x, p.z), sx, sz);
 }
 void EvalWorker::observe(const sim::SimEnvironment& env) {
     sim_->readSensors(env, simInputs_.data());
@@ -379,7 +416,9 @@ void EvalWorker::applyNativePolicy() {
 
 EpisodeResult EvalWorker::runEpisode(const Genome& g, int generation, int candidate, int episode, uint64_t seed, const TickObserver* observer) {
     const auto& e = ctx_->experiment;
-    const EvoWorld& w = *ctx_->world;
+    const int worldIndex = ctx_->episodeWorldIndex(generation, episode);
+    const EvoWorld& w = *ctx_->worlds[static_cast<std::size_t>(worldIndex)];
+    world_ = &w;
     sim::CraftSim& sim = *sim_;
     EvoRNG rng(seed);
     // spawn
@@ -419,6 +458,7 @@ EpisodeResult EvalWorker::runEpisode(const Genome& g, int generation, int candid
     double sx = p.x, sz = p.z;
     frame_.tick = 0; frame_.done = false; frame_.doneReason.clear();
     EpisodeInfo info; info.generation = generation; info.candidate = candidate; info.episode = episode; info.seed = seed;
+    info.world = worldIndex; info.worldCount = int(ctx_->worlds.size());
     info.duration = e.episode.duration; info.controlDt = dt;
     frame_.info = info;
     std::fill(frame_.outputs.begin(), frame_.outputs.end(), 0.0);
@@ -471,6 +511,7 @@ EpisodeResult EvalWorker::runEpisode(const Genome& g, int generation, int candid
 // MARK: - live autopilot
 void EvalWorker::bindLive(const Genome& g, sim::CraftSim& external, const sim::SimEnvironment& env) {
     prepare(g);
+    world_ = &ctx_->primaryWorld();
     sim_ = &external;
     remap();
     if (neat_) neat_->reset();
@@ -505,7 +546,7 @@ std::vector<Fitness> SimEvaluator::evaluate(const std::vector<Genome>& genomes, 
     auto t0 = std::chrono::steady_clock::now();
     int n = int(genomes.size());
     const auto& e = ctx_->experiment;
-    int E = std::max(1, e.episode.episodesPerCandidate);
+    int E = ctx_->episodesPerGeneration(generation);
     bool split = E > 1 && !envFlag("PW_EVAL_SPLIT", "0") && !ctx_->needsPerCandidateCraft && e.controller.mode != "neat";
     int items = split ? n * E : n;
     std::vector<Fitness> out(static_cast<std::size_t>(n));

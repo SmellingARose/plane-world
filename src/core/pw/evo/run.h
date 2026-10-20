@@ -56,9 +56,13 @@ struct EmbeddedController {
 
 class EvolutionRun {
 public:
-    /// `world` resolved (EvoWorld::resolve), `craft` flight-prepared. `factory` defaults to scripts::make(experiment.scripts).
-    EvolutionRun(const ExperimentDocument& experiment, const craft::CraftDocument& craft, std::shared_ptr<const EvoWorld> world,
+    /// `worlds` resolved (EvoWorld::resolveAll), `craft` flight-prepared. `factory` defaults to scripts::make(experiment.scripts).
+    EvolutionRun(const ExperimentDocument& experiment, const craft::CraftDocument& craft, std::vector<std::shared_ptr<const EvoWorld>> worlds,
                  std::string runID = newRunID(), std::string directory = {}, ScriptRuntimeFactory factory = nullptr, jobs::JobSystem* jobs = nullptr);
+    EvolutionRun(const ExperimentDocument& experiment, const craft::CraftDocument& craft, std::shared_ptr<const EvoWorld> world,
+                 std::string runID = newRunID(), std::string directory = {}, ScriptRuntimeFactory factory = nullptr, jobs::JobSystem* jobs = nullptr)
+        : EvolutionRun(experiment, craft, std::vector<std::shared_ptr<const EvoWorld>>{std::move(world)}, std::move(runID), std::move(directory),
+                       std::move(factory), jobs) {}
     ~EvolutionRun();
     static std::string newRunID();
 
@@ -88,8 +92,12 @@ public:
     void join();
 
     void checkpoint(const std::string& dir);
-    static std::unique_ptr<EvolutionRun> resume(const std::string& dir, std::shared_ptr<const EvoWorld> world,
+    static std::unique_ptr<EvolutionRun> resume(const std::string& dir, std::vector<std::shared_ptr<const EvoWorld>> worlds,
                                                 ScriptRuntimeFactory factory = nullptr, jobs::JobSystem* jobs = nullptr);
+    static std::unique_ptr<EvolutionRun> resume(const std::string& dir, std::shared_ptr<const EvoWorld> world,
+                                                ScriptRuntimeFactory factory = nullptr, jobs::JobSystem* jobs = nullptr) {
+        return resume(dir, std::vector<std::shared_ptr<const EvoWorld>>{std::move(world)}, std::move(factory), jobs);
+    }
     /// The craft as decoded for `genome`, with the controller embedded (FLY "autopilot from evolved controller").
     craft::CraftDocument exportCraft(const Genome& genome, const Fitness* fitness = nullptr);
 
@@ -125,6 +133,7 @@ struct Trajectory {
     std::vector<ReplayFrame> frames;
     double outcome = 0;
     std::string doneReason;
+    std::string worldName;   // the world this episode flew in
     std::optional<double> trainingFitness;
     std::optional<bool> fitnessMatches;
     std::optional<ReplayFrame> sample(double t) const;   // interpolated (clamped)

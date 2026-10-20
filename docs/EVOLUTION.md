@@ -124,7 +124,7 @@ function tell(state, population) {}                       // [{ values, fitness,
 | `ctx.state` | Ground truth: `t x y z vx vy vz pitch roll yaw rollRate pitchRate yawRate airspeed groundSpeed altitude agl aoa sideslip gLoad fuel mass thrust distance crashed contact impactSpeed` (m, m/s, deg, deg/s, kg; `distance` is horizontal from spawn). |
 | `ctx.sum`, `ctx.reward` | Running term sums; writable per-tick deltas. |
 | `ctx.t`, `ctx.dt`, `ctx.tick` | Sim time, control period, tick index. |
-| `ctx.info` | `{ generation, candidate, episode, seed, duration }`. |
+| `ctx.info` | `{ generation, candidate, episode, seed, duration, world, worldCount }`. `world` is the episode's index in the experiment's training worlds (§8), so a reward can treat worlds differently. |
 | `ctx.memory` | Per-episode scratch, reset before `init`. |
 | `ctx.rng` | `random()`, `uniform(a, b)`, `gaussian()`, `int(n)`, seeded per episode. |
 | `ctx.genome` | `{ id, values: Float64Array, get(name) }`. |
@@ -190,11 +190,17 @@ FLY shows live values. Frames: +X forward, +Y up, +Z right; positive roll = righ
 
 ## 6. EVOLVE tab
 
-`src/app/qml/EvolvePanel.qml` with `src/app/evolvemodel.cpp`: preset menu, craft and world pickers, headless
+`src/app/qml/EvolvePanel.qml` with `src/app/evolvemodel.cpp`: preset menu, craft picker, training worlds, headless
 options, genome and MLP spec, design-gene table, algorithm form, script editor with error-line marking, run
 controls (start, stop, resume), live charts (best/mean/median, per term, species, archive heatmap, throughput),
 replay of any generation or archive cell in the viewport, and export of a craft with its controller embedded.
 FLY offers "Autopilot from evolved controller" for such crafts.
+
+**Training worlds** (`TrainingWorlds.qml`, ① Craft & worlds): a list of the worlds every candidate is tested in.
+"+ Add a world" and each row's "Change" offer flat ground, the open world (as it is in WORLD when training starts),
+any saved world, an embedded copy of the open world, or a world file elsewhere. With several worlds, "Each
+generation" picks every world, one in turn, or a random set (the same for every candidate), and the panel shows how
+many flights that makes per candidate. The replay caption names the world the replayed episode flew in.
 
 **Aero model picker** (`EvolvePanel.qml:158`) is the same `AeroModelPicker` list as FLY
 (`src/app/appcontroller.cpp:954`): Fast · classic, Fast · slipstream, Fast+ (all effects), Custom. The choice is stored in the experiment's `aero` object (§8).
@@ -219,7 +225,7 @@ Files (library root: `~/Library/Application Support/PlaneWorld` on macOS, `%APPD
 Hot loop: zero heap allocations per control tick and physics substep (checked by `pwtests`); allocation is fine
 per episode, candidate and generation.
 
-## 8. Experiment `aero`
+## 8. Experiment `aero` and `worlds`
 
 ```json
 "aero": { "model": "fast", "profile": "fast.plus",
@@ -229,6 +235,26 @@ per episode, candidate and generation.
 `model` is always `fast` (older files may say `full`, from the removed CFD mode; they load as fast, and a `cfd` key
 is ignored). `profile` is a picker id (`fast.classic`, `fast.slipstream`, `fast.plus` or `custom`); when missing it is
 inferred from the toggles (`src/core/src/evo/experiment.cpp`). Missing `aero` means fast with all toggles on.
+
+```json
+"world": { "source": "file", "path": "/…/worlds/Hills.json" },
+"worlds": [ { "source": "file", "path": "/…/worlds/Hills.json" }, { "source": "flat" }, { "source": "current" } ],
+"worldSchedule": { "mode": "sample", "perGeneration": 2 }
+```
+
+Each world is `{ "source": "current" | "flat" | "file" | "inline", "path"?, "inline"? }`. One world is written as
+`world` only, the format older versions read. Several are written as `worlds` (with `world` = the first, which is what
+older versions train in) plus `worldSchedule`:
+
+| `mode` | Each generation, every candidate flies… |
+|---|---|
+| `all` (default) | `episodesPerCandidate` episodes in every world |
+| `rotate` | in one world, the next one each generation |
+| `sample` | in `perGeneration` worlds picked at random (seeded by the run seed and generation) |
+
+Episodes run world by world (`ExperimentContext::episodeWorldIndex`), and the episode seeds are the same as for one
+world with that many episodes, so a single-world experiment trains exactly as before. The fitness aggregates every
+episode of the generation (`episode.aggregate`); `ctx.info.world` lets a reward weigh worlds differently.
 
 ## 9. Headless training CLI
 

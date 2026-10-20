@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include "appcontroller.h"
+#include "evolvemodel.h"
 #include "pw/cpu.h"
 #include "pw/gpu.h"
 
@@ -47,6 +48,8 @@ int main(int argc, char** argv) {
     auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
     if (win && AppController::instance()) AppController::instance()->attachWindow(win);   // FLY physics on the frame clock
 
+    // --experiment <file.json>: open an experiment in EVOLVE at startup
+    if (const QString ex = value("--experiment"); !ex.isEmpty()) EvolveModel::instance()->open(ex);
     // --size WxH: window size in logical pixels (screenshots)
     if (const QStringList wh = value("--size").split('x'); win && wh.size() == 2) win->resize(wh[0].toInt(), wh[1].toInt());
     // --command "<name>" (repeatable): run command-palette entries once the UI has settled

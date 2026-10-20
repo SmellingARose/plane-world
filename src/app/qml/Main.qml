@@ -53,12 +53,13 @@ ApplicationWindow {
         { name: "Settings…", shortcut: "Ctrl+,", run: () => settingsDlg.open() },
         { name: "Show the welcome tour", shortcut: "", run: () => tour.start() },
         { name: "WORLD: generate terrain", shortcut: "Ctrl+G", run: () => { selectTab(2); WorldModel.generate() } },
-        { name: "WORLD: save world", shortcut: "", run: () => WorldModel.save() },
+        { name: "WORLD: save world", shortcut: "", run: () => WorldFlow.save() },
+        { name: "WORLD: saved worlds (open / delete)", shortcut: "", run: () => WorldFlow.manage() },
         { name: "WORLD: fly here (start a flight at the view centre)", shortcut: "Ctrl+Shift+2", run: () => { selectTab(2); if (worldLoader.item) worldLoader.item.flyHere() } },
         { name: "FLY: fly in the WORLD tab's world", shortcut: "", run: () => { App.flyInWorld = true; selectTab(1) } },
         { name: "FLY: fly over flat ground", shortcut: "", run: () => { App.flyInWorld = false; selectTab(1) } },
-        { name: "WORLD: new Manhattan (Midtown) world", shortcut: "", run: () => { selectTab(2); WorldModel.newWorld("manhattan") } },
-        { name: "WORLD: new mountains world", shortcut: "", run: () => { selectTab(2); WorldModel.newWorld("mountains") } },
+        { name: "WORLD: new Manhattan (Midtown) world", shortcut: "", run: () => { selectTab(2); WorldFlow.newWorld("manhattan") } },
+        { name: "WORLD: new mountains world", shortcut: "", run: () => { selectTab(2); WorldFlow.newWorld("mountains") } },
         { name: "EVOLVE: start / pause training", shortcut: "Ctrl+Return", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.train() } },
         { name: "EVOLVE: quick start (learns to hold altitude in ~10 s)", shortcut: "", run: () => { selectTab(3); EvolveModel.quickStart() } },
         { name: "EVOLVE: check script", shortcut: "", run: () => { selectTab(3); EvolveModel.checkScript() } },
@@ -206,12 +207,20 @@ ApplicationWindow {
         onFileDropped: win.currentTab = 0
     }
     PwToast { id: toast; parent: Overlay.overlay }
+    WorldDialogs { parent: Overlay.overlay }
     Connections { target: App; function onNotify(text, kind) { toast.show(text, kind) }
                                function onTabRequested(t) { const i = win.tabs.indexOf(t); if (i >= 0) win.selectTab(i) } }
 
-    // Unsaved edits: ask before quitting.
+    // Unsaved edits: ask before quitting (the craft first, then the world).
     property bool closeConfirmed: false
-    onClosing: (close) => { if (App.dirty && !closeConfirmed) { close.accepted = false; unsaved.open() } }
+    property bool worldCloseConfirmed: false
+    onClosing: (close) => {
+        if (App.dirty && !closeConfirmed) { close.accepted = false; unsaved.open() }
+        else if (WorldModel.dirty && !worldCloseConfirmed) {
+            close.accepted = false
+            WorldFlow.whenSaved(() => { win.worldCloseConfirmed = true; win.close() })
+        }
+    }
     Dialog {
         id: unsaved
         parent: Overlay.overlay

@@ -107,7 +107,7 @@ static evo::ExperimentDocument quickStartDoc(const std::string& craftName) {
     d.episode.duration = 20; d.episode.episodesPerCandidate = 1;
     d.episode.wind = {};
     d.episode.spawn.mode = "air"; d.episode.spawn.altitudeAGL = 150; d.episode.spawn.speed = 35;
-    d.world.source = "flat";
+    d.worlds = {evo::WorldRef{"flat"}};
     return d;
 }
 
@@ -213,6 +213,85 @@ void EvolveModel::setAero(const QString& id) {
     if (const auto* p = sim::fastAeroProfile(s)) { a.model = "fast"; a.profile = p->id; a.toggles = p->toggles; }
     else if (s == "custom") { a.model = "fast"; a.profile = "custom"; }
     else return;
+    setDoc(d, true);
+}
+
+// ---------------------------------------------------------------- training worlds
+
+namespace {
+std::optional<evo::WorldRef> makeWorldRef(const QString& kind, const QString& arg) {
+    evo::WorldRef w;
+    if (kind == "open") w.source = "current";
+    else if (kind == "flat") w.source = "flat";
+    else if (kind == "saved") { w.source = "file"; w.path = WorldModel::instance()->libraryPath(arg).toStdString(); }
+    else if (kind == "file") {
+        const QUrl u(arg);
+        w.source = "file"; w.path = (u.isLocalFile() ? u.toLocalFile() : arg).toStdString();
+    } else if (kind == "embedded") { w.source = "inline"; w.inlineDoc = WorldModel::instance()->currentDocument(); }
+    else return std::nullopt;
+    return w;
+}
+} // namespace
+
+QVariantList EvolveModel::worlds() const {
+    QVariantList l;
+    const QString libDir = QFileInfo(WorldModel::instance()->libraryDir()).absoluteFilePath();
+    for (const auto& w : m_doc.worlds) {
+        QVariantMap m;
+        m["label"] = QString::fromStdString(w.label());
+        if (w.source == "current") {
+            m["kind"] = "open";
+            m["label"] = tr("Open world");
+            m["detail"] = tr("“%1” from the WORLD tab, as it is when training starts").arg(WorldModel::instance()->name());
+        } else if (w.source == "flat") {
+            m["kind"] = "flat"; m["label"] = tr("Flat ground"); m["detail"] = tr("Endless flat ground, no wind");
+        } else if (w.source == "inline") {
+            m["kind"] = "embedded"; m["detail"] = tr("Copy stored inside the experiment");
+        } else {
+            const QFileInfo f(QString::fromStdString(w.path.value_or("")));
+            const bool saved = f.absolutePath() == libDir;
+            m["kind"] = saved ? "saved" : "file";
+            m["detail"] = saved ? tr("Saved world") : f.absoluteFilePath();
+            m["missing"] = !f.exists();
+        }
+        l << m;
+    }
+    return l;
+}
+
+QVariantMap EvolveModel::worldSchedule() const {
+    return {{"mode", QString::fromStdString(m_doc.worldSchedule.mode)}, {"perGeneration", m_doc.worldSchedule.perGeneration}};
+}
+
+void EvolveModel::addWorld(const QString& kind, const QString& arg) {
+    auto w = makeWorldRef(kind, arg);
+    if (!w) return;
+    evo::ExperimentDocument d = m_doc;
+    d.worlds.push_back(std::move(*w));
+    setDoc(d, true);
+}
+
+void EvolveModel::replaceWorld(int index, const QString& kind, const QString& arg) {
+    auto w = makeWorldRef(kind, arg);
+    if (!w || index < 0 || index >= int(m_doc.worlds.size())) return;
+    evo::ExperimentDocument d = m_doc;
+    d.worlds[std::size_t(index)] = std::move(*w);
+    setDoc(d, true);
+}
+
+void EvolveModel::removeWorld(int index) {
+    if (index < 0 || index >= int(m_doc.worlds.size()) || m_doc.worlds.size() <= 1) return;
+    evo::ExperimentDocument d = m_doc;
+    d.worlds.erase(d.worlds.begin() + index);
+    d.worldSchedule.perGeneration = std::min(d.worldSchedule.perGeneration, int(d.worlds.size()));
+    setDoc(d, true);
+}
+
+void EvolveModel::setWorldSchedule(const QString& mode, int perGeneration) {
+    if (mode != "all" && mode != "rotate" && mode != "sample") return;
+    evo::ExperimentDocument d = m_doc;
+    d.worldSchedule.mode = mode.toStdString();
+    d.worldSchedule.perGeneration = std::clamp(perGeneration, 1, std::max(1, int(d.worlds.size())));
     setDoc(d, true);
 }
 
@@ -496,10 +575,11 @@ void EvolveModel::start() {
     if (running() || m_preparing) return;
     stopReplay();
     evo::ExperimentDocument e = m_doc;
-    if (e.world.source == "current") {
+    for (auto& w : e.worlds) {
+        if (w.source != "current") continue;
         // Snapshot the open world (WORLD tab) into the experiment; the bake runs on the worker.
-        e.world.source = "inline";
-        e.world.inlineDoc = WorldModel::instance()->currentDocument();
+        w.source = "inline";
+        w.inlineDoc = WorldModel::instance()->currentDocument();
     }
     const std::string path = m_path.toStdString();
     m_preparing = true; m_runError.clear();
@@ -514,8 +594,7 @@ void EvolveModel::start() {
             std::string cerr;
             auto craft = evo::resolveCraft(e.crafts.empty() ? nullptr : &e.crafts[0], path, cerr);
             if (!craft) throw evo::EvoError(cerr.empty() ? "no craft" : cerr);
-            auto world = evo::EvoWorld::resolve(e, path, evo::EvoWorld::flat());
-            run = std::make_unique<evo::EvolutionRun>(e, *craft, world);
+            run = std::make_unique<evo::EvolutionRun>(e, *craft, evo::EvoWorld::resolveAll(e, path, evo::EvoWorld::flat()));
         } catch (const script::ScriptException& x) {
             err = QString::fromStdString(x.error.describe()); line = x.error.line;
         } catch (const std::exception& x) {
@@ -550,8 +629,7 @@ void EvolveModel::resumeDir(const QString& dir) {
         try {
             auto cp = json::parseFile(d + "/run.json");
             evo::ExperimentDocument e = cp.ok ? evo::ExperimentDocument::fromJson(cp.value["experiment"]) : evo::ExperimentDocument();
-            auto world = evo::EvoWorld::resolve(e, path, evo::EvoWorld::flat());
-            run = evo::EvolutionRun::resume(d, world);
+            run = evo::EvolutionRun::resume(d, evo::EvoWorld::resolveAll(e, path, evo::EvoWorld::flat()));
         } catch (const std::exception& x) { err = QString::fromUtf8(x.what()); }
         auto* raw = run.release();
         QMetaObject::invokeMethod(QCoreApplication::instance(), [self, raw, err] {
@@ -734,6 +812,7 @@ void EvolveModel::replay(const QString& id) {
                 .arg(tr->outcome, 0, 'f', 3)
                 .arg(tr->trainingFitness ? QString::number(*tr->trainingFitness, 'f', 3) : QStringLiteral("–"))
                 .arg(match, QString::fromStdString(tr->doneReason.empty() ? "time" : tr->doneReason));
+            if (self->m_doc.worlds.size() > 1) self->m_replayInfo += QObject::tr(" · world: %1").arg(QString::fromStdString(tr->worldName));
             emit self->replayChanged();
             emit self->replayTimeChanged();
         }, Qt::QueuedConnection);

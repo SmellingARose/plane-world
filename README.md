@@ -124,7 +124,7 @@ pwcli --info                                               # CPU features, GPU b
 ```
 
 `--train` also takes `--workers`, `--population`, `--seed`, `--aero <profile>`, `--script-engine`.
-The app takes `--tab`, `--color-scheme`, `--size WxH`, `--command "<palette entry>"` (or `"wait <s>"`, run in order) and
+The app takes `--tab`, `--experiment <file.json>`, `--color-scheme`, `--size WxH`, `--command "<palette entry>"` (or `"wait <s>"`, run in order) and
 `--screenshot out.png --quit-after <s>` (how the screenshots above were made).
 
 ## Docs

@@ -61,6 +61,7 @@ struct ScriptBundle {
 /// ctx.info.
 struct EpisodeInfo {
     int generation = 0, candidate = 0, episode = 0;
+    int world = 0, worldCount = 1;   // index into the experiment's worlds (ctx.info.world) and how many it has
     uint64_t seed = 0;
     double duration = 0, controlDt = 0.02;
 };

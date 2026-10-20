@@ -50,6 +50,8 @@ class WorldModel : public QObject {
     Q_PROPERTY(double progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QStringList library READ library NOTIFY libraryChanged)
+    /// Saved worlds, newest first: { name, path, modified (display text), current (the open world's file) }.
+    Q_PROPERTY(QVariantList libraryInfo READ libraryInfo NOTIFY libraryChanged)
     Q_PROPERTY(QString libraryDir READ libraryDir CONSTANT)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY undoChanged)
@@ -133,6 +135,7 @@ public:
     double progress() const { return m_progress; }
     QString status() const { return m_status; }
     QStringList library() const { return m_library; }
+    QVariantList libraryInfo() const { return m_libraryInfo; }
     QString libraryDir() const;
     bool canUndo() const { return !m_undo.empty(); }
     bool canRedo() const { return !m_redo.empty(); }
@@ -196,6 +199,12 @@ public:
     Q_INVOKABLE bool saveAs(const QString& pathOrUrl);
     Q_INVOKABLE void refreshLibrary();
     Q_INVOKABLE QString libraryPath(const QString& name) const;
+    /// True when a saved world other than the open one already uses `name` (saving would replace it).
+    Q_INVOKABLE bool libraryHas(const QString& name) const;
+    /// Names the world `name` and saves it in the library (replacing a saved world of that name).
+    Q_INVOKABLE bool saveToLibrary(const QString& name);
+    /// Moves a saved world to the system Trash. The open world keeps its edits but becomes unsaved.
+    Q_INVOKABLE bool removeFromLibrary(const QString& name);
     // terrain
     Q_INVOKABLE void generate();                         // build the terrain source set above (background)
     Q_INVOKABLE void randomizeSeed();
@@ -262,6 +271,7 @@ private:
     bool m_dirty = false, m_busy = false;
     double m_progress = 1;
     QStringList m_library;
+    QVariantList m_libraryInfo;
     std::vector<Snapshot> m_undo, m_redo;
     std::optional<Snapshot> m_strokeSnap;
     bool m_stroking = false;

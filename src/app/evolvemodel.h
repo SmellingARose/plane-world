@@ -27,6 +27,9 @@ class EvolveModel : public QObject, public ReplayProvider {
     QML_ELEMENT
     QML_SINGLETON
     Q_PROPERTY(QVariantMap experiment READ experiment NOTIFY experimentChanged)
+    /// Training worlds for the UI: { label, kind ("open" | "flat" | "saved" | "file" | "embedded"), detail, missing }.
+    Q_PROPERTY(QVariantList worlds READ worlds NOTIFY experimentChanged)
+    Q_PROPERTY(QVariantMap worldSchedule READ worldSchedule NOTIFY experimentChanged)
     Q_PROPERTY(QString name READ name NOTIFY experimentChanged)
     Q_PROPERTY(QString filePath READ filePath NOTIFY experimentChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY experimentChanged)
@@ -75,6 +78,8 @@ public:
     static EvolveModel* create(QQmlEngine*, QJSEngine*);
 
     QVariantMap experiment() const { return m_map; }
+    QVariantList worlds() const;
+    QVariantMap worldSchedule() const;
     QString name() const { return QString::fromStdString(m_doc.name); }
     QString filePath() const { return m_path; }
     bool dirty() const { return m_dirty; }
@@ -129,6 +134,12 @@ public:
     Q_INVOKABLE void refreshLibrary();
     Q_INVOKABLE QVariantList algorithmSchema(const QString& kind) const;
     Q_INVOKABLE void setAero(const QString& id);   // AeroModelPicker id: fast profile or "custom"
+    /// Training worlds. kind: "open" (the WORLD tab's world when training starts), "flat", "saved" (arg = library name),
+    /// "file" (arg = path or URL) or "embedded" (a copy of the open world stored in the experiment).
+    Q_INVOKABLE void addWorld(const QString& kind, const QString& arg = {});
+    Q_INVOKABLE void replaceWorld(int index, const QString& kind, const QString& arg = {});
+    Q_INVOKABLE void removeWorld(int index);
+    Q_INVOKABLE void setWorldSchedule(const QString& mode, int perGeneration);
     Q_INVOKABLE void setPreset(const QString& genomePreset);   // what evolves; adjusts controller mode + script
     Q_INVOKABLE void toggleIO(const QString& which, const QString& name, bool on);   // "inputs" | "outputs"
     Q_INVOKABLE void setInputScale(const QString& name, double scale);

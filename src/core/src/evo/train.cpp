@@ -15,6 +15,18 @@ namespace pw::evo {
 namespace {
 std::string sw(double d) { return craft::swiftDoubleString(d); }   // Swift "\(double)"
 
+// "Hills" or "Hills, Islands (all each generation)"
+std::string worldList(const std::vector<std::shared_ptr<const EvoWorld>>& worlds, const ExperimentDocument& e) {
+    std::string s;
+    for (auto& w : worlds) s += (s.empty() ? "" : ", ") + w->base.name;
+    if (worlds.size() > 1) {
+        const auto& m = e.worldSchedule;
+        s += m.mode == "rotate" ? " (one per generation, in turn)"
+           : m.mode == "sample" ? " (" + std::to_string(m.perGeneration) + " at random per generation)" : " (all each generation)";
+    }
+    return s;
+}
+
 int train(const train::Request& req) {
     try {
         scripts::setDefaults(scripts::defaultMode(), req.engine);
@@ -24,21 +36,21 @@ int train(const train::Request& req) {
         auto craft = resolveCraft(e.crafts.empty() ? nullptr : &e.crafts[0], req.experimentPath, err);
         if (!craft) { std::printf("error: craft not found (%s)\n", err.c_str()); return 1; }
         std::vector<std::string> notes;
-        auto world = EvoWorld::resolve(e, req.experimentPath, req.currentAsFlat ? EvoWorld::flat() : nullptr, &notes);
+        auto worlds = EvoWorld::resolveAll(e, req.experimentPath, req.currentAsFlat ? EvoWorld::flat() : nullptr, &notes);
         std::string runID = EvolutionRun::newRunID();
         std::string out = req.outDir.empty() ? e.runDirectory(runID) : req.outDir;
         std::error_code ec;
         std::filesystem::create_directories(out, ec);
         if (ec) { std::printf("error: I/O: cannot create %s: %s\n", out.c_str(), ec.message().c_str()); return 1; }
         bool resume = req.resume && std::filesystem::exists(out + "/run.json");
-        std::unique_ptr<EvolutionRun> r = resume ? EvolutionRun::resume(out, world) : std::make_unique<EvolutionRun>(e, *craft, world, runID, out);
+        std::unique_ptr<EvolutionRun> r = resume ? EvolutionRun::resume(out, worlds) : std::make_unique<EvolutionRun>(e, *craft, worlds, runID, out);
         const ExperimentDocument& ex = r->context()->experiment;
         int gens = std::max(1, ex.generations);
         std::printf("aero model: %s\n", ex.aero.model.c_str());
         int workers = ex.workers == 0 ? int(std::thread::hardware_concurrency()) : ex.workers;
         std::printf("experiment '%s'  algorithm %s  genes %d  population %d  workers %d  episode %ss x%d  world %s\n", ex.name.c_str(),
                     ex.algorithm.kind.c_str(), r->layout().count(), ex.population, workers, sw(ex.episode.duration).c_str(),
-                    ex.episode.episodesPerCandidate, world->base.name.c_str());
+                    ex.episode.episodesPerCandidate, worldList(worlds, ex).c_str());
         std::string terms;
         for (auto& t : r->termNames()) terms += (terms.empty() ? "" : ", ") + t;
         std::printf("terms: %s   out: %s\n", terms.c_str(), out.c_str());

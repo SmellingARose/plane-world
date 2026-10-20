@@ -103,6 +103,12 @@ WorldRef worldRefFromJson(const Value& v) {
     }
     return w;
 }
+Value toJsonWorld(const WorldRef& world) {
+    Value w = Value::object(); w.set("source", Value::string(world.source));
+    if (world.path) w.set("path", Value::string(*world.path));
+    if (world.inlineDoc) w.set("inline", world::toJson(*world.inlineDoc));
+    return w;
+}
 AeroRunSettings aeroFromJson(const Value& v) {
     AeroRunSettings a;
     if (v["toggles"].isObject()) {
@@ -187,7 +193,17 @@ ExperimentDocument ExperimentDocument::fromJson(const Value& v) {
         std::vector<CraftRef> c; for (auto& r : x.items()) c.push_back(craftRefFromJson(r));
         e.crafts = std::move(c);
     });
-    tolerant(v, "world", [&](auto& x) { e.world = worldRefFromJson(x); });
+    tolerant(v, "world", [&](auto& x) { e.worlds = {worldRefFromJson(x)}; });
+    tolerant(v, "worlds", [&](auto& x) {
+        if (!x.isArray() || x.items().empty()) throw Missing("worlds");
+        std::vector<WorldRef> l; for (auto& r : x.items()) l.push_back(worldRefFromJson(r));
+        e.worlds = std::move(l);
+    });
+    tolerant(v, "worldSchedule", [&](auto& x) {
+        WorldSchedule s; s.mode = rStr(x, "mode"); s.perGeneration = rInt(x, "perGeneration");
+        if (s.mode != "all" && s.mode != "rotate" && s.mode != "sample") throw Missing("worldSchedule.mode");
+        e.worldSchedule = s;
+    });
     tolerant(v, "headless", [&](auto& x) {
         HeadlessOptionsDoc h; h.terrain = rBool(x, "terrain"); h.water = rBool(x, "water"); h.oceanWaves = rBool(x, "oceanWaves");
         h.vegetation = rBool(x, "vegetation"); h.breakables = rBool(x, "breakables"); e.headless = h;
@@ -219,6 +235,13 @@ ExperimentDocument ExperimentDocument::fromJson(const Value& v) {
     return e;
 }
 
+std::string WorldRef::label() const {
+    if (source == "flat") return "flat";
+    if (source == "inline") return inlineDoc && !inlineDoc->name.empty() ? inlineDoc->name : "embedded world";
+    if (source == "file") return path ? std::filesystem::path(*path).stem().string() : "world file";
+    return "open world";
+}
+
 Value ExperimentDocument::toJson() const {
     Value o = Value::object();
     o.set("version", Value::i64(version)); o.set("name", Value::string(name)); o.set("notes", Value::string(notes));
@@ -231,10 +254,14 @@ Value ExperimentDocument::toJson() const {
         cr.push(std::move(r));
     }
     o.set("crafts", std::move(cr));
-    Value w = Value::object(); w.set("source", Value::string(world.source));
-    if (world.path) w.set("path", Value::string(*world.path));
-    if (world.inlineDoc) w.set("inline", world::toJson(*world.inlineDoc));
-    o.set("world", std::move(w));
+    o.set("world", toJsonWorld(worlds.empty() ? WorldRef{} : worlds[0]));
+    if (worlds.size() > 1) {
+        Value l = Value::array(); for (auto& w : worlds) l.push(toJsonWorld(w));
+        o.set("worlds", std::move(l));
+        Value s = Value::object(); s.set("mode", Value::string(worldSchedule.mode));
+        s.set("perGeneration", Value::i64(worldSchedule.perGeneration));
+        o.set("worldSchedule", std::move(s));
+    }
     Value h = Value::object();
     h.set("terrain", Value::fromBool(headless.terrain)); h.set("water", Value::fromBool(headless.water)); h.set("oceanWaves", Value::fromBool(headless.oceanWaves));
     h.set("vegetation", Value::fromBool(headless.vegetation)); h.set("breakables", Value::fromBool(headless.breakables));
@@ -324,7 +351,7 @@ ExperimentDocument neuralController(const std::string& craftName) {
     e.name = "Neural controller — " + craftName;
     e.notes = "MLP (sensors → control surfaces + throttle) learns to take off, climb to 150 m AGL and hold wings level.";
     CraftRef r; r.name = craftName; e.crafts = {r};
-    e.world.source = "current";
+    e.worlds = {WorldRef{}};
     e.genome.preset = "neural";
     MLPSpec m; m.hidden = {12};
     m.inputs = {"alt", "att.pitch", "att.roll", "rate.roll", "rate.pitch", "rate.yaw", "air", "vs", "aero.aoa"};
@@ -348,7 +375,7 @@ ExperimentDocument craftDesign(const std::string& craftName) {
     e.name = "Craft design — " + craftName;
     e.notes = "Evolve wing span/chord, wing position and stabilator size; a scripted PID autopilot flies every design.";
     CraftRef r; r.name = craftName; e.crafts = {r};
-    e.world.source = "current";
+    e.worlds = {WorldRef{}};
     e.genome.preset = "design"; e.genome.mlp.reset();
     e.genome.design = {dg("Wing L", "p.span", 2.5, 6, 4.2, {"Wing R"}), dg("Wing L", "p.chord", 0.8, 2.2, 1.5, {"Wing R"}),
                        dg("Wing L", "pos.0", -0.6, 1.4, 0.4, {"Wing R", "Aileron L", "Aileron R"}), dg("Stabilator", "p.span", 2, 4.5, 3.4)};

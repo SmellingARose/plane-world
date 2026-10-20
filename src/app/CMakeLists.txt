@@ -16,7 +16,7 @@ set_target_properties(pwapp PROPERTIES
   MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
   MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION})
 
-set_source_files_properties(qml/Theme.qml qml/WorldTools.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/Theme.qml qml/WorldTools.qml qml/WorldFlow.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 qt_add_qml_module(pwapp
   URI PlaneWorld
   VERSION 1.0

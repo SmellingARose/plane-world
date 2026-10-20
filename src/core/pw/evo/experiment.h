@@ -23,6 +23,15 @@ struct WorldRef {
     std::string source = "current";   // "current" | "flat" | "file" | "inline"
     std::optional<std::string> path;
     std::optional<world::WorldDocument> inlineDoc;
+    /// Short name for logs and the UI: the file's base name, the embedded world's name, "flat" or "open world".
+    std::string label() const;
+};
+
+/// Which of an experiment's worlds each generation trains in. Every candidate of a generation flies the same worlds,
+/// so their scores stay comparable.
+struct WorldSchedule {
+    std::string mode = "all";   // "all": every world | "rotate": one per generation, in turn | "sample": `perGeneration` at random
+    int perGeneration = 2;      // "sample" only
 };
 
 struct HeadlessOptionsDoc {
@@ -89,7 +98,10 @@ struct ExperimentDocument {
     int version = kFormatVersion;
     std::string name = "Untitled experiment", notes;
     std::vector<CraftRef> crafts;
-    WorldRef world;
+    /// Training worlds, at least one. The file keeps the first as "world" (what older readers use) and, when there are
+    /// several, all of them as "worlds" plus "worldSchedule".
+    std::vector<WorldRef> worlds{WorldRef{}};
+    WorldSchedule worldSchedule;
     HeadlessOptionsDoc headless;
     GenomeSource genome;
     ControllerSpec controller;

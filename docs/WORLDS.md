@@ -1,8 +1,20 @@
 # Worlds
 
 A world is a JSON document (`pw/world/document.h`): terrain spec, water (ocean, lakes, rivers), vegetation, objects
-(props / breakables), environment (sun, wind, fog) and a spawn. WORLD → **New** builds one from a preset; **Save**
-writes it to the library (`<data dir>/worlds`), where **Open** lists it.
+(props / breakables), environment (sun, wind, fog) and a spawn. WORLD → **New** builds one from a preset.
+
+## Saving and picking worlds
+
+- **Save** (Ctrl+S) asks for a name the first time and warns before replacing another saved world of that name.
+  Saved worlds live in the library (`<data dir>/worlds`). **Save As…** saves a copy under a new name, or to another
+  folder.
+- **Open…** (Ctrl+O) shows the saved worlds, newest first: open one, move one to the Trash, or open a file elsewhere.
+- Opening or starting a world, picking a saved world in FLY, and quitting all ask first when the open world has
+  unsaved edits.
+- **FLY › World** picks flat ground, the open world or any saved world. **EVOLVE › Training worlds** picks one or
+  several worlds to train in ([EVOLUTION.md §8](EVOLUTION.md#8-experiment-aero-and-worlds)).
+- Code: `WorldModel` (library, save by name, delete to Trash), `WorldFlow.qml` (the shared actions) and
+  `WorldDialogs.qml` (their dialogs).
 
 ## New-world presets
 

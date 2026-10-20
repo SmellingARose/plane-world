@@ -15,27 +15,10 @@ Rectangle {
     readonly property bool sculptTool: ["raise", "lower", "smooth", "flatten", "paint"].indexOf(WorldModel.tool) >= 0
     readonly property bool natureTool: ["trees", "erase", "grass"].indexOf(WorldModel.tool) >= 0
 
-    function openFile() { openDlg.open() }
     function flyHere() {
         const t = viewport ? viewport.viewTarget() : [0, 0, 0]
         App.flyFrom(t[0], t[1], t[2])
         App.requestTab("FLY")
-    }
-    function saveFileAs() { saveDlg.open() }
-    FileDialog {
-        id: openDlg
-        title: "Open world"
-        nameFilters: ["World (*.json)"]
-        currentFolder: (Qt.platform.os === "windows" ? "file:///" : "file://") + WorldModel.libraryDir
-        onAccepted: WorldModel.open(selectedFile)
-    }
-    FileDialog {
-        id: saveDlg
-        title: "Save world as"
-        fileMode: FileDialog.SaveFile
-        nameFilters: ["World (*.json)"]
-        currentFolder: (Qt.platform.os === "windows" ? "file:///" : "file://") + WorldModel.libraryDir
-        onAccepted: WorldModel.saveAs(selectedFile)
     }
     FileDialog {
         id: hmDlg
@@ -43,7 +26,8 @@ Rectangle {
         nameFilters: ["Images (*.png *.jpg *.jpeg)", "Raw 16-bit (*.r16 *.raw)"]
         onAccepted: { WorldModel.heightmapPath = selectedFile.toString(); WorldModel.terrainKind = "heightmap" }
     }
-    // Ctrl+O / Ctrl+Shift+S are bound once, in WorldPage (duplicates would make them ambiguous)
+    // Ctrl+S / Ctrl+Shift+S / Ctrl+O are bound once, in WorldPage (duplicates would make them ambiguous); the file
+    // actions and their dialogs are WorldFlow / WorldDialogs, shared with FLY and EVOLVE.
 
     ScrollView {
         id: sv
@@ -82,30 +66,22 @@ Rectangle {
                         onClicked: newMenu.popup()
                         Menu {
                             id: newMenu
-                            MenuItem { text: "Flat"; onTriggered: WorldModel.newWorld("flat") }
-                            MenuItem { text: "Rolling hills"; onTriggered: WorldModel.newWorld("hills") }
-                            MenuItem { text: "Islands"; onTriggered: WorldModel.newWorld("islands") }
-                            MenuItem { text: "Mountains"; onTriggered: WorldModel.newWorld("mountains") }
-                            MenuItem { text: "Manhattan (Midtown)"; onTriggered: WorldModel.newWorld("manhattan") }
+                            MenuItem { text: "Flat"; onTriggered: WorldFlow.newWorld("flat") }
+                            MenuItem { text: "Rolling hills"; onTriggered: WorldFlow.newWorld("hills") }
+                            MenuItem { text: "Islands"; onTriggered: WorldFlow.newWorld("islands") }
+                            MenuItem { text: "Mountains"; onTriggered: WorldFlow.newWorld("mountains") }
+                            MenuItem { text: "Manhattan (Midtown)"; onTriggered: WorldFlow.newWorld("manhattan") }
                         }
                     }
                     Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0
                         text: "Open"
-                        onClicked: { WorldModel.refreshLibrary(); openMenu.popup() }
-                        Menu {
-                            id: openMenu
-                            Repeater {
-                                model: WorldModel.library
-                                MenuItem { required property string modelData; text: modelData; onTriggered: WorldModel.open(modelData) }
-                            }
-                            MenuItem { text: "No saved worlds"; enabled: false; visible: WorldModel.library.length === 0; height: visible ? implicitHeight : 0 }
-                            MenuSeparator {}
-                            MenuItem { text: "Browse…  " + Theme.shortcutText("Ctrl+O"); onTriggered: openDlg.open() }
-                        }
-                    }
-                    Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0; text: "Save"; onClicked: WorldModel.save(); enabled: !WorldModel.busy
-                        ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.tip("Save to the world library", "Ctrl+S") }
-                    Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0; text: "Save As"; onClicked: saveDlg.open(); enabled: !WorldModel.busy }
+                        onClicked: WorldFlow.manage()
+                        ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.tip("Saved worlds: open, delete or browse for a file", "Ctrl+O") }
+                    Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0; text: "Save"; onClicked: WorldFlow.save(); enabled: !WorldModel.busy
+                        ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay
+                        ToolTip.text: Theme.tip(WorldModel.filePath === "" ? "Name this world and save it" : "Save this world", "Ctrl+S") }
+                    Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0; text: "Save As"; onClicked: WorldFlow.saveAs(); enabled: !WorldModel.busy
+                        ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.tip("Save a copy under a new name", "Ctrl+Shift+S") }
                 }
                 Label { Layout.fillWidth: true; text: WorldModel.terrainInfo; color: Theme.textFaint; font.pixelSize: Theme.caption; wrapMode: Text.WordWrap }
 
@@ -138,8 +114,8 @@ Rectangle {
                         }
                     }
                     Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.textMuted
-                        text: WorldModel.dirty ? "Unsaved changes — Save keeps this world in your library for later sessions."
-                                               : (WorldModel.filePath !== "" ? "Saved." : "Save it to reuse it in later sessions.") }
+                        text: WorldModel.dirty ? "Unsaved changes. Save keeps this world for later and makes it pickable in FLY and EVOLVE."
+                                               : (WorldModel.filePath !== "" ? "Saved." : "Save it to reuse it later and pick it in FLY and EVOLVE.") }
                 }
             }
 

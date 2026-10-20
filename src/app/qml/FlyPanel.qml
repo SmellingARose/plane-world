@@ -31,30 +31,18 @@ ColumnLayout {
     }
     Label { text: "C cycles the camera"; color: Theme.textFaint; font.pixelSize: Theme.caption; Layout.topMargin: -Theme.s2 }
 
-    // Where you fly: the WORLD tab's world (terrain, water, trees, props, wind all count) or neutral flat ground.
+    // Where you fly: flat ground, the world open in WORLD (terrain, water, trees, props, wind all count) or a saved world.
     PwSection {
         title: "World"
-        hint: "FLY uses the world open in the WORLD tab. Edits there show up here immediately."
+        hint: "Pick flat ground, the world open in the WORLD tab, or a saved world. Edits in WORLD show up here immediately."
         PwCard {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.s2
                 Rectangle { width: 4; Layout.fillHeight: true; radius: 2; color: App.flyInWorld ? Theme.tabTint["WORLD"] : Theme.separator }
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 0
-                    Label { Layout.fillWidth: true; elide: Text.ElideRight; font.weight: Font.DemiBold
-                        text: App.flyInWorld ? App.worldName + (WorldModel.dirty ? "  •" : "") : "Flat test ground" }
-                    Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: Theme.textMuted; font.pixelSize: Theme.caption; text: App.worldSummary }
-                }
+                WorldPicker { Layout.fillWidth: true }
             }
-            PwSegmented {
-                model: [{ text: "Fly in world", tip: "Terrain, water, trees, props and wind from the WORLD tab" },
-                        { text: "Flat ground", tip: "Endless flat ground, no wind — for testing a design" }]
-                currentIndex: App.flyInWorld ? 0 : 1
-                onActivated: (i) => App.flyInWorld = (i === 0)
-                ToolTip.visible: false
-            }
+            Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; color: Theme.textMuted; font.pixelSize: Theme.caption; text: App.worldSummary }
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.s1

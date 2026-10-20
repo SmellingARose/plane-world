@@ -111,12 +111,12 @@ std::string EvolutionRun::newRunID() {
     return b;
 }
 
-EvolutionRun::EvolutionRun(const ExperimentDocument& experiment, const craft::CraftDocument& craft, std::shared_ptr<const EvoWorld> world,
+EvolutionRun::EvolutionRun(const ExperimentDocument& experiment, const craft::CraftDocument& craft, std::vector<std::shared_ptr<const EvoWorld>> worlds,
                            std::string id, std::string dir, ScriptRuntimeFactory factory, jobs::JobSystem* jobs)
     : runID(std::move(id)), directory(std::move(dir)) {
     ScriptBundle bundle = experiment.scripts;
     factory_ = factory ? std::move(factory) : ScriptRuntimeFactory([bundle] { return scripts::make(bundle); });
-    ctxMut_ = std::make_shared<ExperimentContext>(experiment, craft, std::move(world));
+    ctxMut_ = std::make_shared<ExperimentContext>(experiment, craft, std::move(worlds));
     orchestrator_ = factory_();
     orchestrator_->compile(experiment.scripts, experiment);
     ctxMut_->buildLayout(*orchestrator_);
@@ -244,14 +244,14 @@ void EvolutionRun::checkpoint(const std::string& dir) {
     if (auto a = algorithm_->archive()) writeText(dir + "/archive.json", json::dump(toJson(*a)));
 }
 
-std::unique_ptr<EvolutionRun> EvolutionRun::resume(const std::string& dir, std::shared_ptr<const EvoWorld> world, ScriptRuntimeFactory factory, jobs::JobSystem* jobs) {
+std::unique_ptr<EvolutionRun> EvolutionRun::resume(const std::string& dir, std::vector<std::shared_ptr<const EvoWorld>> worlds, ScriptRuntimeFactory factory, jobs::JobSystem* jobs) {
     auto pr = json::parse(readText(dir + "/run.json"));
     if (!pr.ok) throw EvoError("I/O: run.json is not valid JSON: " + pr.error);
     const Value& cp = pr.value;
     ExperimentDocument e = ExperimentDocument::fromJson(cp["experiment"]);
     craft::CraftDocument craft; std::string err;
     if (!craft::fromJson(cp["craft"], craft, err)) throw EvoError("I/O: run.json craft: " + err);
-    auto run = std::make_unique<EvolutionRun>(e, craft, std::move(world), js::reqStr(cp, "runID"), dir, std::move(factory), jobs);
+    auto run = std::make_unique<EvolutionRun>(e, craft, std::move(worlds), js::reqStr(cp, "runID"), dir, std::move(factory), jobs);
     GenomeLayout saved = layoutFromJson(cp["layout"]);
     if (!(run->ctx_->layout == saved)) throw EvoError("invalid experiment: genome layout changed since the checkpoint (script or craft edited)");
     run->algorithm_->restore(readText(dir + "/algorithm.state"));
@@ -339,7 +339,8 @@ Trajectory record(std::shared_ptr<const ExperimentContext> ctx, const Genome& ge
     for (auto& p : craft.parts) tr.partIDs.push_back(p.id);
     tr.outputNames = ctx->outputNames; tr.termNames = ctx->termNames;
     tr.outcome = total; tr.doneReason = w.frame().doneReason; tr.trainingFitness = trainingFitness;
-    if (trainingFitness && e.episode.episodesPerCandidate == 1) tr.fitnessMatches = *trainingFitness == total;
+    tr.worldName = ctx->episodeWorld(generation, episode).base.name;
+    if (trainingFitness && ctx->episodesPerGeneration(generation) == 1) tr.fitnessMatches = *trainingFitness == total;
     return tr;
 }
 }

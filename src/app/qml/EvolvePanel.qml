@@ -182,7 +182,9 @@ Rectangle {
                     }
 
                     // ---------------- ① craft & world
-                    StepTitle { number: 1; title: qsTr("Craft & world"); summary: (ev.io.craft || "") + " · " + ({ current: qsTr("open world"), flat: qsTr("flat"), file: qsTr("world file"), inline: qsTr("embedded world") })[xp.world ? xp.world.source : "current"] }
+                    StepTitle { number: 1; title: qsTr("Craft & worlds")
+                                summary: (ev.io.craft || "") + " · " + (ev.worlds.length === 1 ? (ev.worlds[0].kind === "open" ? qsTr("open world") : ev.worlds[0].label)
+                                                                                                : qsTr("%1 worlds").arg(ev.worlds.length)) }
                     ColumnLayout {
                         Layout.fillWidth: true; Layout.leftMargin: Theme.s4; Layout.rightMargin: Theme.s4
                         spacing: Theme.s2
@@ -195,23 +197,8 @@ Rectangle {
                             }
                         }
                         Label { visible: ev.io.error !== undefined && ev.io.error !== ""; text: ev.io.error || ""; color: Theme.bad; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: Theme.caption }
-                        PwPropertyRow { label: qsTr("World"); tip: qsTr("Where the training flights happen"); Layout.fillWidth: true
-                            ComboBox {
-                                id: worldBox
-                                Layout.fillWidth: true
-                                readonly property var keys: ["current", "flat", "file", "inline"]
-                                model: [qsTr("The WORLD tab's world"), qsTr("Flat ground"), qsTr("World file"), qsTr("Embedded copy")]
-                                currentIndex: Math.max(0, keys.indexOf(xp.world ? xp.world.source : "current"))
-                                onActivated: (i) => ev.set("world.source", keys[i])
-                            }
-                        }
-                        Hint {
-                            text: worldBox.currentIndex === 0 ? qsTr("Uses “%1” as it is when training starts — terrain, water and wind.").arg(WorldModel.name || qsTr("Untitled world"))
-                                : worldBox.currentIndex === 1 ? qsTr("Endless flat ground: the quickest, most repeatable training.")
-                                : worldBox.currentIndex === 2 ? qsTr("A saved world file (path in the experiment).") : qsTr("A copy of a world stored inside the experiment.")
-                        }
-                        Button { visible: worldBox.currentIndex === 0; text: qsTr("Edit world"); onClicked: App.requestTab("WORLD")
-                            ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.tip(qsTr("Open the WORLD tab"), "Ctrl+3") }
+                        Label { text: qsTr("Training worlds"); color: Theme.textMuted; font.pixelSize: Theme.small; Layout.topMargin: Theme.s1 }
+                        TrainingWorlds { Layout.fillWidth: true }
                         PwSection {
                             title: qsTr("World details & aero model")
                             expanded: false
@@ -465,7 +452,7 @@ Rectangle {
                                 PwNumberField { value: xp.checkpointEvery || 5; decimals: 0; step: 1; minimum: 0; onCommitted: (v) => ev.set("checkpointEvery", Math.round(v)) } }
                             PwPropertyRow { label: qsTr("Physics"); Layout.fillWidth: true
                                 PwNumberField { value: num("episode.physicsHz", 1000); suffix: " Hz"; decimals: 0; step: 100; minimum: 50; onCommitted: (v) => ev.set("episode.physicsHz", v) } }
-                            PwPropertyRow { label: qsTr("Flights each"); tip: qsTr("Episodes per candidate (with different wind / jitter); the score is aggregated"); Layout.fillWidth: true
+                            PwPropertyRow { label: qsTr("Flights each"); tip: qsTr("Episodes per candidate in each training world (with different wind / jitter); the score is aggregated"); Layout.fillWidth: true
                                 PwNumberField { value: num("episode.episodesPerCandidate", 1); decimals: 0; step: 1; minimum: 1; onCommitted: (v) => ev.set("episode.episodesPerCandidate", Math.round(v)) } }
                             PwPropertyRow { label: qsTr("Aggregate"); Layout.fillWidth: true
                                 PwSegmented { Layout.fillWidth: true; model: ["mean", "min", "median"]; currentIndex: Math.max(0, ["mean", "min", "median"].indexOf(num("episode.aggregate", "mean")))

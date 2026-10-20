@@ -13,7 +13,7 @@ craft::CraftDocument trainer() { return presets::addStandardSensors(*craft::pres
 std::unique_ptr<ScriptRuntime> neuralRuntime() { return scripts::makePreset("neural"); }
 std::shared_ptr<ExperimentContext> context(double duration, const std::string& mode = "mlp") {
     ExperimentDocument e = presets::neuralController();
-    e.episode.duration = duration; e.episode.stopOnCrash = false; e.world.source = "flat";
+    e.episode.duration = duration; e.episode.stopOnCrash = false; e.worlds = {WorldRef{"flat"}};
     e.controller.mode = mode;
     if (mode == "neat") e.algorithm.kind = "neat";
     auto ctx = std::make_shared<ExperimentContext>(e, trainer(), EvoWorld::flat());
