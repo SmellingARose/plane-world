@@ -2,22 +2,30 @@
 
 | Platform | Artefact | Made by | Signed |
 |---|---|---|---|
-| macOS arm64 | `PlaneWorld-<ver>-macos-arm64.dmg` (drag to Applications; `pwcli` inside `Contents/MacOS`) | `packaging/macos/make_dmg.sh` | ad-hoc (`codesign -s -`) by default |
-| Windows x64 | `PlaneWorld-<ver>-windows-x64.msi` (per-machine, Program Files, Start menu shortcut, major-upgrade aware) | `packaging/windows/make_msi.sh` + `PlaneWorld.wxs` (WiX v5) | unsigned |
+| macOS arm64 | `PlaneWorld-macOS.dmg` (drag to Applications; `pwcli` inside `Contents/MacOS`) | `packaging/macos/make_dmg.sh` | ad-hoc (`codesign -s -`) by default |
+| Windows x64 | `PlaneWorld-Windows.msi` (per-machine, Program Files, Start menu shortcut, major-upgrade aware) | `packaging/windows/make_msi.sh` + `PlaneWorld.wxs` (WiX v5) | unsigned |
 
-The version comes from `project(PlaneWorld VERSION ...)` in `CMakeLists.txt`.
+The version comes from `project(PlaneWorld VERSION ...)` in `CMakeLists.txt`. The file names carry no version, so the
+README's `releases/latest/download/...` links always fetch the newest release.
 
 ## CI
 
 `.github/workflows/ci.yml`: every push to `main` builds both installers and smoke-tests them: the .dmg is mounted, the app copied out and
 launched (screenshot `installed-macos-arm64.png`); the .msi is installed silently with `msiexec /qn`, the installed
 `pwcli --info` and app launch are run (screenshot), then it is uninstalled and the removal checked. Pushing a tag
-`v*` runs the same jobs plus `release`, which drafts a GitHub release with the installers attached. Publishing the
-draft is a manual step.
+`v*` runs the same jobs plus `release`, which publishes a GitHub release with the two installers attached.
+
+## Making a release
+
+1. Bump `project(PlaneWorld VERSION x.y.z)` in `CMakeLists.txt`, commit and push to `main`.
+2. Tag that commit and push the tag: `git tag vx.y.z && git push origin vx.y.z`. CI stops at once if the tag and
+   `CMakeLists.txt` disagree.
+3. About an hour later the release is live and the README's download links point at it. If a job fails, delete the tag
+   (`git push origin :vx.y.z && git tag -d vx.y.z`), fix, and tag again.
 
 ## macOS: Developer ID signing + notarization (needs your Apple ID)
 
-Ad-hoc signed apps open on the build Mac, but on other Macs Gatekeeper blocks a downloaded copy (right-click > Open, or
+Ad-hoc signed apps open on the build Mac, but on other Macs Gatekeeper blocks a downloaded copy (System Settings > Privacy & Security > Open Anyway, or
 `xattr -dr com.apple.quarantine "/Applications/Plane World.app"`). To ship to others:
 
 1. Join the Apple Developer Program; in Xcode or developer.apple.com create a **Developer ID Application** certificate

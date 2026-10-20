@@ -31,12 +31,19 @@ if(WIN32)
   find_program(PW_WINDEPLOYQT windeployqt HINTS ${_qtbin})
   if(PW_WINDEPLOYQT)
     # Self-contained folder: ${CMAKE_BINARY_DIR}/deploy/Plane World.exe + Qt runtime (no build intermediates).
+    # The MSVC runtime DLLs go next to the exe (app-local), so a PC without the VC++ Redistributable still starts it;
+    # windeployqt would only copy vc_redist.x64.exe, which nothing runs.
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+    include(InstallRequiredSystemLibraries)
+    if(MSVC AND NOT CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+      message(WARNING "MSVC runtime DLLs not found: the deploy folder will need the VC++ Redistributable installed")
+    endif()
     set(_dep ${CMAKE_BINARY_DIR}/deploy)
     add_custom_target(pwapp_deploy
       COMMAND ${CMAKE_COMMAND} -E rm -rf ${_dep}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${_dep}
-      COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:pwapp> ${_dep}/
-      COMMAND ${PW_WINDEPLOYQT} --qmldir ${CMAKE_CURRENT_SOURCE_DIR}/qml --no-translations "${_dep}/$<TARGET_FILE_NAME:pwapp>"
+      COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:pwapp> ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} ${_dep}/
+      COMMAND ${PW_WINDEPLOYQT} --qmldir ${CMAKE_CURRENT_SOURCE_DIR}/qml --no-translations --no-compiler-runtime "${_dep}/$<TARGET_FILE_NAME:pwapp>"
       DEPENDS pwapp VERBATIM)
   endif()
 elseif(APPLE)

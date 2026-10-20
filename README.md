@@ -1,4 +1,34 @@
-# Plane World
+<div align="center">
+
+<h1>Plane World</h1>
+
+<p><b>Build aircraft from parts. Fly them over any terrain. Evolve their autopilots.</b></p>
+
+<a href="https://github.com/SmellingARose/plane-world/releases/latest/download/PlaneWorld-macOS.dmg"><img src="docs/download/macos.svg" alt="Download for macOS" height="56"></a>&nbsp;&nbsp;<a href="https://github.com/SmellingARose/plane-world/releases/latest/download/PlaneWorld-Windows.msi"><img src="docs/download/windows.svg" alt="Download for Windows" height="56"></a>
+
+<sub>One download, nothing else to install · <a href="https://github.com/SmellingARose/plane-world/releases">All releases</a></sub>
+
+<br>
+
+<img src="docs/screens/fly.jpg" alt="Flying a craft in Plane World" width="100%">
+
+</div>
+
+<details>
+<summary><b>First launch shows a warning?</b> That is expected, here is the one-time fix.</summary>
+<br>
+
+The app is not signed by a paid developer account, so the first time:
+
+- **Mac:** open the .dmg, drag **Plane World** to Applications and open it. When macOS says it cannot check the app,
+  open **System Settings → Privacy & Security**, scroll down, press **Open Anyway** and confirm. After that it opens
+  normally. Intel Macs are not supported.
+- **Windows:** run the .msi. If SmartScreen says "Windows protected your PC", press **More info**, then **Run anyway**.
+  Plane World is then in the Start menu.
+
+</details>
+
+## About
 
 A flight and vehicle physics sandbox: build crafts from parts or CAD, fly them over procedural or real terrain, and
 evolve controllers and designs. Three kinds of aero, kept distinct:
@@ -54,6 +84,8 @@ controller or design, then fly the result.
 Any Direct3D 12 GPU (feature level 11_0+; NVIDIA, AMD, Intel) or Apple silicon GPU. Per-vendor tuning lives in `pwgpu`.
 
 ## Build and run
+
+Only needed to work on the code: the download buttons at the top are the same app, ready to run.
 
 Requirements: CMake 3.24+, Ninja, Qt 6.8, and the [Slang](https://github.com/shader-slang/slang/releases) release
 unpacked to `~/.local/slang-<version>` or pointed at by `SLANG_DIR`.

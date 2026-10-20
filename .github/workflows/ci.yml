@@ -1,4 +1,5 @@
-# CI: macOS arm64 (Metal) + Windows x64 (MSVC, Direct3D 12 / WARP); tag pushes draft a release.
+# CI: macOS arm64 (Metal) + Windows x64 (MSVC, Direct3D 12 / WARP). A tag v<version> (matching project(VERSION) in
+# CMakeLists.txt) also publishes a GitHub release with the two installers.
 name: ci
 on:
   push:
@@ -30,6 +31,12 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      - name: Tag matches the version in CMakeLists.txt
+        if: github.ref_type == 'tag'
+        run: |
+          V=$(sed -nE 's/^project\(PlaneWorld VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)
+          [[ "v$V" == "$GITHUB_REF_NAME" ]] || { echo "::error::tag $GITHUB_REF_NAME, but CMakeLists.txt says $V: bump project(VERSION) first"; exit 1; }
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -107,7 +114,11 @@ jobs:
         run: build/src/cli/pwcli --bench all --reps 1 --json build/bench.json
 
       - name: Deploy app
-        run: cmake --build build --target pwapp_deploy
+        run: |
+          cmake --build build --target pwapp_deploy
+          if [[ "$RUNNER_OS" == "Windows" ]]; then   # app-local MSVC runtime: PCs without the VC++ Redistributable
+            ls build/deploy/vcruntime140.dll build/deploy/msvcp140.dll
+          fi
 
       - name: App launch smoke (screenshot)
         env:
@@ -196,10 +207,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artefacts
-      - name: Draft GitHub release with installers
+      - name: Publish the GitHub release with the installers
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --draft --generate-notes \
+          gh release create "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --generate-notes \
             --title "Plane World ${GITHUB_REF_NAME}" \
-            artefacts/*/*.dmg artefacts/*/*.msi artefacts/*/PlaneWorld-*.zip
+            artefacts/*/PlaneWorld-macOS.dmg artefacts/*/PlaneWorld-Windows.msi

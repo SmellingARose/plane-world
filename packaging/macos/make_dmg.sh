@@ -38,7 +38,8 @@ if otool -L "$APP/Contents/MacOS/Plane World" | grep -E '/opt/homebrew|/usr/loca
   echo "error: bundle still links a non-bundled Qt"; exit 1
 fi
 
-DMG="$OUT/PlaneWorld-$VERSION-macos-arm64.dmg"
+# A fixed name, so the README can link to releases/latest/download/PlaneWorld-macOS.dmg (the version is in the volume name)
+DMG="$OUT/PlaneWorld-macOS.dmg"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
 hdiutil create -volname "Plane World $VERSION" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG" >/dev/null

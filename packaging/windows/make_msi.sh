@@ -8,7 +8,7 @@ VERSION=$(grep -E '^CMAKE_PROJECT_VERSION:' "$BUILD/CMakeCache.txt" | cut -d= -f
 [[ -f "$BUILD/deploy/Plane World.exe" ]] || { echo "run: cmake --build $BUILD --target pwapp_deploy"; exit 1; }
 cp "$BUILD/src/cli/pwcli.exe" "$BUILD/deploy/"
 mkdir -p "$OUT"
-MSI="$OUT/PlaneWorld-$VERSION-windows-x64.msi"
+MSI="$OUT/PlaneWorld-Windows.msi"   # a fixed name, so the README can link to releases/latest/download/PlaneWorld-Windows.msi
 wix build -arch x64 -d Version="$VERSION" -bindpath deploy="$(cygpath -aw "$BUILD/deploy")" -o "$(cygpath -aw "$MSI")" "$(cygpath -aw "$HERE/PlaneWorld.wxs")"
 SIZE=$(stat -c %s "$MSI")
 ls -la "$MSI"
