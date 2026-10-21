@@ -733,7 +733,7 @@ void EvolveModel::rebuildDerived() {
 }
 
 void EvolveModel::pause() { if (m_run) { m_run->stop(); setStatus(tr("Pausing after this generation…")); } }
-void EvolveModel::resume() { if (m_run && !running()) { m_state = evo::RunState::Running; m_run->start(); emit runChanged(); } }
+void EvolveModel::resume() { if (m_run && !running()) { m_run->setGenerationLimit(m_doc.generations); m_state = evo::RunState::Running; m_run->start(); emit runChanged(); } }
 void EvolveModel::stop() { if (m_run) { m_run->stop(); setStatus(tr("Stopping after this generation; a checkpoint is written…")); } }
 void EvolveModel::newRun() {
     if (m_run) { m_run->onGeneration = nullptr; m_run->onStateChange = nullptr; m_run->stop(); m_run->join(); m_run.reset(); }

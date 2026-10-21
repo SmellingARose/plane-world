@@ -198,7 +198,7 @@ void EvolutionRun::start() {
     if (thread_.joinable()) thread_.join();
     if (onStateChange) onStateChange(RunState::Running, {});
     thread_ = std::thread([this] {
-        int limit = ctx_->experiment.generations;
+        const int limit = generationLimit_ >= 0 ? generationLimit_.load() : ctx_->experiment.generations;
         try {
             while (!stopFlag_ && (limit <= 0 || algorithm_->generation() < limit)) runGeneration();
             if (!directory.empty()) checkpoint(directory);

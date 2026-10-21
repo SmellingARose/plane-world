@@ -88,6 +88,8 @@ public:
     GenerationRecord runGeneration();
     /// Background loop until experiment.generations (0 = forever) or stop(). join() waits for it.
     void start();
+    /// Overrides experiment.generations for later start() calls (resume after editing the count); < 0 = use the experiment's.
+    void setGenerationLimit(int n) { generationLimit_ = n; }
     void stop();
     void join();
 
@@ -106,6 +108,7 @@ private:
     void setState(RunState s, const std::string& err = {});
     std::shared_ptr<ExperimentContext> ctxMut_;
     std::shared_ptr<const ExperimentContext> ctx_;
+    std::atomic<int> generationLimit_{-1};
     std::unique_ptr<ScriptRuntime> orchestrator_;
     std::unique_ptr<SimEvaluator> evaluator_;
     std::unique_ptr<Algorithm> algorithm_;
