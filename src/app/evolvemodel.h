@@ -71,6 +71,8 @@ class EvolveModel : public QObject, public ReplayProvider {
     Q_PROPERTY(double replaySpeed MEMBER m_replaySpeed NOTIFY replayChanged)
     Q_PROPERTY(bool replayPlaying READ replayPlaying WRITE setReplayPlaying NOTIFY replayChanged)
     Q_PROPERTY(QVariantList replayOutputs READ replayOutputs NOTIFY replayTimeChanged)
+    // flight readout for the replay HUD: { t, alt, vs, speed, hspeed, tilt, dist } (m, m/s, deg) at replayTime
+    Q_PROPERTY(QVariantMap replayTelemetry READ replayTelemetry NOTIFY replayTimeChanged)
 public:
     explicit EvolveModel(QObject* parent);   // no default: QML must use create() (one shared instance)
     ~EvolveModel() override;
@@ -119,6 +121,7 @@ public:
     bool replayPlaying() const { return m_playing; }
     void setReplayPlaying(bool p) { if (p != m_playing) { m_playing = p; emit replayChanged(); } }
     QVariantList replayOutputs() const;
+    QVariantMap replayTelemetry() const;
 
     // document
     Q_INVOKABLE void set(const QString& path, const QVariant& value);
@@ -159,7 +162,7 @@ public:
     Q_INVOKABLE void resume();
     Q_INVOKABLE void stop();
     Q_INVOKABLE void newRun();
-    Q_INVOKABLE void resumeDir(const QString& dir);
+    Q_INVOKABLE void resumeDir(const QString& dir, bool train = true);   // train=false: load the run for review only
     // replay / export
     Q_INVOKABLE void replay(const QString& candidate);   // "g<gen>" | "cell<k>" | "best"
     Q_INVOKABLE void stopReplay();
@@ -196,7 +199,7 @@ private:
     void setStatus(const QString& s) { if (s != m_status) { m_status = s; emit statusChanged(); } }
     void refreshIO();
     void refreshRunDirs();
-    void attach(std::unique_ptr<pw::evo::EvolutionRun> run, bool fresh);
+    void attach(std::unique_ptr<pw::evo::EvolutionRun> run, bool fresh, bool start = true);
     void drain();
     void rebuildDerived();
     void frame();

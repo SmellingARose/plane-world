@@ -1,0 +1,917 @@
+{
+ "version": 1,
+ "name": "Landing pad",
+ "terrain": {
+  "kind": "flat",
+  "params": {}
+ },
+ "water": {
+  "oceanEnabled": false,
+  "seaLevel": -100,
+  "windSpeed": 3,
+  "windDirectionDeg": 0,
+  "fetchKm": 10,
+  "lakes": [],
+  "rivers": [],
+  "fluidZones": []
+ },
+ "environment": {
+  "timeOfDayHours": 16.3,
+  "sunAzimuthDeg": 250,
+  "windSpeed": 2,
+  "windDirectionDeg": 270,
+  "turbidity": 2.5,
+  "fogDensity": 1
+ },
+ "vegetation": {},
+ "objects": [
+  {
+   "id": "pad-ring",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     0,
+     0.015,
+     0
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    22,
+    0.03,
+    22
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     0.85,
+     0.62,
+     0.06
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 0.25,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     0,
+     0.03,
+     0
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    20,
+    0.03,
+    20
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     0.16,
+     0.17,
+     0.19
+    ],
+    "roughness": 0.9,
+    "metallic": 0,
+    "emissive": 0,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-inner-ring",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     0,
+     0.045,
+     0
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    8.6,
+    0.02,
+    8.6
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     0.9,
+     0.9,
+     0.88
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 0.15,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-inner",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     0,
+     0.055,
+     0
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    7.8,
+    0.02,
+    7.8
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     0.16,
+     0.17,
+     0.19
+    ],
+    "roughness": 0.9,
+    "metallic": 0,
+    "emissive": 0,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-x0",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     0,
+     0.07,
+     0
+    ],
+    "rotation": [
+     0,
+     0.3826834323650898,
+     0,
+     0.9238795325112867
+    ]
+   },
+   "scale": [
+    6.0,
+    0.02,
+    0.7
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "box",
+    "color": [
+     0.92,
+     0.92,
+     0.9
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 0.2,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-x1",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     0,
+     0.07,
+     0
+    ],
+    "rotation": [
+     0,
+     -0.3826834323650898,
+     0,
+     0.9238795325112867
+    ]
+   },
+   "scale": [
+    6.0,
+    0.02,
+    0.7
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "box",
+    "color": [
+     0.92,
+     0.92,
+     0.9
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 0.2,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light0",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     11.6,
+     0.12,
+     0.0
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light1",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     10.717002577130925,
+     0.12,
+     4.439127815435041
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light2",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     8.202438661763951,
+     0.12,
+     8.202438661763951
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light3",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     4.439127815435042,
+     0.12,
+     10.717002577130925
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light4",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     7.102951435054649e-16,
+     0.12,
+     11.6
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light5",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -4.43912781543504,
+     0.12,
+     10.717002577130925
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light6",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -8.202438661763951,
+     0.12,
+     8.202438661763951
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light7",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -10.717002577130925,
+     0.12,
+     4.439127815435042
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light8",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -11.6,
+     0.12,
+     1.4205902870109297e-15
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light9",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -10.717002577130927,
+     0.12,
+     -4.43912781543504
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light10",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -8.202438661763953,
+     0.12,
+     -8.202438661763951
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light11",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -4.4391278154350475,
+     0.12,
+     -10.717002577130923
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light12",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -2.1308854305163945e-15,
+     0.12,
+     -11.6
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light13",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     4.439127815435044,
+     0.12,
+     -10.717002577130925
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light14",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     8.20243866176395,
+     0.12,
+     -8.202438661763953
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "pad-light15",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     10.717002577130923,
+     0.12,
+     -4.439127815435048
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    0.35,
+    0.24,
+    0.35
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "cylinder",
+    "color": [
+     1.0,
+     0.35,
+     0.12
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 6,
+    "collide": false
+   }
+  },
+  {
+   "id": "tower",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -26,
+     15,
+     8
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    3,
+    30,
+    3
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "box",
+    "color": [
+     0.55,
+     0.57,
+     0.6
+    ],
+    "roughness": 0.5,
+    "metallic": 0.6,
+    "emissive": 0,
+    "collide": false
+   }
+  },
+  {
+   "id": "tower-top",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -26,
+     30.6,
+     8
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    4,
+    1.2,
+    4
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "box",
+    "color": [
+     0.85,
+     0.3,
+     0.15
+    ],
+    "roughness": 0.8,
+    "metallic": 0,
+    "emissive": 0.3,
+    "collide": false
+   }
+  },
+  {
+   "id": "tower-arm",
+   "kind": "prop",
+   "transform": {
+    "position": [
+     -21.5,
+     24,
+     8
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "scale": [
+    6,
+    0.8,
+    0.8
+   ],
+   "breakable": false,
+   "params": {
+    "shape": "box",
+    "color": [
+     0.55,
+     0.57,
+     0.6
+    ],
+    "roughness": 0.5,
+    "metallic": 0.6,
+    "emissive": 0,
+    "collide": false
+   }
+  }
+ ],
+ "spawn": {
+  "position": [
+   0,
+   2,
+   0
+  ],
+  "rotation": [
+   0,
+   0,
+   0,
+   1
+  ]
+ }
+}

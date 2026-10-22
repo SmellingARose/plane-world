@@ -617,14 +617,14 @@ void EvolveModel::start() {
     });
 }
 
-void EvolveModel::resumeDir(const QString& dir) {
+void EvolveModel::resumeDir(const QString& dir, bool train) {
     if (running() || m_preparing) return;
     m_preparing = true; m_runError.clear(); emit runChanged();
     setStatus(tr("Resuming %1…").arg(QFileInfo(dir).fileName()));
     if (m_prep.joinable()) m_prep.join();
     QPointer<EvolveModel> self(this);
     const std::string d = dir.toStdString(), path = m_path.toStdString();
-    m_prep = std::thread([self, d, path] {
+    m_prep = std::thread([self, d, path, train] {
         std::unique_ptr<evo::EvolutionRun> run; QString err;
         try {
             auto cp = json::parseFile(d + "/run.json");
@@ -632,17 +632,17 @@ void EvolveModel::resumeDir(const QString& dir) {
             run = evo::EvolutionRun::resume(d, evo::EvoWorld::resolveAll(e, path, evo::EvoWorld::flat()));
         } catch (const std::exception& x) { err = QString::fromUtf8(x.what()); }
         auto* raw = run.release();
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [self, raw, err] {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [self, raw, err, train] {
             std::unique_ptr<evo::EvolutionRun> r(raw);
             if (!self) return;
             self->m_preparing = false;
             if (!r) { self->m_runError = err; emit self->runChanged(); self->setStatus(tr("Resume failed")); return; }
-            self->attach(std::move(r), false);
+            self->attach(std::move(r), false, train);
         }, Qt::QueuedConnection);
     });
 }
 
-void EvolveModel::attach(std::unique_ptr<evo::EvolutionRun> run, bool fresh) {
+void EvolveModel::attach(std::unique_ptr<evo::EvolutionRun> run, bool fresh, bool start) {
     if (m_run) { m_run->onGeneration = nullptr; m_run->onStateChange = nullptr; m_run->stop(); m_run->join(); }
     m_run = std::move(run);
     m_box = std::make_shared<Mailbox>();
@@ -679,6 +679,12 @@ void EvolveModel::attach(std::unique_ptr<evo::EvolutionRun> run, bool fresh) {
             if (st != evo::RunState::Running) self->refreshRunDirs();
         }, Qt::QueuedConnection);
     };
+    if (!start) {   // review only: history, hall of fame and replays, no training
+        m_state = evo::RunState::Finished;
+        emit runChanged();
+        setStatus(tr("Loaded %1 (%2 generations)").arg(runID()).arg(m_history.size()));
+        return;
+    }
     m_state = evo::RunState::Running;
     m_run->start();
     emit runChanged();
@@ -841,6 +847,38 @@ QVariantList EvolveModel::replayOutputs() const {
         QVariantMap m; m["name"] = QString::fromStdString(m_traj->outputNames[i]); m["value"] = f->outputs[i]; l << m;
     }
     return l;
+}
+
+QVariantMap EvolveModel::replayTelemetry() const {
+    QVariantMap m;
+    if (!m_traj || m_traj->frames.empty()) return m;
+    const double T = replayDuration(), t = m_replayTime, h = 0.05;
+    auto f = m_traj->sample(t);
+    auto a = m_traj->sample(std::max(0.0, t - h)), b = m_traj->sample(std::min(T, t + h));
+    if (!f || !a || !b) return m;
+    const auto& p = f->origin.position;
+    const double span = std::min(T, t + h) - std::max(0.0, t - h);
+    Vec3d v{};
+    if (span > 1e-6) v = (b->origin.position - a->origin.position) * (1.0 / span);
+    // tilt: angle between the craft's up axis and world up
+    const Vec3d up = f->origin.rotation.act(Vec3d{0, 1, 0});
+    const double tilt = std::acos(std::clamp(up.y / std::max(1e-9, length(up)), -1.0, 1.0)) * 180 / 3.141592653589793;
+    m["t"] = t;
+    // height of the landing gear: after a landing, the craft's resting height is the zero (legs on the pad)
+    double gear = 0;
+    if (m_traj->doneReason == "script") {
+        const auto& last = m_traj->frames.back().origin.position;
+        gear = std::min(0.0, last.y - WorldModel::instance()->heightAt(last.x, last.z));
+    }
+    m["alt"] = std::max(0.0, p.y - WorldModel::instance()->heightAt(p.x, p.z) - gear);
+    m["vs"] = v.y;
+    m["speed"] = length(v);
+    m["hspeed"] = std::sqrt(v.x * v.x + v.z * v.z);
+    m["tilt"] = tilt;
+    m["dist"] = std::sqrt(p.x * p.x + p.z * p.z);   // from the world origin (the pad in landing worlds)
+    m["ended"] = t >= T - 1e-6;
+    m["doneReason"] = QString::fromStdString(m_traj->doneReason);
+    return m;
 }
 
 const craft::CraftDocument* EvolveModel::replayCraft(uint64_t& version) const {

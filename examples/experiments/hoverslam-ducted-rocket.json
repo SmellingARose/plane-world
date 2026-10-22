@@ -1,0 +1,87 @@
+{
+ "algorithm": {
+  "kind": "cmaes",
+  "values": {
+   "sigma0": 0.3
+  }
+ },
+ "checkpointEvery": 10,
+ "controller": {
+  "hz": 100,
+  "mode": "script"
+ },
+ "crafts": [
+  {
+   "path": "../crafts/ducted-rocket-gridfins.json"
+  }
+ ],
+ "descriptorAxes": [],
+ "episode": {
+  "aggregate": "mean",
+  "commonRandomNumbers": true,
+  "crashSpeed": 6,
+  "duration": 14,
+  "episodesPerCandidate": 4,
+  "physicsHz": 1000,
+  "spawn": {
+   "mode": "air",
+   "altitudeAGL": 60,
+   "jitterAltitude": 10,
+   "verticalSpeed": -15,
+   "jitterVerticalSpeed": 5,
+   "headingDeg": 0,
+   "jitterHeadingDeg": 0,
+   "jitterAttitudeDeg": 3,
+   "jitterPosition": 4,
+   "jitterSpeed": 0,
+   "speed": 0,
+   "position": [
+    0,
+    0,
+    0
+   ]
+  },
+  "stopOnCrash": true,
+  "wind": {
+   "directionMaxDeg": 360,
+   "directionMinDeg": 0,
+   "speedMax": 2,
+   "speedMin": 0,
+   "turbulence": 0.2
+  }
+ },
+ "generations": 60,
+ "genome": {
+  "preset": "script",
+  "design": []
+ },
+ "headless": {
+  "breakables": false,
+  "oceanWaves": false,
+  "terrain": true,
+  "vegetation": false,
+  "water": true
+ },
+ "name": "Ducted rocket - hoverslam landing (evolved suicide burn)",
+ "notes": "SpaceX-style suicide burn: dropped at 50-70 m AGL, already falling 10-20 m/s, a few metres off a pad. Craft: ducted rocket + 4 grid fins (passively stable in a tail-first fall). A JS landing controller (velocity-vs-altitude burn profile + vane attitude/position loops) whose 10 gains are evolved with CMA-ES. Reward: touchdown speed, tilt, pad distance, fuel (throttle-seconds); big crash penalty. The starting gains light the engine too late and crash.",
+ "population": 24,
+ "rewardTerms": [
+  "touchdown",
+  "upright",
+  "pad",
+  "fuel",
+  "crash"
+ ],
+ "scripts": {
+  "callBudgetMs": 5,
+  "language": "javascript",
+  "source": "// Hoverslam (suicide burn): the ducted rocket is dropped at 50-70 m AGL, already falling at 10-20 m/s, a few metres\n// off a landing pad at the world origin, in light gusty wind. It must light its fans as late as possible and touch down\n// upright, on the pad, at ~0 m/s, using as little energy (\"fuel\") as it can.\n// Outputs: Lift upper, Lift lower (fan throttles), Vane X / Vane Z (exhaust vanes; measured on the craft:\n//   +Vane X rolls the body negative (drifts +z), +Vane Z pitches it negative (drifts -x)).\n// Controller: a burn-profile landing law. The commanded descent rate is v(h) = -sqrt(2*A*(h - H0)) - VF; the engine\n// stays off until the craft's fall speed reaches that profile, then a velocity loop tracks it down to the pad. A big\n// A means a late, hard burn (little fuel, little margin); a small A means an early, gentle (expensive) one.\n// Craft: the ducted rocket plus four grid fins at the top (like Falcon 9): without them it tumbles in an unpowered fall.\n// The fans may idle at TI before the burn (more vane authority, costs fuel); evolution decides.\n// The vanes run an attitude PD loop whose lean set-point steers the craft over the pad. Evolution tunes the 10 gains.\n// The ducted rocket is electric, so \"fuel\" is the integral of mean fan throttle (throttle-seconds).\n// Terms (named reward points, all reported per generation):\n//   touchdown - vertical impact speed penalty (the headline: 0 = perfect)\n//   upright   - tilt at touchdown\n//   pad       - horizontal distance from the pad centre at touchdown\n//   fuel      - throttle-seconds burned\n//   crash     - one-off penalty: hard impact (> 2.5 m/s), tipped (> 15 deg), flew away, or never landed\nfunction terms() { return [\"touchdown\", \"upright\", \"pad\", \"fuel\", \"crash\"]; }\n\n// --- Controller genes (9). The starting values light the engine far too late (A = 22 m/s^2 of assumed braking, more\n// than the fans can give) and slam into the pad.\nfunction genome(base) {\n  const g = (name, lo, hi, init) => base.genes.push({ name: name, group: \"script\", min: lo, max: hi, initial: init, sigma: (hi - lo) / 10 });\n  g(\"A\", 3, 30, 22);          // braking the profile assumes (m/s^2): later ignition when larger\n  g(\"H0\", 0, 6, 0.5);         // profile reaches zero this far above the pad (m)\n  g(\"VF\", 0, 3, 0.3);         // final descent rate (m/s)\n  g(\"T0\", 0.2, 0.9, 0.5);     // feed-forward throttle while tracking\n  g(\"KV\", 0, 0.6, 0.1);       // throttle per m/s of descent-rate error\n  g(\"KA\", 0, 0.1, 0.02);      // vane per deg of attitude error\n  g(\"KR\", -0.02, 0.02, 0.0);  // vane per deg/s of body rate (sign left to evolution)\n  g(\"KP\", 0, 4, 0.5);         // lean (deg) per m off the pad\n  g(\"KD\", 0, 8, 1);           // lean (deg) per m/s of drift (braking)\n  g(\"TI\", 0, 0.3, 0.05);      // idle throttle before the burn: keeps the exhaust vanes working (costs fuel)\n  return base;\n}\n\nfunction init(ctx) { ctx.memory.burnAlt = -1; ctx.memory.fuel = 0; ctx.memory.alt0 = ctx.state.agl; }\n\n// tilt from the craft's attitude sensor (the tail-sitter's body frame: 0 = upright)\nfunction tiltDeg(ctx) { const p = ctx.in[\"att.pitch\"], r = ctx.in[\"att.roll\"]; return Math.min(Math.sqrt(p * p + r * r), 90); }\n\nfunction control(ctx) {\n  const G = ctx.genome, i = ctx.in, s = ctx.state;\n  const A = G.get(\"A\"), H0 = G.get(\"H0\"), VF = G.get(\"VF\");\n  const h = s.agl, vs = s.vy;\n  const vt = -Math.sqrt(2 * A * Math.max(h - H0, 0)) - VF;\n  const tilt = tiltDeg(ctx) * Math.PI / 180;\n  let thr = (G.get(\"T0\") + G.get(\"KV\") * (vt - vs)) / Math.max(Math.cos(tilt), 0.5);\n  const idle = G.get(\"TI\");\n  if (vs > vt + 0.5 && ctx.memory.burnAlt < 0) thr = idle;   // still above the profile: idle (vane authority only)\n  thr = clamp(thr, 0, 1);\n  if (ctx.memory.burnAlt < 0 && thr > idle + 0.05) ctx.memory.burnAlt = h;\n  ctx.out[\"Lift upper\"] = thr; ctx.out[\"Lift lower\"] = thr;\n  // steer over the pad: lean toward it, brake the drift\n  const L = 12, KP = G.get(\"KP\"), KD = G.get(\"KD\");\n  const pitchSp = clamp(-KP * s.x - KD * s.vx, -L, L);   // +pitch drifts +x\n  const rollSp = clamp(KP * s.z + KD * s.vz, -L, L);     // -roll drifts +z\n  const KA = G.get(\"KA\"), KR = G.get(\"KR\");\n  ctx.out[\"Vane Z\"] = clamp(KA * (i[\"att.pitch\"] - pitchSp) + KR * i[\"rate.pitch\"], -1, 1);\n  ctx.out[\"Vane X\"] = clamp(KA * (i[\"att.roll\"] - rollSp) + KR * i[\"rate.roll\"], -1, 1);\n}\n\nfunction reward(ctx) {\n  const o = ctx.out, thr = 0.5 * ((o[\"Lift upper\"] || 0) + (o[\"Lift lower\"] || 0));\n  ctx.memory.fuel += thr * ctx.dt;\n  return { fuel: -0.6 * thr * ctx.dt };\n}\n\nfunction landed(ctx) { return ctx.state.contact && ctx.t > 0.05; }\nfunction lost(ctx) { const s = ctx.state; return tiltDeg(ctx) > 80 || s.agl > ctx.memory.alt0 + 30; }\nfunction terminate(ctx) { return landed(ctx) || lost(ctx); }\n\nfunction fitness(ctx) {\n  const s = ctx.state, m = ctx.memory;\n  const pad = Math.sqrt(s.x * s.x + s.z * s.z);\n  const touched = ctx.doneReason === \"crash\" || landed(ctx);\n  if (!touched) {\n    // flew away, tipped over in the air, or still airborne at the end: worse than any touchdown\n    return { fitness: -150 - Math.min(s.agl, 100) + ctx.sum.fuel,\n             terms: { touchdown: -100, upright: 0, pad: 0, crash: -150, fuel: ctx.sum.fuel } };\n  }\n  const v = Math.max(s.impactSpeed, Math.abs(s.vy));\n  const tilt = tiltDeg(ctx);\n  const touchdown = -10 * Math.min(v, 30);\n  const upright = -1.0 * Math.min(tilt, 45);\n  const padT = -3 * Math.min(pad, 15);\n  const crash = (v > 2.5 || tilt > 15 || ctx.doneReason === \"crash\") ? -40 : 0;\n  return { fitness: 100 + touchdown + upright + padT + ctx.sum.fuel + crash,\n           terms: { touchdown: touchdown, upright: upright, pad: padT, fuel: ctx.sum.fuel, crash: crash } };\n}\n\nfunction descriptor(ctx) { return [ctx.memory.burnAlt, ctx.memory.fuel]; }\n"
+ },
+ "seed": 1,
+ "version": 1,
+ "workers": 0,
+ "world": {
+  "source": "file",
+  "path": "../worlds/landing-pad.json"
+ }
+}

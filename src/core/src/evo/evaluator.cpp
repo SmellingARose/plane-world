@@ -435,6 +435,10 @@ EpisodeResult EvalWorker::runEpisode(const Genome& g, int generation, int candid
         p.y = ground + smax(1, s.altitudeAGL);
         double v = smax(0, s.speed + (s.jitterSpeed > 0 ? rng.uniform(-1, 1) * s.jitterSpeed : 0));
         v0 = q.act({1, 0, 0}) * v;
+        // drop / landing starts: altitude jitter and a world-vertical speed. The RNG is only drawn when the
+        // options are set, so existing experiments keep their exact episode streams.
+        if (s.jitterAltitude > 0) p.y = ground + smax(1, s.altitudeAGL + rng.uniform(-1, 1) * s.jitterAltitude);
+        v0.y += s.verticalSpeed + (s.jitterVerticalSpeed > 0 ? rng.uniform(-1, 1) * s.jitterVerticalSpeed : 0);
     } else if (s.mode == "custom") {
         v0 = q.act({1, 0, 0}) * s.speed;
     } else {

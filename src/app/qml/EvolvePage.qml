@@ -100,6 +100,41 @@ SplitView {
             }
         }
 
+        // flight telemetry (altitude, vertical speed, tilt, distance) of the replayed episode
+        Rectangle {
+            id: telem
+            readonly property var tm: ev.replayTelemetry
+            anchors { left: parent.left; top: parent.top; margins: Theme.s3 }
+            visible: ev.replayActive && tm.alt !== undefined
+            radius: Theme.radius; color: Theme.hud
+            width: 236; height: telCol.implicitHeight + Theme.s3 * 2
+            Column {
+                id: telCol
+                anchors { left: parent.left; right: parent.right; top: parent.top; margins: Theme.s3 }
+                spacing: 2
+                Text { text: qsTr("FLIGHT  ·  T+%1 s").arg(telem.tm.t !== undefined ? telem.tm.t.toFixed(1) : "0.0"); color: Theme.hudFaint; font.pixelSize: Theme.micro; font.letterSpacing: Theme.sectionTracking }
+                Repeater {
+                    model: [
+                        { k: qsTr("ALT"), v: telem.tm.alt, d: 1, u: "m", warn: false },
+                        { k: qsTr("V/S"), v: telem.tm.vs, d: 1, u: "m/s", warn: telem.tm.alt < 3 && telem.tm.vs < -3 },
+                        { k: qsTr("TILT"), v: telem.tm.tilt, d: 1, u: "°", warn: telem.tm.tilt > 20 },
+                        { k: qsTr("PAD"), v: telem.tm.dist, d: 1, u: "m", warn: false }
+                    ]
+                    Row {
+                        required property var modelData
+                        spacing: Theme.s2
+                        Text { width: 52; text: modelData.k; color: Theme.hudMuted; font.family: Theme.mono; font.pixelSize: Theme.body; anchors.baseline: val.baseline }
+                        Text { id: val; width: 110; horizontalAlignment: Text.AlignRight
+                            text: modelData.v !== undefined ? (modelData.v >= 0 && modelData.k === qsTr("V/S") ? "+" : "") + modelData.v.toFixed(modelData.d) : "–"
+                            color: modelData.warn ? "#ff7a6b" : Theme.hudText; font.family: Theme.mono; font.pixelSize: Theme.display; font.weight: Font.DemiBold }
+                        Text { text: modelData.u; color: Theme.hudMuted; font.family: Theme.mono; font.pixelSize: Theme.caption; anchors.baseline: val.baseline }
+                    }
+                }
+                Text { visible: telem.tm.ended === true; text: telem.tm.doneReason === "crash" ? qsTr("CRASHED") : telem.tm.doneReason === "script" ? qsTr("TOUCHDOWN") : qsTr("END: %1").arg(telem.tm.doneReason || "time")
+                    color: telem.tm.doneReason === "crash" ? "#ff7a6b" : "#7be08a"; font.pixelSize: Theme.title; font.weight: Font.Bold; font.letterSpacing: Theme.sectionTracking }
+            }
+        }
+
         // live outputs (what the controller is doing right now)
         Rectangle {
             anchors { right: parent.right; top: parent.top; margins: Theme.s3 }
