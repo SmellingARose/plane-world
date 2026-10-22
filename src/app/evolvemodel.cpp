@@ -864,7 +864,13 @@ QVariantMap EvolveModel::replayTelemetry() const {
     const Vec3d up = f->origin.rotation.act(Vec3d{0, 1, 0});
     const double tilt = std::acos(std::clamp(up.y / std::max(1e-9, length(up)), -1.0, 1.0)) * 180 / 3.141592653589793;
     m["t"] = t;
-    m["alt"] = p.y - WorldModel::instance()->heightAt(p.x, p.z);
+    // height of the landing gear: after a landing, the craft's resting height is the zero (legs on the pad)
+    double gear = 0;
+    if (m_traj->doneReason == "script") {
+        const auto& last = m_traj->frames.back().origin.position;
+        gear = std::min(0.0, last.y - WorldModel::instance()->heightAt(last.x, last.z));
+    }
+    m["alt"] = std::max(0.0, p.y - WorldModel::instance()->heightAt(p.x, p.z) - gear);
     m["vs"] = v.y;
     m["speed"] = length(v);
     m["hspeed"] = std::sqrt(v.x * v.x + v.z * v.z);
