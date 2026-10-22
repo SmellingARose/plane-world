@@ -1031,7 +1031,7 @@ WorldDocument dubai() {
     k.cone(980, 2300, 355, 30, 40, pal::steel, true, 0.3, 0.6);
     // Downtown around the Burj: mid-rise and towers
     gridBlocks(k, Rect{-900, 800, -900, 900}, 120, 120, 24, pal::plaza, 2,
-        [&](const Rect& b) { return b.overlaps({-200, 320, -300, 120}); },
+        [&](const Rect& b) { return b.overlaps({-200, 320, -300, 120}) || b.overlaps({-90, 90, -790, -610}); },   // Burj park, spawn plaza
         [&](const Rect& lot) {
             const double r = k.rng.next();
             tower(k, lot, 30 + 220 * r * r, kGlass, {pal::whiteStone, cpal::sand, pal::limestone, cpal::stuccoWhite});
