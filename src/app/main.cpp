@@ -1,10 +1,9 @@
 // Plane World (Qt 6 Quick). Native Qt Quick Controls style per OS; the 3D viewport is our own Metal / D3D12
 // renderer sharing Qt's device (GpuViewport).
 //   pwapp [--quit-after <s>] [--screenshot <file.png>] [--tab build|fly|world|evolve] [--color-scheme dark|light]
-//         [--size <w>x<h>] [--command "<palette entry>" | "wait <s>"]...   (commands run 1 s after launch, in order)
+//         [--craft <craft.json>] [--size <w>x<h>] [--command "<palette entry>" | "wait <s>" | "open <craft.json>"]...   (commands run 1 s after launch, in order)
 //         [--open-run <dir> [--replay g<gen>|best] [--replay-speed <x>]]
-//         scripted commands: "evolve-resume <run dir>", "evolve-load <run dir>" (no training), "evolve-replay best|g<N>", "evolve-speed <x>", "world-open <file>"
-#include <QUrl>
+//         scripted commands: "evolve-resume <run dir>", "evolve-load <run dir>" (no training), "evolve-replay best|g<N>", "evolve-speed <x>", "world-open <file>", "autopilot on"
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
@@ -13,7 +12,9 @@
 #include <QQuickWindow>
 #include <QTimer>
 #include <QDir>
+#include <QFileInfo>
 #include <QImage>
+#include <QUrl>
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -55,6 +56,9 @@ int main(int argc, char** argv) {
     auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
     if (win && AppController::instance()) AppController::instance()->attachWindow(win);   // FLY physics on the frame clock
 
+    // --craft <file.json>: import a craft file at startup (as Open craft... does); its outputs show up in BUILD / EVOLVE
+    if (const QString cf = value("--craft"); !cf.isEmpty() && AppController::instance())
+        AppController::instance()->openFile(QUrl::fromLocalFile(QFileInfo(cf).absoluteFilePath()));
     // --experiment <file.json>: open an experiment in EVOLVE at startup
     if (const QString ex = value("--experiment"); !ex.isEmpty()) EvolveModel::instance()->open(ex);
     // --open-run <dir> [--replay g<gen>|best] [--replay-speed x]: load a finished run (e.g. from pwcli --train --out)
@@ -111,6 +115,8 @@ int main(int argc, char** argv) {
             for (; i < commands.size(); ++i) {
                 const QString& c = commands[i];
                 if (c.startsWith("wait ")) { QTimer::singleShot(int(c.mid(5).toDouble() * 1000), win, [run, i] { (*run)(i + 1); }); return; }
+                // "open <craft.json>": import a craft file as Open craft… does (scripted demos / screenshots)
+                if (c.startsWith("open ")) { if (AppController::instance()) AppController::instance()->openFile(QUrl::fromLocalFile(QFileInfo(c.mid(5)).absoluteFilePath())); continue; }
                 // scripted EVOLVE review / recording steps (not palette entries)
                 if (c.startsWith("evolve-resume ")) { EvolveModel::instance()->resumeDir(c.mid(14)); continue; }
                 if (c.startsWith("evolve-load ")) { EvolveModel::instance()->resumeDir(c.mid(12), false); continue; }
@@ -120,8 +126,7 @@ int main(int argc, char** argv) {
                 }
                 if (c.startsWith("evolve-speed ")) { EvolveModel::instance()->setProperty("replaySpeed", c.mid(13).toDouble()); continue; }
                 if (c.startsWith("world-open ")) { WorldModel::instance()->open(c.mid(11)); continue; }
-                // "open <craft.json>" loads a craft into FLY; "autopilot on" (re)starts the evolved autopilot from the spawn
-                if (c.startsWith("open ") && AppController::instance()) { AppController::instance()->openFile(QUrl::fromLocalFile(c.mid(5))); continue; }
+                // "autopilot on" (re)starts the evolved autopilot from the spawn
                 if (c == "autopilot on" && AppController::instance()) { AppController::instance()->setAutopilot(false); AppController::instance()->setAutopilot(true); continue; }
                 QVariant ok;
                 QMetaObject::invokeMethod(win, "runCommand", Q_RETURN_ARG(QVariant, ok), Q_ARG(QVariant, c));

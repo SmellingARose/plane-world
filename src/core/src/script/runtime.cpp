@@ -327,7 +327,8 @@ public:
         call("__bind", {detail::Arg::f64(p(f.inputs), f.inputs.size()), detail::Arg::f64(p(f.outputs), f.outputs.size()),
                         detail::Arg::f64(p(f.terms), f.terms.size()), detail::Arg::f64(p(f.termSums), f.termSums.size()),
                         detail::Arg::str(jsonStringArray(f.inputNames)), detail::Arg::str(jsonStringArray(f.outputNames)),
-                        detail::Arg::str(jsonStringArray(f.termNames)), detail::Arg::str(jsonStringArray(CraftStateSnapshot::fieldNames()))},
+                        detail::Arg::str(jsonStringArray(f.termNames)), detail::Arg::str(jsonStringArray(CraftStateSnapshot::fieldNames())),
+                        detail::Arg::str(f.craftJSON.empty() ? std::string("{}") : f.craftJSON)},
              "init", kLongBudget);
         boundFrame_ = &f; boundIn_ = f.inputs.data(); boundOut_ = f.outputs.data(); boundT_ = f.terms.data(); boundSum_ = f.termSums.data();
     }

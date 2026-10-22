@@ -63,3 +63,14 @@ for both engines, and that QuickJS's own heap gets none either).
 preset documents are in `data/experiments/`. `pwcli --train` accepts `--generations --population --workers --seed
 --out --resume --current-as-flat --aero --script-engine` (`src/cli/train_cli.cpp:114-179`) and hands
 the request to the evolution core (`src/core/src/evo/train.cpp`).
+
+## Any craft: `--craft` and `ctx.craft`
+
+`pwcli --train exp.json --craft my-craft.json` imports any craft file and trains the same experiment on it; it prints
+the craft's output wiring first. Every script sees that wiring as `ctx.craft`:
+`{ mass, rotors: [{ output, x, y, z, spin, thrust }], outputs: [{ name, kind }] }` (rotor positions about the centre
+of mass in body axes, x forward / y up / z right; spin +1 / -1; rated static thrust in N). A geometry-aware controller
+can build its own motor mixer from it, so one experiment flies a quad, a hexacopter or a lopsided pentacopter without
+naming a single motor: see `examples/experiments/any-multirotor.json` with `examples/crafts/heavy-hex.json` and
+`examples/crafts/lopsided-penta.json`. In the app, `--craft <file>` (or the startup command `open <file>`) imports a
+craft, and EVOLVE > Set up > Sensors -> controls (palette: "EVOLVE: show controller wiring") lists what each output drives.

@@ -16,6 +16,7 @@ SplitView {
     Connections { target: EvolveModel; function onFlyRequested(p) { page.flyRequested(p) } }
 
     function train() { panel.train() }
+    function showWiring() { panel.showWiring() }
     Shortcut { sequence: "Ctrl+Return"; enabled: page.visible; onActivated: panel.train() }
     Shortcut { sequences: [StandardKey.Save]; enabled: page.visible; onActivated: ev.save() }
     Shortcut { sequence: "Ctrl+Shift+S"; enabled: page.visible; onActivated: panel.saveFileAs() }

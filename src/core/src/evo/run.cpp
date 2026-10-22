@@ -357,6 +357,7 @@ EvolvedAutopilot::EvolvedAutopilot(const craft::CraftDocument& craft, sim::Craft
     runtime_ = scripts::make(c->script);
     runtime_->compile(c->script, exp);
     frame_ = std::make_unique<ControlFrame>(c->inputNames, c->outputNames, c->termNames);
+    frame_->craftJSON = craftWiringJSON(sim);   // ctx.craft for geometry-aware (auto-wiring) scripts
     auto indexOf = [](const std::vector<std::string>& v, const std::string& n) { for (std::size_t i = 0; i < v.size(); ++i) if (v[i] == n) return int(i); return -1; };
     auto r = c->layout.range("mlp");
     if (c->mode == "mlp" && c->mlp && r.first >= 0) {

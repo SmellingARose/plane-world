@@ -3,6 +3,7 @@
 //   pwcli --train <experiment.json> [--generations N] [--population N] [--workers N] [--seed N] [--out dir] [--resume]
 //         [--current-as-flat] [--aero fast|<profile id>]
 //         [--script-engine auto|jsc|quickjs]                                   (C++ only: pick the JS engine)
+//         [--craft <craft.json>]   fly this craft file instead of the experiment's craft (prints its output wiring)
 // The overrides are applied to the experiment document here; the run itself is the evolution core's
 // (pw::train::handler(), registered by pw/evolution).
 #include <cstdio>
@@ -11,7 +12,13 @@
 #include <string>
 #include <vector>
 
+#include <filesystem>
+
+#include "pw/craft/document.h"
+#include "pw/evo/evaluator.h"
 #include "pw/json.h"
+#include "pw/sim/craft_sim.h"
+#include "pw/sim/craft_spec.h"
 #include "pw/script/presets.h"
 #include "pw/script/runtime.h"
 #include "pw/sim/fidelity.h"
@@ -105,6 +112,23 @@ int runTrain(const std::vector<std::string>& args) {
     if (parseInt(value(args, "--workers"), n, true)) e = with(e, "workers", Value::number(double(n)));
     if (parseInt(value(args, "--population"), n, true)) e = with(e, "population", Value::number(double(n)));
     if (parseInt(value(args, "--seed"), n, false)) e = with(e, "seed", Value::number(double((unsigned long long)n)));
+    // --craft <file.json>: import any craft file and train the same experiment on it. The controller script sees the
+    // craft's outputs and rotor geometry (ctx.craft), so a geometry-aware script wires itself to the new craft.
+    if (const char* cf = value(args, "--craft")) {
+        std::error_code ec;
+        const std::string abs = std::filesystem::absolute(cf, ec).string();
+        pw::craft::CraftDocument doc; std::string err;
+        if (!pw::craft::loadCraftFile(abs, doc, err)) { std::printf("error: --craft %s: %s\n", cf, err.c_str()); return 1; }
+        pw::sim::CraftSim probe;
+        if (!probe.load(pw::sim::CraftSpec::fromDocument(doc), &err)) { std::printf("error: --craft %s does not load: %s\n", cf, err.c_str()); return 1; }
+        std::printf("craft: %s (%s), %.3f kg, %d parts, %d outputs\n", doc.name.c_str(), cf, probe.mass(), int(doc.parts.size()), int(probe.outputs().size()));
+        std::printf("wiring (ctx.craft): %s\n", pw::evo::craftWiringJSON(probe).c_str());
+        Value ref = Value::object();
+        ref = with(ref, "path", Value::string(abs));
+        Value arr = Value::array();
+        arr.push(ref);
+        e = with(e, "crafts", arr);
+    }
     Value aero = e["aero"].isObject() ? e["aero"] : Value::object();
     if (const char* a = value(args, "--aero")) {
         std::string s = a;
