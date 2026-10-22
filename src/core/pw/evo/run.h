@@ -129,6 +129,7 @@ struct ReplayFrame {
     Transform origin;                 // craft origin transform
     std::vector<Transform> parts;     // per part (CraftSim::partPoses order)
     std::vector<double> outputs, termSums;
+    std::optional<Vec3d> threat;      // incoming missile position (experiments with a "threat")
 };
 struct Trajectory {
     craft::CraftDocument craft;
@@ -139,6 +140,7 @@ struct Trajectory {
     std::string worldName;   // the world this episode flew in
     std::optional<double> trainingFitness;
     std::optional<bool> fitnessMatches;
+    std::optional<ThreatSpec> threat;   // the experiment's threat (kill radius for the intercept effect)
     std::optional<ReplayFrame> sample(double t) const;   // interpolated (clamped)
     Value toJson() const;
 };

@@ -161,7 +161,7 @@ void CraftSim::readSensors(const SimEnvironment& env, double* out) {
             break;
         }
         case SensorKind::Target: {
-            Vec3d d = s.target - pw;
+            Vec3d d = (targetOverride ? *targetOverride : s.target) - pw;
             double hd = std::sqrt(d.x * d.x + d.z * d.z);
             out[o] = d.x; out[o + 1] = d.y; out[o + 2] = d.z; out[o + 3] = length(d);
             double b = (std::atan2(d.z, d.x) - std::atan2(fwd.z, fwd.x)) / kDeg;

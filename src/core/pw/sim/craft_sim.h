@@ -124,6 +124,8 @@ public:
     int parallelThreshold = 256;
     double crashSpeed = 8;
     uint64_t sensorNoiseSeed = 0x9E3779B97F4A7C15ull;
+    /// When set, every `target` sensor points here instead of its p.tx/ty/tz (a moving target, e.g. an incoming missile).
+    std::optional<Vec3d> targetOverride;
     jobs::JobSystem* jobSystem = nullptr;         // nullptr = JobSystem::shared() when going parallel
 
 

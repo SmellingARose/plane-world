@@ -94,6 +94,24 @@ struct AeroRunSettings {
     std::string profile = sim::kDefaultAeroProfile;
 };
 
+/// Optional incoming threat (missile-interception rewards): a ballistic missile launched at t = 0 from `range` m
+/// (± rangeJitter) at azimuth azimuthDeg (± azimuthJitterDeg, 0 = +X) from the defended point (the spawn), aimed to
+/// hit it after flightTime s (± timeJitter) under gravity. Jitter is drawn per episode from the episode seed (so all
+/// candidates of a generation face the same missile with common random numbers). While a threat is set, every
+/// `target` sensor of the craft points at the missile, so `target.dx/dy/dz` is the seeker's line of sight.
+/// The replay records the missile position for the viewport; killRadius is used there to show the intercept.
+struct ThreatSpec {
+    double range = 450, rangeJitter = 0, azimuthDeg = 0, azimuthJitterDeg = 0;
+    double flightTime = 11, timeJitter = 0, launchHeight = 2, gravity = 9.81, killRadius = 2.5;
+};
+/// One episode's missile: position p0 + v0 t + g t^2 / 2 until it reaches the defended point's height at impactT.
+struct ThreatTrack {
+    Vec3d p0, v0, aimPoint; double impactT = 0, gravity = 9.81;
+    Vec3d position(double t) const;
+    Vec3d velocity(double t) const;
+};
+ThreatTrack makeThreatTrack(const ThreatSpec& s, uint64_t episodeSeed, const Vec3d& defended);
+
 struct ExperimentDocument {
     int version = kFormatVersion;
     std::string name = "Untitled experiment", notes;
@@ -117,6 +135,7 @@ struct ExperimentDocument {
     int workers = 0;                  // 0 = job system thread count
     int batchLanes = 1;               // SIMD lanes (Swift CraftSimBatch); the C++ evaluator is scalar (bit-identical anyway)
     AeroRunSettings aero;
+    std::optional<ThreatSpec> threat;   // "threat" (missile interception), see ThreatSpec
 
     static ExperimentDocument fromJson(const Value& v);
     Value toJson() const;

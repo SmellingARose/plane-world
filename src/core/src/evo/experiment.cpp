@@ -219,6 +219,15 @@ ExperimentDocument ExperimentDocument::fromJson(const Value& v) {
     tolerant(v, "population", [&](auto& x) { if (!x.isNumber()) throw Missing("population"); e.population = int(x.asI64()); });
     tolerant(v, "generations", [&](auto& x) { if (!x.isNumber()) throw Missing("generations"); e.generations = int(x.asI64()); });
     tolerant(v, "episode", [&](auto& x) { e.episode = episodeFromJson(x); });
+    tolerant(v, "threat", [&](auto& x) {
+        if (!x.isObject()) throw Missing("threat");
+        ThreatSpec t;
+        auto n = [&](const char* k, double& d) { if (x.has(k) && x[k].isNumber()) d = x[k].num(); };
+        n("range", t.range); n("rangeJitter", t.rangeJitter); n("azimuthDeg", t.azimuthDeg); n("azimuthJitterDeg", t.azimuthJitterDeg);
+        n("flightTime", t.flightTime); n("timeJitter", t.timeJitter); n("launchHeight", t.launchHeight); n("gravity", t.gravity);
+        n("killRadius", t.killRadius);
+        e.threat = t;
+    });
     tolerant(v, "seed", [&](auto& x) { if (!x.isNumber() || x.num() < 0) throw Missing("seed"); e.seed = x.asU64(); });
     tolerant(v, "scripts", [&](auto& x) { e.scripts = scriptsFromJson(x); });
     tolerant(v, "rewardTerms", [&](auto& x) { Value w = Value::object(); w.set("t", x); e.rewardTerms = rStrs(w, "t"); });
@@ -292,6 +301,15 @@ Value ExperimentDocument::toJson() const {
     ep.set("wind", std::move(wd));
     ep.set("stopOnCrash", Value::fromBool(episode.stopOnCrash)); ep.set("crashSpeed", Value::number(episode.crashSpeed));
     o.set("episode", std::move(ep));
+    if (threat) {
+        Value t = Value::object(); const ThreatSpec& h = *threat;
+        t.set("range", Value::number(h.range)); t.set("rangeJitter", Value::number(h.rangeJitter));
+        t.set("azimuthDeg", Value::number(h.azimuthDeg)); t.set("azimuthJitterDeg", Value::number(h.azimuthJitterDeg));
+        t.set("flightTime", Value::number(h.flightTime)); t.set("timeJitter", Value::number(h.timeJitter));
+        t.set("launchHeight", Value::number(h.launchHeight)); t.set("gravity", Value::number(h.gravity));
+        t.set("killRadius", Value::number(h.killRadius));
+        o.set("threat", std::move(t));
+    }
     o.set("seed", Value::u64(seed));
     o.set("scripts", evo::toJson(scripts));
     o.set("rewardTerms", js::arrStr(rewardTerms));
@@ -421,6 +439,28 @@ std::optional<craft::CraftDocument> resolveCraft(const CraftRef* ref, const std:
         if (!doc) { err = "craft '" + name + "' not found (bundled or in " + craft::library::craftsDir() + ")"; return std::nullopt; }
     }
     return craft::outputs::prepareForFlight(presets::addStandardSensors(*doc));
+}
+
+// MARK: - threat (missile interception)
+ThreatTrack makeThreatTrack(const ThreatSpec& s, uint64_t episodeSeed, const Vec3d& defended) {
+    EvoRNG r(EvoRNG::derive(episodeSeed, {0x7472}));   // own stream: the episode's other draws are unchanged
+    const double range = smax(10, s.range + (s.rangeJitter > 0 ? r.uniform(-1, 1) * s.rangeJitter : 0));
+    const double az = (s.azimuthDeg + (s.azimuthJitterDeg > 0 ? r.uniform(-1, 1) * s.azimuthJitterDeg : 0)) * kDeg;
+    const double T = smax(1, s.flightTime + (s.timeJitter > 0 ? r.uniform(-1, 1) * s.timeJitter : 0));
+    ThreatTrack k;
+    k.gravity = s.gravity; k.impactT = T; k.aimPoint = defended;
+    k.p0 = {defended.x + std::cos(az) * range, defended.y + s.launchHeight, defended.z + std::sin(az) * range};
+    const Vec3d d = defended - k.p0;
+    k.v0 = {d.x / T, (d.y + 0.5 * s.gravity * T * T) / T, d.z / T};
+    return k;
+}
+Vec3d ThreatTrack::position(double t) const {
+    const double u = std::clamp(t, 0.0, impactT);
+    return {p0.x + v0.x * u, p0.y + v0.y * u - 0.5 * gravity * u * u, p0.z + v0.z * u};
+}
+Vec3d ThreatTrack::velocity(double t) const {
+    if (t >= impactT) return {};
+    return {v0.x, v0.y - gravity * smax(0, t), v0.z};
 }
 
 } // namespace pw::evo

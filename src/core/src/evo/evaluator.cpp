@@ -451,6 +451,10 @@ EpisodeResult EvalWorker::runEpisode(const Genome& g, int generation, int candid
     if (neat_) neat_->reset();
     if (mlp_) mlp_->reset();
 
+    // incoming threat: the target sensors track the missile (defended point = spawn)
+    std::optional<ThreatTrack> threat;
+    if (e.threat) { threat = makeThreatTrack(*e.threat, seed, sim.position()); sim.targetOverride = threat->position(0); }
+    else sim.targetOverride.reset();
     sim::SimEnvironment env = w.makeEnvironment(Vec3d{std::sin(windDir), 0, std::cos(windDir)} * windSpeed, 0);
     double hz = smax(1, e.controller.hz);
     double dt = 1 / hz;
@@ -491,6 +495,7 @@ EpisodeResult EvalWorker::runEpisode(const Genome& g, int generation, int candid
                 sim.markObstacleHit(length(sim.velocity()));
             std::swap(cornersPrev_, cornersCur_); prevPos = sim.position();
         }
+        if (threat) sim.targetOverride = threat->position(env.time);
         fillState(env, sx, sz); observe(env);
         const Vec3d& pos = sim.position();
         if (!(std::isfinite(pos.x) && std::isfinite(pos.y) && std::isfinite(sim.velocity().y))) { frame_.done = true; frame_.doneReason = "nan"; break; }

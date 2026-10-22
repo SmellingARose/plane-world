@@ -296,6 +296,7 @@ std::optional<ReplayFrame> Trajectory::sample(double t) const {
     ReplayFrame f = a;
     f.t = t; f.origin = lerp(a.origin, b.origin);
     if (a.parts.size() == b.parts.size()) for (std::size_t i = 0; i < a.parts.size(); ++i) f.parts[i] = lerp(a.parts[i], b.parts[i]);
+    if (a.threat && b.threat) f.threat = *a.threat + (*b.threat - *a.threat) * u;
     return f;
 }
 Value Trajectory::toJson() const {
@@ -330,6 +331,7 @@ Trajectory record(std::shared_ptr<const ExperimentContext> ctx, const Genome& ge
         rf.origin = Transform(sim.originPosition(), sim.orientation());
         for (auto& p : sim.partPoses()) rf.parts.push_back(Transform(p.position, p.rotation));
         rf.outputs = f.outputs; rf.termSums = f.termSums;
+        rf.threat = sim.targetOverride;
         tr.frames.push_back(std::move(rf));
     };
     EpisodeResult r = w.runEpisode(genome, generation, candidate, episode, seed, &obs);
@@ -338,6 +340,7 @@ Trajectory record(std::shared_ptr<const ExperimentContext> ctx, const Genome& ge
     tr.craft = craft;
     for (auto& p : craft.parts) tr.partIDs.push_back(p.id);
     tr.outputNames = ctx->outputNames; tr.termNames = ctx->termNames;
+    tr.threat = e.threat;
     tr.outcome = total; tr.doneReason = w.frame().doneReason; tr.trainingFitness = trainingFitness;
     tr.worldName = ctx->episodeWorld(generation, episode).base.name;
     if (trainingFitness && ctx->episodesPerGeneration(generation) == 1) tr.fitnessMatches = *trainingFitness == total;
