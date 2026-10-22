@@ -266,6 +266,83 @@ void WorldViewport::releaseResources() {
     // The scene graph is going away (window closed / item removed): nodes are deleted by Qt on the render thread.
 }
 
+// Missile-interception overlay (debug lines, HDR so the bright parts bloom): smoke trail and a red target box on
+// the missile, a cyan trail and box on the interceptor, and a starburst at the intercept (or a red one at impact).
+static void drawThreat(pw::render::Renderer& r, const pw::render::Camera& cam, const ReplayThreatView& v) {
+    // lines are drawn into the HDR target before exposure / tonemap: scale the colours to read as emissive
+    static const float gain = qEnvironmentVariableIsSet("PW_THREAT_GAIN") ? qEnvironmentVariable("PW_THREAT_GAIN").toFloat() : 25.0f;
+    struct Lines {
+        pw::render::DebugDraw& dd;
+        void line(const Vec3d& a, const Vec3d& b, Float4 c) { dd.line(a, b, Float4{c.x * gain, c.y * gain, c.z * gain, 1}); }
+    } d{r.debug};
+    const Vec3d right = cam.right(), up = cam.up();
+    auto thick = [&](const Vec3d& a, const Vec3d& b, Float4 c, double w) {   // a few offset lines read as one thick one
+        for (int i = -2; i <= 2; ++i) for (int j = -2; j <= 2; ++j) {
+            if (std::abs(i) + std::abs(j) > 3) continue;
+            const Vec3d o = right * (w * i * 0.5) + up * (w * j * 0.5);
+            d.line(a + o, b + o, c);
+        }
+    };
+    auto scale = [&](const Vec3d& p) { return std::max(0.4, length(p - cam.position) * 0.012); };   // ~constant screen size
+    auto box = [&](const Vec3d& p, Float4 c) {
+        const double s = scale(p) * 2.2, g = s * 0.45;
+        for (int sx = -1; sx <= 1; sx += 2) for (int sy = -1; sy <= 1; sy += 2) {
+            const Vec3d corner = p + right * (sx * s) + up * (sy * s);
+            for (int k = -1; k <= 1; ++k) {
+                const double o = s * 0.03 * k;
+                d.line(corner + up * o, corner - right * (sx * g) + up * o, c); d.line(corner + right * o, corner - up * (sy * g) + right * o, c);
+            }
+        }
+    };
+    // trails (fade towards the tail)
+    auto trail = [&](const std::vector<Vec3d>& t, Float4 c, double w) {
+        const std::size_t n = t.size();
+        for (std::size_t i = 1; i < n; ++i) {
+            const float a = 0.15f + 0.85f * float(i) / float(n);
+            const Float4 col{c.x * a, c.y * a, c.z * a, 1};
+            thick(t[i - 1], t[i], col, w * scale(t[i]) * 0.25);
+        }
+    };
+    trail(v.missileTrail, Float4{2.4f, 0.9f, 0.35f, 1}, 1.0);
+    trail(v.craftTrail, Float4{0.3f, 1.6f, 2.4f, 1}, 0.6);
+    if (!v.destroyed) {
+        // missile body along its direction of travel + hot head
+        Vec3d dir{0, -1, 0};
+        if (v.missileTrail.size() >= 2) { Vec3d dd = v.missileTrail.back() - v.missileTrail[v.missileTrail.size() - 2]; if (length(dd) > 1e-6) dir = dd * (1.0 / length(dd)); }
+        thick(v.missile - dir * 3.5 * scale(v.missile), v.missile, Float4{3.5f, 3.2f, 2.8f, 1}, 0.3 * scale(v.missile));
+        if (!v.impacted) box(v.missile, Float4{6.0f, 0.5f, 0.35f, 1});
+    }
+    box(v.craft, Float4{0.4f, 2.0f, 3.0f, 1});
+    // intercept / impact flash: expanding starburst + rings, fading over ~1.6 s
+    if (v.eventT >= 0) {
+        const double a = v.time - v.eventT;
+        if (a >= 0 && a < 1.6) {
+            const double R = (v.destroyed ? 4 : 7) + a * (v.destroyed ? 26 : 34);
+            const float f = float(std::pow(1 - a / 1.6, 1.5));
+            const Float4 core = v.destroyed ? Float4{8.0f * f, 6.0f * f, 3.0f * f, 1} : Float4{8.0f * f, 1.6f * f, 0.6f * f, 1};
+            unsigned h = 2166136261u;
+            for (int i = 0; i < 70; ++i) {
+                h = (h ^ unsigned(i * 7919)) * 16777619u;
+                const double u = (h & 1023) / 1023.0, w = ((h >> 10) & 1023) / 1023.0, l = 0.55 + 0.45 * (((h >> 20) & 1023) / 1023.0);
+                const double th = 6.283185307179586 * u, ph = std::acos(2 * w - 1);
+                const Vec3d dir{std::sin(ph) * std::cos(th), std::cos(ph), std::sin(ph) * std::sin(th)};
+                d.line(v.eventPoint + dir * (R * 0.15), v.eventPoint + dir * (R * l), core);
+            }
+            for (int ring = 0; ring < 3; ++ring) {
+                const double rr = R * (0.6 + 0.2 * ring);
+                Vec3d prev;
+                for (int i = 0; i <= 64; ++i) {
+                    const double q = i * 6.283185307179586 / 64;
+                    const Vec3d p = ring == 1 ? v.eventPoint + Vec3d{std::cos(q) * rr, 0, std::sin(q) * rr}
+                                              : v.eventPoint + right * (std::cos(q) * rr) + up * (std::sin(q) * rr);
+                    if (i) d.line(prev, p, Float4{core.x * 0.6f, core.y * 0.6f, core.z * 0.6f, 1});
+                    prev = p;
+                }
+            }
+        }
+    }
+}
+
 QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
     QElapsedTimer cpuT; cpuT.start();
     auto* n = static_cast<WorldViewportNode*>(old);
@@ -365,11 +442,26 @@ QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
     }
     const bool showIdle = !showRep && m_showReplay && n->craft;
     if (n->craft && showIdle != n->craftAdded) { if (showIdle) n->renderer->add(n->craft.get()); else n->renderer->remove(n->craft.get()); n->craftAdded = showIdle; }
+    ReplayThreatView threat;
+    const bool hasThreat = showRep && EvolveModel::instance()->replayThreat(threat);
     if (showRep) {
         geo::Transform origin;
         if (EvolveModel::instance()->replayPoses(n->poses, origin)) {
             n->replay->setPartPoses(n->poses);
-            if (m_dragButton == Qt::NoButton) {
+            if (hasThreat && m_dragButton == Qt::NoButton) {
+                // missile interception: frame interceptor and missile together (zooming in as they converge), then
+                // hold on the intercept / impact point
+                const bool live = threat.eventT < 0;
+                const Vec3d focus = live ? threat.craft * 0.62 + threat.missile * 0.38 : threat.eventPoint;
+                const double sep = live ? length(threat.missile - threat.craft) : 0;
+                const double k = 0.06;
+                m_goal.tx += (focus.x - m_goal.tx) * k; m_goal.tz += (focus.z - m_goal.tz) * k;
+                m_goal.height += (focus.y - wm->heightAt(focus.x, focus.z) - m_goal.height) * k;
+                const double want = std::clamp(sep * 1.15 + 30, 36.0, 700.0);
+                m_goal.dist += (want - m_goal.dist) * 0.03;
+                m_goal.yaw += 0.0009;   // slow orbit
+                m_goal.pitch += (0.14 - m_goal.pitch) * 0.05;   // low, looking out along the threat axis
+            } else if (m_dragButton == Qt::NoButton) {
                 m_goal.tx += (origin.position.x - m_goal.tx) * 0.25; m_goal.tz += (origin.position.z - m_goal.tz) * 0.25;
                 // follow the height too (air starts fly far above the ground the camera target sits on)
                 const double h = origin.position.y - wm->heightAt(origin.position.x, origin.position.z);
@@ -379,7 +471,8 @@ QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
     } else if (n->craft) n->craft->setCraftPose(wm->document().spawn);
 
     const double t = m_clock.elapsed() / 1000.0;
-    const double dt = std::clamp(t - m_lastT, 0.0, 0.1);
+    static const double fixedDt = qEnvironmentVariable("PW_FIXED_DT").toDouble();   // frame-exact recordings
+    const double dt = fixedDt > 0 ? fixedDt : std::clamp(t - m_lastT, 0.0, 0.1);
     m_lastT = t;
     stepCamera(dt);
     pw::render::Camera cam;
@@ -401,6 +494,7 @@ QSGNode* WorldViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
         }
         n->renderer->debug.cross({m_cursor.x(), m_cursor.y() + 0.4, m_cursor.z()}, std::max(0.5, r * 0.05), col);
     }
+    if (hasThreat) drawThreat(*n->renderer, cam, threat);
     n->renderer->environment.timeOfDayHours = wm->timeOfDay();
     n->renderer->environment.sunAzimuthDeg = wm->sunAzimuth();
     n->renderer->environment.windSpeed = wm->windSpeed();

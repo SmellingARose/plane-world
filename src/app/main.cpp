@@ -2,6 +2,7 @@
 // renderer sharing Qt's device (GpuViewport).
 //   pwapp [--quit-after <s>] [--screenshot <file.png>] [--tab build|fly|world|evolve] [--color-scheme dark|light]
 //         [--size <w>x<h>] [--command "<palette entry>" | "wait <s>"]...   (commands run 1 s after launch, in order)
+//         [--open-run <dir> [--replay g<gen>|best] [--replay-speed <x>]]
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
@@ -9,6 +10,9 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTimer>
+#include <QDir>
+#include <QImage>
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include "appcontroller.h"
@@ -50,6 +54,46 @@ int main(int argc, char** argv) {
 
     // --experiment <file.json>: open an experiment in EVOLVE at startup
     if (const QString ex = value("--experiment"); !ex.isEmpty()) EvolveModel::instance()->open(ex);
+    // --open-run <dir> [--replay g<gen>|best] [--replay-speed x]: load a finished run (e.g. from pwcli --train --out)
+    // and replay one of its candidates once loaded (footage / reviews)
+    if (const QString rd = value("--open-run"); !rd.isEmpty()) {
+        EvolveModel* em = EvolveModel::instance();
+        em->resumeDir(rd);
+        const QString rep = value("--replay");
+        const double speed = value("--replay-speed").toDouble();
+        if (!rep.isEmpty()) {
+            auto* poll = new QTimer(&app);
+            QObject::connect(poll, &QTimer::timeout, em, [em, rep, speed, poll] {
+                if (!em->hasRun()) return;
+                poll->stop(); poll->deleteLater();
+                if (speed > 0) em->setProperty("replaySpeed", speed);
+                em->replay(rep);
+            });
+            poll->start(200);
+            // --record-dir <dir> [--record-fps 30] [--record-from s] [--record-seconds s]: frame-exact footage — the
+            // replay is paused and stepped 1/fps per grabbed window frame (PNG sequence, stitch with ffmpeg); quits after
+            if (const QString rec = value("--record-dir"); !rec.isEmpty() && win) {
+                const double fps = value("--record-fps").isEmpty() ? 30 : value("--record-fps").toDouble();
+                const double from = value("--record-from").toDouble();
+                const double secs = value("--record-seconds").toDouble();
+                QDir().mkpath(rec);
+                auto frame = std::make_shared<int>(-90);   // warm-up frames (camera / TAA settle on the first frame)
+                auto* tick = new QTimer(&app);
+                QObject::connect(tick, &QTimer::timeout, em, [=] {
+                    if (!em->replayActive() || em->replayBusy()) return;
+                    const double end = secs > 0 ? std::min(from + secs, em->replayDuration()) : em->replayDuration();
+                    const int i = *frame;
+                    em->setReplayPlaying(false);
+                    em->setReplayTime(from + std::max(0, i) / fps);
+                    QImage img = win->grabWindow();   // renders a frame synchronously (also during warm-up)
+                    if (i >= 0) img.save(QStringLiteral("%1/f%2.jpg").arg(rec).arg(i, 5, 10, QLatin1Char('0')), "JPG", 94);
+                    ++*frame;
+                    if (from + *frame / fps > end) { tick->stop(); qInfo("recorded %d frames to %s", *frame, qPrintable(rec)); QCoreApplication::exit(0); }
+                });
+                tick->start(1);
+            }
+        }
+    }
     // --size WxH: window size in logical pixels (screenshots)
     if (const QStringList wh = value("--size").split('x'); win && wh.size() == 2) win->resize(wh[0].toInt(), wh[1].toInt());
     // --command "<name>" (repeatable): run command-palette entries once the UI has settled

@@ -171,6 +171,7 @@ public:
     // ReplayProvider
     const pw::craft::CraftDocument* replayCraft(uint64_t& version) const override;
     bool replayPoses(std::vector<pw::geo::Transform>& parts, pw::geo::Transform& origin) const override;
+    bool replayThreat(ReplayThreatView& out) const override;
     const pw::craft::CraftDocument* idleCraft(uint64_t& version) const override { version = m_craftVersion; return m_craft ? &*m_craft : nullptr; }
 
     /// Tests / smoke: block until the run leaves Running/Stopping (processes events).

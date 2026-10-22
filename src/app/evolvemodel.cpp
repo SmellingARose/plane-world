@@ -860,6 +860,39 @@ bool EvolveModel::replayPoses(std::vector<geo::Transform>& parts, geo::Transform
     return true;
 }
 
+bool EvolveModel::replayThreat(ReplayThreatView& out) const {
+    if (!m_traj || !m_traj->threat || m_traj->frames.empty() || !m_traj->frames.front().threat) return false;
+    const auto& fr = m_traj->frames;
+    const double t = m_replayTime, kr = m_traj->threat->killRadius;
+    out = ReplayThreatView{};
+    out.killRadius = kr; out.time = t;
+    // first intercept (craft origin within the kill radius) / impact (missile stopped at the defended point)
+    double hitT = -1, impactT = -1; Vec3d hitP, impactP;
+    for (std::size_t i = 0; i < fr.size(); ++i) {
+        if (!fr[i].threat) continue;
+        if (length(*fr[i].threat - fr[i].origin.position) <= kr) { hitT = fr[i].t; hitP = *fr[i].threat; break; }
+        if (i > 0 && fr[i - 1].threat && length(*fr[i].threat - *fr[i - 1].threat) < 1e-9 && fr[i].t > 1) { impactT = fr[i].t; impactP = *fr[i].threat; break; }
+    }
+    const double stride = 0.05;   // trail sample spacing (s)
+    double last = -1e9;
+    for (const auto& f : fr) {
+        if (f.t > t) break;
+        if (f.t - last < stride) continue;
+        last = f.t;
+        out.craftTrail.push_back(f.origin.position);
+        if (f.threat && (hitT < 0 || f.t <= hitT)) out.missileTrail.push_back(*f.threat);
+    }
+    auto s = m_traj->sample(t);
+    if (!s) return false;
+    out.craft = s->origin.position;
+    out.missile = s->threat ? *s->threat : Vec3d{};
+    if (hitT >= 0 && t >= hitT) { out.destroyed = true; out.eventT = hitT; out.eventPoint = hitP; out.missile = hitP; }
+    else if (impactT >= 0 && t >= impactT) { out.impacted = true; out.eventT = impactT; out.eventPoint = impactP; }
+    if (!out.missileTrail.empty() && !out.destroyed) out.missileTrail.push_back(out.missile);
+    out.craftTrail.push_back(out.craft);
+    return true;
+}
+
 void EvolveModel::frame() {
     static QElapsedTimer clock;
     if (!clock.isValid()) clock.start();
