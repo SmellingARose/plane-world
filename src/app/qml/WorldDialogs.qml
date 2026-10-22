@@ -146,6 +146,9 @@ Item {
                         MenuItem { text: qsTr("Islands"); onTriggered: { manager.close(); WorldFlow.newWorld("islands") } }
                         MenuItem { text: qsTr("Mountains"); onTriggered: { manager.close(); WorldFlow.newWorld("mountains") } }
                         MenuItem { text: qsTr("Manhattan (Midtown)"); onTriggered: { manager.close(); WorldFlow.newWorld("manhattan") } }
+                        MenuItem { text: qsTr("Los Angeles (Downtown)"); onTriggered: { manager.close(); WorldFlow.newWorld("losangeles") } }
+                        MenuItem { text: qsTr("Tel Aviv (Coast)"); onTriggered: { manager.close(); WorldFlow.newWorld("telaviv") } }
+                        MenuItem { text: qsTr("Dubai (Downtown)"); onTriggered: { manager.close(); WorldFlow.newWorld("dubai") } }
                     }
                 }
                 Item { Layout.fillWidth: true }

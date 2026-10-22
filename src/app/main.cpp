@@ -4,6 +4,7 @@
 //         [--size <w>x<h>] [--command "<palette entry>" | "wait <s>"]...   (commands run 1 s after launch, in order)
 //         [--open-run <dir> [--replay g<gen>|best] [--replay-speed <x>]]
 //         scripted commands: "evolve-resume <run dir>", "evolve-load <run dir>" (no training), "evolve-replay best|g<N>", "evolve-speed <x>", "world-open <file>"
+#include <QUrl>
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
@@ -96,6 +97,8 @@ int main(int argc, char** argv) {
             }
         }
     }
+    // --resume-run <run dir>: load a finished / checkpointed run (e.g. one trained headless by pwcli) into EVOLVE
+    if (const QString rd = value("--resume-run"); !rd.isEmpty()) EvolveModel::instance()->resumeDir(rd);
     // --size WxH: window size in logical pixels (screenshots)
     if (const QStringList wh = value("--size").split('x'); win && wh.size() == 2) win->resize(wh[0].toInt(), wh[1].toInt());
     // --command "<name>" (repeatable): run command-palette entries once the UI has settled
@@ -117,6 +120,9 @@ int main(int argc, char** argv) {
                 }
                 if (c.startsWith("evolve-speed ")) { EvolveModel::instance()->setProperty("replaySpeed", c.mid(13).toDouble()); continue; }
                 if (c.startsWith("world-open ")) { WorldModel::instance()->open(c.mid(11)); continue; }
+                // "open <craft.json>" loads a craft into FLY; "autopilot on" (re)starts the evolved autopilot from the spawn
+                if (c.startsWith("open ") && AppController::instance()) { AppController::instance()->openFile(QUrl::fromLocalFile(c.mid(5))); continue; }
+                if (c == "autopilot on" && AppController::instance()) { AppController::instance()->setAutopilot(false); AppController::instance()->setAutopilot(true); continue; }
                 QVariant ok;
                 QMetaObject::invokeMethod(win, "runCommand", Q_RETURN_ARG(QVariant, ok), Q_ARG(QVariant, c));
                 if (!ok.toBool()) qWarning("--command: no palette entry named \"%s\"", qPrintable(c));
