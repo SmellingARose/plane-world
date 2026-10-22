@@ -228,8 +228,8 @@ void WorldModel::emitAll() {
 void WorldModel::newWorld(const QString& preset) {
     world::WorldDocument d;
     d.name = "Untitled world";
-    if (preset == "manhattan") {
-        d = world::presets::manhattanMidtown();
+    if (auto c = world::presets::city(preset.toStdString())) {
+        d = std::move(*c);
         pw::terrain::TerrainSystem::carveLakeBeds(d.terrain, d.water.lakes);   // rivers and park lakes get a bed
     } else if (preset == "flat") {
         d.terrain.kind = world::TerrainKind::Flat;

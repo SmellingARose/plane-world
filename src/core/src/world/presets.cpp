@@ -49,14 +49,21 @@ struct Rect { double u0, u1, v0, v1; bool contains(double u, double v) const { r
 
 class City {
 public:
-    explicit City(WorldDocument& d) : d_(d) {}
+    /// gridDeg: the street grid's rotation clockwise from true north; (originU, originV): the local point placed at the
+    /// world origin. Manhattan's defaults; the other cities pass their own.
+    explicit City(WorldDocument& d, double gridDeg = 29.0, double originU = kOriginU, double originV = kOriginV,
+                  uint64_t seed = 0x6D616E68617474ull)
+        : d_(d), rng{seed}, th(gridDeg * kPi / 180.0), c(std::cos(th)), s(std::sin(th)),
+          rot(Quatd::angleAxis(-th, {0, 1, 0})), ou(originU), ov(originV) {}
     WorldDocument& d_;
-    Rng rng{0x6D616E68617474ull};
-    const double th = 29.0 * kPi / 180.0, c = std::cos(29.0 * kPi / 180.0), s = std::sin(29.0 * kPi / 180.0);
-    const Quatd rot = Quatd::angleAxis(-29.0 * kPi / 180.0, {0, 1, 0});   // local x -> u axis, local -z -> v axis
+    Rng rng;
+    double yawX = 0;   // extra footprint rotation (deg clockwise, about the centre) for the next prims; 0 = on the grid
+    const double th, c, s;
+    const Quatd rot;   // local x -> u axis, local -z -> v axis
+    const double ou, ov;
 
     Vec3d W(double u, double v, double y = 0) const {
-        u -= kOriginU; v -= kOriginV;
+        u -= ou; v -= ov;
         return Vec3d{u * c + v * s, y, u * s - v * c};
     }
     std::vector<double> pt(double u, double v) const { Vec3d p = W(u, v); return {p.x, p.z}; }
@@ -74,7 +81,8 @@ public:
         if (metal > 0) p.set("metallic", Value::number(metal));
         if (emit > 0) p.set("emissive", Value::number(emit));
         if (!collide) p.set("collide", Value::fromBool(false));
-        d_.placeProp(kind, std::nullopt, Transform(W(u, v, G + y0 + h * 0.5), rot), {w, h, dp}, false, std::move(p));
+        const Quatd q = yawX == 0 ? rot : rot * Quatd::angleAxis(-yawX * kPi / 180.0, {0, 1, 0});
+        d_.placeProp(kind, std::nullopt, Transform(W(u, v, G + y0 + h * 0.5), q), {w, h, dp}, false, std::move(p));
     }
     void box(double u, double v, double y0, double w, double dp, double h, Col col, Pat pat = Pat::Windows, bool collide = true,
              double rough = 0.85, double metal = 0, double emit = 0) { prim("box", "building", u, v, y0, w, dp, h, col, pat, collide, rough, metal, emit); }
@@ -679,5 +687,369 @@ WorldDocument manhattanMidtown() {
     // Crafts fly along their +X axis: turn +X onto the up-town axis (s, 0, -c).
     d.spawn = Transform(k.W(-420, stV(80) + 25, G + 2), Quatd::angleAxis((90.0 - 29.0) * kPi / 180.0, {0, 1, 0}));
     return d;
+}
+
+// ====================================================================== more cities
+// Same toolkit as Manhattan (the City prim helpers and lot massing), smaller rule sets: a street grid at the city's
+// real rotation, a height field that puts the towers where they are, a handful of modelled landmarks, and the
+// geography that makes the skyline recognisable (LA's hills and the Hollywood sign, Tel Aviv's beach, Dubai's desert).
+// Massing is approximate (footprints and heights from public figures, shapes simplified to boxes / cylinders / cones).
+namespace {
+namespace cpal {
+constexpr Col sand{0.66, 0.58, 0.42}, stucco{0.60, 0.54, 0.44}, stuccoWhite{0.72, 0.70, 0.65}, stuccoPink{0.62, 0.49, 0.42},
+              stuccoYellow{0.64, 0.56, 0.38}, chaparral{0.17, 0.19, 0.10}, hillBrown{0.33, 0.29, 0.19}, dryLawn{0.25, 0.27, 0.12},
+              palmGreen{0.10, 0.21, 0.06}, palmTrunk{0.33, 0.26, 0.18}, bauhaus{0.76, 0.74, 0.68}, sandstone{0.62, 0.52, 0.38},
+              desert{0.66, 0.54, 0.37}, signWhite{0.93, 0.93, 0.92};
+}
+
+double gaussM(double u, double v, double cu, double cv, double su, double sv) {
+    const double du = (u - cu) / su, dv = (v - cv) / sv;
+    return std::exp(-(du * du + dv * dv));
+}
+void palm(City& k, double u, double v, double h) {
+    k.cyl(u, v, 0, 0.7, h, cpal::palmTrunk, false, 0.95);
+    for (double a : {0.0, 45.0, 90.0, 135.0}) {
+        k.yawX = a + k.rng.range(-10, 10);
+        k.box(u, v, h - 0.6, 8.0, 0.5, 1.0, cpal::palmGreen * k.rng.range(0.8, 1.2), Pat::None, false, 0.9);
+    }
+    k.yawX = 0;
+    k.cone(u, v, h - 1.6, 2.2, 2.2, cpal::palmGreen * 0.8, false, 0.9);
+}
+void hill(City& k, double u, double v, double dia, double h, Col col) {
+    k.prim("cone", "ground", u, v, -1, dia, dia, h + 1, col, Pat::None, true, 1.0);
+}
+/// Surface height of a hill() cone at (u, v) (0 outside it).
+double hillY(double cu, double cv, double dia, double h, double u, double v) {
+    const double r = std::hypot(u - cu, v - cv);
+    return r >= dia * 0.5 ? 0 : (h + 1) * (1 - r / (dia * 0.5)) - 1;
+}
+/// A grid of blocks over [u0,u1]x[v0,v1]: pitch (bu, bv) including the street, each block a sidewalk slab and a
+/// row of lots; lot(rect) places what stands on it (may skip). skip(rect) leaves a whole block empty.
+template <class Skip, class Lot>
+void gridBlocks(City& k, Rect area, double bu, double bv, double street, Col walk, int lotsAcross, Skip&& skip, Lot&& lot) {
+    for (double v = area.v0; v + bv <= area.v1 + 1e-6; v += bv)
+        for (double u = area.u0; u + bu <= area.u1 + 1e-6; u += bu) {
+            const Rect blk{u + street * 0.5, u + bu - street * 0.5, v + street * 0.5, v + bv - street * 0.5};
+            if (skip(blk)) continue;
+            k.slab(0.5 * (blk.u0 + blk.u1), 0.5 * (blk.v0 + blk.v1), blk.u1 - blk.u0, blk.v1 - blk.v0, 0.16, walk);
+            const Rect in{blk.u0 + 3, blk.u1 - 3, blk.v0 + 3, blk.v1 - 3};
+            const double vm = 0.5 * (in.v0 + in.v1);
+            for (int row = 0; row < 2; ++row) {
+                double a = in.u0;
+                const double step = (in.u1 - in.u0) / lotsAcross;
+                for (int i = 0; i < lotsAcross; ++i, a += step)
+                    lot(Rect{a + 0.5, a + step - 0.5, row == 0 ? in.v0 : vm + 0.5, row == 0 ? vm - 0.5 : in.v1});
+            }
+        }
+}
+/// One lot of mid-rise / tower massing, height h, in a palette.
+void tower(City& k, const Rect& r, double h, const std::array<Col, 4>& glass, const std::array<Col, 4>& stone) {
+    const double w = r.u1 - r.u0, dp = r.v1 - r.v0;
+    h = std::min(h, 7.0 * std::min(w, dp) + 25);
+    if (h < 28) k.building(r, h, 0, k.rng.pick(stone) * k.rng.range(0.9, 1.1));
+    else if (h < 70 && k.rng.chance(0.55)) k.building(r, h, 1, k.rng.pick(stone) * k.rng.range(0.9, 1.1));
+    else k.building(r, h, 2, k.rng.pick(glass));
+}
+void setVegetation(WorldDocument& d, City& k) {
+    JsonObject veg;
+    veg.set("enabled", Value::fromBool(true));
+    veg.set("treeDensityPerHa", Value::number(0));
+    veg.set("seaLevel", Value::number(G - 10));
+    veg.set("grassDensity", Value::number(0));
+    veg.set("strokes", k.strokes_);
+    d.vegetation = veg;
+}
+WorldDocument cityBase(const char* name, double tod, double sunAz, double fog) {
+    WorldDocument d;
+    d.name = name;
+    d.terrain.kind = TerrainKind::Flat;
+    d.terrain.params.set("level", Value::number(G));
+    d.environment.timeOfDayHours = tod;
+    d.environment.sunAzimuthDeg = sunAz;
+    d.environment.fogDensity = fog;
+    return d;
+}
+/// Spawn at (u, v) facing local up-grid (+v), crafts fly along +X.
+Transform citySpawn(const City& k, double gridDeg, double u, double v) {
+    return Transform(k.W(u, v, G + 2), Quatd::angleAxis((90.0 - gridDeg) * kPi / 180.0, {0, 1, 0}));
+}
+const std::array<Col, 4> kGlass{pal::glassBlue, pal::glassSilver, pal::glassDark, pal::glassGreen};
+} // namespace
+
+// ---------------------------------------------------------------------- Los Angeles
+// Local frame: u east, v north along the downtown grid (rotated ~37 deg like DTLA's), origin near Pershing Square.
+// Downtown towers on Bunker Hill, an endless low stucco grid, elevated freeways, and the hills to the north with the
+// Hollywood sign and Griffith Observatory (pulled much closer to downtown than they really are, so one shot holds both).
+WorldDocument losAngeles() {
+    constexpr double kDeg = 37;
+    WorldDocument d = cityBase("Los Angeles (Downtown)", 17.2, 245, 0.9);
+    City k(d, kDeg, 0, 0, 0x6C61646F776E74ull);
+    const Rect core{-650, 650, -650, 650};
+    // landmarks (approximate massing)
+    {   // Wilshire Grand Center, 335 m with the spire; sloped glass crown
+        const double u = -330, v = -220;
+        k.box(u, v, 0, 70, 50, 30, pal::granite, Pat::Windows);
+        k.box(u, v, 30, 52, 34, 240, pal::glassBlue * 1.1, Pat::Glass, true, 0.25);
+        k.box(u, v, 270, 44, 28, 18, pal::glassSilver, Pat::Glass, true, 0.25);
+        k.box(u + 6, v, 288, 30, 22, 12, pal::glassSilver, Pat::Glass, true, 0.25);
+        k.cyl(u + 10, v, 300, 1.8, 35, pal::steel, true, 0.3, 0.7);
+    }
+    {   // U.S. Bank Tower, 310 m cylinder with stepped setbacks and the crown
+        const double u = -120, v = 60;
+        k.cyl(u, v, 0, 52, 230, pal::buffBrick * 1.15, true, 0.8, 0, Pat::Windows);
+        k.cyl(u, v, 230, 46, 40, pal::buffBrick * 1.15, true, 0.8, 0, Pat::Windows);
+        k.cyl(u, v, 270, 40, 25, pal::buffBrick * 1.1, true, 0.8, 0, Pat::Windows);
+        k.cyl(u, v, 295, 34, 8, pal::glassDark, true, 0.3);
+        k.cyl(u, v, 303, 30, 7, pal::steel, true, 0.4, 0.5);
+    }
+    k.box(80, -40, 0, 54, 40, 262, pal::glassDark, Pat::Glass, true, 0.3);              // Aon Center
+    k.box(-200, 220, 0, 46, 46, 228, pal::glassSilver, Pat::Glass, true, 0.3);          // Two California Plaza
+    k.cone(-200, 220, 228, 30, 14, pal::glassSilver, true, 0.3, 0.3);
+    k.box(-60, 260, 0, 44, 44, 191, pal::glassSilver * 0.9, Pat::Glass, true, 0.3);     // One California Plaza
+    k.box(-30, -160, 0, 48, 36, 228, pal::glassBlue, Pat::Glass, true, 0.3);            // Gas Company Tower
+    k.box(-150, -360, 0, 42, 42, 221, pal::whiteStone, Pat::Glass, true, 0.4);           // 777 Tower
+    k.box(160, 180, 0, 40, 40, 213, pal::glassGreen, Pat::Glass, true, 0.3);             // Wells Fargo
+    k.box(-430, 60, 0, 56, 30, 190, pal::glassBlue * 0.9, Pat::Glass, true, 0.3);        // Figueroa at Wilshire
+    {   // City Hall: wide base, the tower, stepped pyramid top
+        const double u = 470, v = 420;
+        k.box(u, v, 0, 120, 60, 40, pal::whiteStone, Pat::Windows);
+        k.box(u, v, 40, 36, 36, 75, pal::whiteStone * 1.05, Pat::Windows);
+        k.box(u, v, 115, 28, 28, 10, pal::whiteStone, Pat::Windows);
+        k.box(u, v, 125, 20, 20, 5, pal::whiteStone, Pat::None);
+        k.cone(u, v, 130, 18, 10, pal::whiteStone * 0.9, true, 0.5);
+        k.cyl(u, v, 140, 0.8, 8, pal::steel, false, 0.4, 0.6);
+    }
+    {   // Walt Disney Concert Hall: stainless sails
+        const double u = 220, v = 470;
+        for (int i = 0; i < 9; ++i) {
+            k.yawX = k.rng.range(-35, 35);
+            k.box(u + k.rng.range(-35, 35), v + k.rng.range(-25, 25), 0, k.rng.range(25, 45), k.rng.range(8, 16), k.rng.range(18, 36),
+                  pal::steel * 1.05, Pat::None, true, 0.25, 0.9);
+        }
+        k.yawX = 0;
+    }
+    const std::vector<Rect> sites = {{-380, -280, -260, -180}, {-150, -90, 30, 90}, {50, 110, -60, -20}, {-225, -175, 195, 245},
+                                     {-85, -35, 235, 285}, {-55, -5, -180, -140}, {-175, -125, -385, -335}, {140, 180, 160, 200},
+                                     {-460, -400, 45, 75}, {410, 530, 390, 450}, {175, 265, 435, 505}};
+    auto onSite = [&](const Rect& r) { for (auto& s : sites) if (s.overlaps(r)) return true; return false; };
+    // the asphalt under everything
+    k.slab(0, -500, 9000, 7000, 0.04, pal::asphalt * 1.4, 0.9);
+    // Pershing Square, the spawn plaza (open ground south of the towers) and Grand Park
+    const Rect pershing{-30, 80, -330, -230}, spawnPlaza{-120, 60, -820, -700}, grandPark{250, 420, 300, 380};
+    for (const Rect* r : {&pershing, &spawnPlaza, &grandPark})
+        k.slab(0.5 * (r->u0 + r->u1), 0.5 * (r->v0 + r->v1), r->u1 - r->u0, r->v1 - r->v0, 0.18, r == &grandPark ? pal::lawn : pal::plaza);
+    for (double u = -100; u < 60; u += 22) { palm(k, u, -830, 14); palm(k, u, -690, 14); }
+    // downtown blocks (DTLA's ~100 m blocks); height peaks on Bunker Hill
+    gridBlocks(k, core, 110, 110, 20, pal::sidewalk, 2,
+        [&](const Rect& b) { return b.overlaps(pershing) || b.overlaps(grandPark) || b.overlaps(spawnPlaza); },
+        [&](const Rect& lot) {
+            if (onSite(lot)) return;
+            const double cu = 0.5 * (lot.u0 + lot.u1), cv = 0.5 * (lot.v0 + lot.v1);
+            const double t = gaussM(cu, cv, -150, 0, 330, 380);
+            if (k.rng.chance(0.18)) return;   // surface parking: DTLA is full of it
+            const double r = k.rng.next();
+            tower(k, lot, 14 + 30 * r + t * (40 + 140 * r * r), kGlass,
+                  {pal::buffBrick, pal::limestone, cpal::stucco, pal::concrete});
+        });
+    // the sprawl: low stucco on long LA blocks, a few dingbats and strip malls, palms on the boulevards
+    const std::array<Col, 4> stuccos{cpal::stucco, cpal::stuccoWhite, cpal::stuccoPink, cpal::stuccoYellow};
+    gridBlocks(k, Rect{-3300, 3300, -3200, 1500}, 180, 90, 18, cpal::dryLawn, 4,
+        [&](const Rect& b) { return b.overlaps({core.u0 - 20, core.u1 + 20, core.v0 - 20, core.v1 + 20}) || b.overlaps(spawnPlaza); },
+        [&](const Rect& lot) {
+            if (k.rng.chance(0.12)) return;
+            const double w = lot.u1 - lot.u0, dp = lot.v1 - lot.v0;
+            const double cu = 0.5 * (lot.u0 + lot.u1), cv = 0.5 * (lot.v0 + lot.v1);
+            const double nearCore = gaussM(cu, cv, 0, 0, 1300, 1300);
+            const double h = k.rng.chance(0.06 + 0.2 * nearCore) ? k.rng.range(12, 28 + 40 * nearCore) : k.rng.range(4, 8);
+            k.box(cu, cv, 0, w * k.rng.range(0.6, 0.85), dp * k.rng.range(0.55, 0.8), h, k.rng.pick(stuccos) * k.rng.range(0.85, 1.1),
+                  h > 10 ? Pat::Windows : Pat::None, true, 0.95);
+        });
+    for (double v = -3200; v < 1500; v += 60) { palm(k, -1080 + 0.5 * 18, v, k.rng.range(16, 24)); palm(k, 1080 - 9, v, k.rng.range(16, 24)); }
+    // freeways: the 110 west of downtown, the 101 north of it (elevated decks on columns)
+    auto freeway = [&](double u0, double v0, double u1, double v1) {
+        const double len = std::hypot(u1 - u0, v1 - v0), um = 0.5 * (u0 + u1), vm = 0.5 * (v0 + v1);
+        const bool alongV = std::fabs(v1 - v0) > std::fabs(u1 - u0);
+        k.box(um, vm, 9, alongV ? 44 : len, alongV ? len : 44, 1.6, pal::concrete, Pat::None, true, 0.9);
+        k.box(um, vm, 10.6, alongV ? 44 : len, alongV ? len : 44, 0.12, pal::asphalt, Pat::None, false, 0.9);
+        for (double s = 0; s < len; s += 45) {
+            const double f = s / len;
+            k.box(u0 + (u1 - u0) * f, v0 + (v1 - v0) * f, 0, 3, 3, 9, pal::concrete * 0.9, Pat::None, true, 0.9);
+        }
+    };
+    freeway(-700, -3200, -700, 1500);
+    freeway(-3300, 720, 3300, 720);
+    // the hills: a ridge of chaparral cones across the north, Hollywood sign and Griffith Observatory on the front
+    for (int i = 0; i < 18; ++i) {
+        const double u = -3600 + i * 420 + k.rng.range(-80, 80), v = 2600 + k.rng.range(-250, 300);
+        hill(k, u, v, k.rng.range(1100, 1700), k.rng.range(170, 330), (i % 2 ? cpal::chaparral : cpal::hillBrown) * k.rng.range(0.85, 1.1));
+    }
+    const double hu = -1500, hv = 2350, hd = 1500, hh = 360;
+    hill(k, hu, hv, hd, hh, cpal::hillBrown);
+    for (int i = 0; i < 9; ++i) {   // H O L L Y W O O D, 13.7 m letters
+        const double u = hu - 70 + i * 16, v = hv - 420;
+        const double y = hillY(hu, hv, hd, hh, u, v);
+        k.box(u, v, y - 2, 11, 1.2, 15.5, cpal::signWhite, Pat::None, true, 0.6, 0, 0.15);
+    }
+    {   // Griffith Observatory: white block with three domes, on its own summit
+        const double gu = 600, gv = 2250, y = 220;
+        hill(k, gu, gv, 1300, y, cpal::chaparral);
+        k.box(gu, gv, y - 1, 60, 24, 12, cpal::stuccoWhite, Pat::None);
+        k.cyl(gu, gv, y + 11, 18, 4, cpal::stuccoWhite);
+        k.cone(gu, gv, y + 15, 18, 9, pal::copper * 0.8, true, 0.4, 0.5);
+        for (double s : {-26.0, 26.0}) { k.cyl(gu + s, gv, y + 11, 9, 3, cpal::stuccoWhite); k.cone(gu + s, gv, y + 14, 9, 5, pal::copper * 0.8, true, 0.4, 0.5); }
+    }
+    setVegetation(d, k);
+    d.spawn = citySpawn(k, kDeg, -30, -760);
+    return d;
+}
+
+// ---------------------------------------------------------------------- Tel Aviv
+// Local frame: u east (inland), v north along the coast (rotated ~20 deg like the shoreline), origin on the beach
+// promenade near Gordon Beach. The Mediterranean to the west, the sand and the Tayelet, a wall of beachfront hotels,
+// the white Bauhaus city behind them, the Ayalon highway and the towers around it (Azrieli Center, Sarona), Reading
+// power station's chimney to the north and Old Jaffa on its hill to the south.
+WorldDocument telAviv() {
+    constexpr double kDeg = 20;
+    WorldDocument d = cityBase("Tel Aviv (Coast)", 17.6, 285, 0.55);
+    City k(d, kDeg, 0, 0, 0x74656C61766976ull);
+    const double sea = -60, beach0 = -60, beach1 = 20, prom = 45;
+    k.lakeRect("mediterranean", {-4500, sea, -7000, 7000});
+    k.prim("box", "ground", sea, 0, -9, 2, 14000, 9.6, cpal::sand * 0.9, Pat::None, false, 1.0);   // the sand dropping into the sea
+    k.slab(0.5 * (beach0 + beach1), 0, beach1 - beach0, 14000, 0.2, cpal::sand, 1.0);
+    k.slab(0.5 * (beach1 + prom), 0, prom - beach1, 14000, 0.22, pal::plaza * 1.15, 0.9);
+    for (int i = 0; i < 12; ++i) {   // breakwaters off the beach
+        const double v = -3000 + i * 520;
+        k.box(sea - 120, v, -1, 18, 140, 1.8, pal::concrete * 0.85, Pat::None, true, 1.0);
+    }
+    for (double v = -3400; v < 3400; v += 34) palm(k, 32, v + k.rng.range(-5, 5), k.rng.range(10, 15));
+    for (double v = -3400; v < 3400; v += 160) {   // lifeguard huts and kiosks on the sand
+        k.box(-25, v, 0, 5, 5, 3.2, cpal::stuccoWhite, Pat::None, true, 0.8);
+    }
+    k.slab(1500, 0, 6000, 14000, 0.04, pal::asphalt * 1.3, 0.9);   // the city's asphalt
+    // landmarks
+    const double ay = 1700;   // Ayalon highway (u)
+    {   // Azrieli Center: round 187 m, triangular 169 m (simplified to a rotated box), square 154 m, on the mall podium
+        const double u = ay + 230, v = 300;
+        k.box(u, v, 0, 200, 120, 26, pal::concrete * 1.1, Pat::Windows);
+        k.cyl(u - 65, v, 26, 46, 161, pal::glassSilver, true, 0.3, 0.2, Pat::Glass);
+        k.cyl(u - 65, v, 187, 30, 6, pal::steel, true, 0.4, 0.5);
+        k.yawX = 30; k.box(u, v, 26, 40, 40, 143, pal::glassBlue * 1.1, Pat::Glass, true, 0.3); k.yawX = 0;
+        k.box(u + 65, v, 26, 40, 40, 128, pal::glassSilver * 0.9, Pat::Glass, true, 0.3);
+        k.box(ay + 230, v + 170, 0, 50, 50, 238, pal::glassSilver * 1.05, Pat::Glass, true, 0.3);   // Azrieli Sarona tower
+        k.box(ay + 320, v - 180, 0, 60, 40, 196, pal::glassDark, Pat::Glass, true, 0.3);           // Midtown
+        k.box(ay + 380, v - 60, 0, 44, 44, 180, pal::glassBlue, Pat::Glass, true, 0.3);
+    }
+    k.box(560, -1350, 0, 40, 40, 142, pal::navyGrey, Pat::Glass, true, 0.4);                      // Shalom Meir Tower
+    {   // Reading power station: plant hall and the striped chimney
+        const double u = 120, v = 3700;
+        k.box(u + 60, v, 0, 120, 60, 40, pal::concrete, Pat::None);
+        for (int i = 0; i < 6; ++i)
+            k.cyl(u, v, i * 25.0, 10 - i * 0.6, 25, i % 2 ? Col{0.62, 0.12, 0.10} : cpal::signWhite, true, 0.8);
+    }
+    {   // Old Jaffa: a sandstone hill with its clock tower and St Peter's church
+        const double ju = 80, jv = -3900;
+        k.lakeRect("jaffa-sea", {-600, sea, -7000, -3400});
+        hill(k, ju, jv, 600, 34, cpal::sandstone * 0.9);
+        for (int i = 0; i < 70; ++i) {
+            const double u = ju + k.rng.range(-200, 200), v = jv + k.rng.range(-200, 200);
+            const double y = hillY(ju, jv, 600, 34, u, v);
+            if (y <= 0.5) continue;
+            k.box(u, v, y - 2, k.rng.range(8, 16), k.rng.range(8, 16), k.rng.range(6, 12), cpal::sandstone * k.rng.range(0.85, 1.1), Pat::Windows);
+        }
+        k.box(ju - 40, jv, 30, 18, 40, 16, cpal::sandstone * 1.1, Pat::Windows);
+        k.box(ju - 40, jv - 22, 30, 8, 8, 30, cpal::sandstone * 1.15, Pat::None);
+        k.cone(ju - 40, jv - 22, 60, 8, 8, cpal::sandstone, true);
+        k.box(ju + 260, jv + 90, 0, 6, 6, 24, cpal::sandstone * 1.1, Pat::Windows);   // the clock tower
+        k.box(ju + 260, jv + 90, 24, 4, 4, 4, cpal::sandstone, Pat::None);
+    }
+    k.slab(ay, 0, 70, 14000, 0.1, pal::asphalt, 0.9);   // the Ayalon itself
+    k.box(ay, 0, 0, 2, 14000, 1.2, pal::concrete, Pat::None, false, 0.9);
+    // Rothschild Boulevard: a tree-lined strip through the White City
+    for (double v = -1500; v < 400; v += 70) k.treeStroke(520, v, 16, 140, 1);
+    const Rect rothschild{505, 535, -1550, 450};
+    // the hotel wall on HaYarkon / the promenade
+    const std::array<Col, 4> hotel{cpal::stuccoWhite, pal::whiteStone, pal::glassSilver, cpal::bauhaus};
+    for (double v = -3200; v < 3200;) {
+        const double len = k.rng.range(30, 70), dense = gaussM(0, v, 0, 0, 1, 1700);
+        const double h = k.rng.chance(0.3 + 0.5 * dense) ? k.rng.range(45, 70 + 70 * dense) : k.rng.range(14, 30);
+        const Col c = k.rng.pick(hotel);
+        k.building({prom + 20, prom + 20 + k.rng.range(22, 34), v, v + len}, h, h > 40 ? (c.r < 0.5 ? 2 : 1) : 0, c);
+        v += len + k.rng.range(10, 30);
+    }
+    // the White City: 3-4 storey Bauhaus blocks, a few mid-rises; towers thicken towards the Ayalon
+    const std::array<Col, 4> white{cpal::bauhaus, cpal::stuccoWhite, cpal::bauhaus * 0.92, cpal::stuccoYellow * 1.1};
+    gridBlocks(k, Rect{120, 2600, -3300, 3300}, 95, 80, 16, pal::sidewalk * 1.1, 3,
+        [&](const Rect& b) { return b.overlaps(rothschild) || b.overlaps({ay - 50, ay + 50, -7000, 7000}) || b.overlaps({ay + 100, ay + 420, 80, 520}); },
+        [&](const Rect& lot) {
+            const double cu = 0.5 * (lot.u0 + lot.u1), cv = 0.5 * (lot.v0 + lot.v1);
+            const double t = gaussM(cu, cv, ay + 200, 0, 520, 1200) + 0.5 * gaussM(cu, cv, 560, -1400, 300, 300);
+            const double r = k.rng.next();
+            if (t > 0.25 && r < 0.35 * t) { tower(k, lot, 60 + 150 * t * k.rng.next(), kGlass, white); return; }
+            const double h = k.rng.chance(0.08) ? k.rng.range(30, 55) : k.rng.range(11, 18);
+            const double w = lot.u1 - lot.u0, dp = lot.v1 - lot.v0;
+            const Col c = k.rng.pick(white) * k.rng.range(0.92, 1.05);
+            k.box(cu, cv, 0, w * 0.82, dp * 0.8, h, c, Pat::Windows, true, 0.9);
+            if (h < 20 && k.rng.chance(0.5)) k.box(cu, cv, h, w * 0.5, dp * 0.4, 3, c * 0.95, Pat::None, false, 0.9);   // roof room
+            if (k.rng.chance(0.4)) k.treeStroke(cu, cv + dp * 0.5, 6, 80, 1);
+        });
+    setVegetation(d, k);
+    d.spawn = citySpawn(k, kDeg, -5, -600);
+    return d;
+}
+
+// ---------------------------------------------------------------------- Dubai
+// Local frame: u east, v north along Sheikh Zayed Road (rotated ~-42 deg, the road runs NE-SW), origin by the Burj.
+WorldDocument dubai() {
+    constexpr double kDeg = 48;
+    WorldDocument d = cityBase("Dubai (Downtown)", 17.0, 255, 0.95);
+    City k(d, kDeg, 0, 0, 0x64756261692121ull);
+    k.slab(0, 0, 12000, 12000, 0.03, cpal::desert, 1.0);
+    {   // Burj Khalifa: a Y-plan stack of setbacks to 585 m of building, then the spire to 828 m
+        const double u = 0, v = 0;
+        double w = 72, y = 0;
+        for (int i = 0; i < 12; ++i) {
+            const double h = 48;
+            for (double a : {0.0, 60.0, 120.0}) { k.yawX = a; k.box(u, v, y, w, w * 0.34, h, pal::glassSilver * 1.1, Pat::Glass, true, 0.25, 0.3); }
+            y += h; w *= 0.86;
+        }
+        k.yawX = 0;
+        k.cyl(u, v, y, 9, 828 - 120 - y, pal::steel, true, 0.3, 0.7);
+        k.cyl(u, v, 708, 4, 120, pal::steel, true, 0.3, 0.7);
+        k.lake("burj-lake", {{-120, -260}, {260, -230}, {300, -120}, {80, -110}, {-60, -80}, {-160, -150}});
+    }
+    k.slab(900, 0, 90, 12000, 0.06, pal::asphalt, 0.9);   // Sheikh Zayed Road
+    // the towers along Sheikh Zayed Road
+    for (double v = -4000; v < 4500;) {
+        for (double side : {-1.0, 1.0}) {
+            const double u = 900 + side * k.rng.range(80, 110), h = k.rng.range(120, 360) * (k.rng.chance(0.15) ? 1.2 : 1);
+            const double w = k.rng.range(30, 50);
+            tower(k, {u - w / 2, u + w / 2, v - w / 2, v + w / 2}, h, kGlass, {pal::whiteStone, pal::limestone, cpal::sand, pal::concrete});
+        }
+        v += k.rng.range(70, 120);
+    }
+    k.box(980, 2300, 0, 50, 30, 355, pal::glassSilver, Pat::Glass, true, 0.3);   // Emirates Towers (simplified)
+    k.cone(980, 2300, 355, 30, 40, pal::steel, true, 0.3, 0.6);
+    // Downtown around the Burj: mid-rise and towers
+    gridBlocks(k, Rect{-900, 800, -900, 900}, 120, 120, 24, pal::plaza, 2,
+        [&](const Rect& b) { return b.overlaps({-200, 320, -300, 120}); },
+        [&](const Rect& lot) {
+            const double r = k.rng.next();
+            tower(k, lot, 30 + 220 * r * r, kGlass, {pal::whiteStone, cpal::sand, pal::limestone, cpal::stuccoWhite});
+        });
+    // the coast (Jumeirah) to the north-west
+    k.lakeRect("gulf", {-6000, -1800, -6000, 6000});
+    k.slab(-1760, 0, 80, 12000, 0.2, cpal::sand, 1.0);
+    for (double v = -2000; v < 2500; v += 40) palm(k, -1690, v, k.rng.range(10, 14));
+    setVegetation(d, k);
+    d.spawn = citySpawn(k, kDeg, 0, -700);
+    return d;
+}
+
+std::optional<WorldDocument> city(const std::string& key) {
+    if (key == "manhattan") return manhattanMidtown();
+    if (key == "losangeles") return losAngeles();
+    if (key == "telaviv") return telAviv();
+    if (key == "dubai") return dubai();
+    return std::nullopt;
 }
 } // namespace pw::world::presets

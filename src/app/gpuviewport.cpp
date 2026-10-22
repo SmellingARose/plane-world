@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include "gpuviewport.h"
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -283,6 +286,29 @@ void GpuViewport::stepCamera(double dt) {
             const double desired = std::atan2(-fwd.x, -fwd.z);
             m_goal.yaw += wrapPi(desired - m_goal.yaw) * std::min(1.0, dt * 2.5);
         }
+    }
+    // PW_CINECAM="yaw0,yaw1,pitch0,pitch1,dist0,dist1,seconds,delay" (degrees, metres): a scripted, repeatable camera
+    // move for recordings. Yaw is relative to "behind the craft" at the moment the flight starts; the move eases from
+    // the first values to the second over `seconds`, starting `delay` seconds into the flight.
+    struct Cine { bool on = false; double y0, y1, p0, p1, d0, d1, dur, delay; };
+    static const Cine cine = [] {
+        Cine c;
+        if (const char* e = std::getenv("PW_CINECAM"))
+            c.on = std::sscanf(e, "%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf", &c.y0, &c.y1, &c.p0, &c.p1, &c.d0, &c.d1, &c.dur, &c.delay) == 8;
+        return c;
+    }();
+    static double cineT = -1, cineBase = 0;
+    if (auto* app = AppController::instance(); cine.on && app && app->mode() == "fly") {
+        if (cineT < 0) { const Vec3d fwd = app->craftRotation().act({1, 0, 0}); cineBase = std::atan2(-fwd.x, -fwd.z); cineT = 0; }
+        cineT += dt;
+        double s = std::clamp((cineT - cine.delay) / std::max(cine.dur, 1e-3), 0.0, 1.0);
+        s = s * s * (3 - 2 * s);
+        constexpr double r = 3.14159265358979323846 / 180.0;
+        m_goal.yaw = cineBase + r * (cine.y0 + (cine.y1 - cine.y0) * s);
+        m_goal.pitch = r * (cine.p0 + (cine.p1 - cine.p0) * s);
+        m_goal.dist = cine.d0 * std::pow(cine.d1 / cine.d0, s);
+        m_cur.yaw = m_goal.yaw; m_cur.pitch = m_goal.pitch; m_cur.dist = m_goal.dist;
+        emit cameraChanged();
     }
     const double a = 1.0 - std::exp(-dt / 0.09);
     const double y0 = m_cur.yaw;

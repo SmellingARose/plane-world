@@ -2,6 +2,7 @@
 // renderer sharing Qt's device (GpuViewport).
 //   pwapp [--quit-after <s>] [--screenshot <file.png>] [--tab build|fly|world|evolve] [--color-scheme dark|light]
 //         [--size <w>x<h>] [--command "<palette entry>" | "wait <s>"]...   (commands run 1 s after launch, in order)
+#include <QUrl>
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
@@ -50,6 +51,8 @@ int main(int argc, char** argv) {
 
     // --experiment <file.json>: open an experiment in EVOLVE at startup
     if (const QString ex = value("--experiment"); !ex.isEmpty()) EvolveModel::instance()->open(ex);
+    // --resume-run <run dir>: load a finished / checkpointed run (e.g. one trained headless by pwcli) into EVOLVE
+    if (const QString rd = value("--resume-run"); !rd.isEmpty()) EvolveModel::instance()->resumeDir(rd);
     // --size WxH: window size in logical pixels (screenshots)
     if (const QStringList wh = value("--size").split('x'); win && wh.size() == 2) win->resize(wh[0].toInt(), wh[1].toInt());
     // --command "<name>" (repeatable): run command-palette entries once the UI has settled
@@ -62,6 +65,9 @@ int main(int argc, char** argv) {
             for (; i < commands.size(); ++i) {
                 const QString& c = commands[i];
                 if (c.startsWith("wait ")) { QTimer::singleShot(int(c.mid(5).toDouble() * 1000), win, [run, i] { (*run)(i + 1); }); return; }
+                // "open <craft.json>" loads a craft into FLY; "autopilot on" (re)starts the evolved autopilot from the spawn
+                if (c.startsWith("open ") && AppController::instance()) { AppController::instance()->openFile(QUrl::fromLocalFile(c.mid(5))); continue; }
+                if (c == "autopilot on" && AppController::instance()) { AppController::instance()->setAutopilot(false); AppController::instance()->setAutopilot(true); continue; }
                 QVariant ok;
                 QMetaObject::invokeMethod(win, "runCommand", Q_RETURN_ARG(QVariant, ok), Q_ARG(QVariant, c));
                 if (!ok.toBool()) qWarning("--command: no palette entry named \"%s\"", qPrintable(c));

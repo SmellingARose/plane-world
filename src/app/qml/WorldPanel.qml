@@ -71,6 +71,9 @@ Rectangle {
                             MenuItem { text: "Islands"; onTriggered: WorldFlow.newWorld("islands") }
                             MenuItem { text: "Mountains"; onTriggered: WorldFlow.newWorld("mountains") }
                             MenuItem { text: "Manhattan (Midtown)"; onTriggered: WorldFlow.newWorld("manhattan") }
+                            MenuItem { text: "Los Angeles (Downtown)"; onTriggered: WorldFlow.newWorld("losangeles") }
+                            MenuItem { text: "Tel Aviv (Coast)"; onTriggered: WorldFlow.newWorld("telaviv") }
+                            MenuItem { text: "Dubai (Downtown)"; onTriggered: WorldFlow.newWorld("dubai") }
                         }
                     }
                     Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0

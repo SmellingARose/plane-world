@@ -193,7 +193,7 @@ public:
     void setFogDensity(double v);
 
     // file
-    Q_INVOKABLE void newWorld(const QString& preset);   // "flat" | "hills" | "islands" | "mountains" | "manhattan"
+    Q_INVOKABLE void newWorld(const QString& preset);   // "flat" | "hills" | "islands" | "mountains" | "manhattan" | "losangeles" | "telaviv" | "dubai"
     Q_INVOKABLE bool open(const QString& pathOrUrl);
     Q_INVOKABLE bool save();
     Q_INVOKABLE bool saveAs(const QString& pathOrUrl);
