@@ -1,6 +1,8 @@
 #include "pw/evo/evaluator.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
@@ -247,6 +249,38 @@ CraftStateSnapshot captureState(const sim::CraftSim& s, double time, double surf
     return st;
 }
 
+// MARK: - wiring
+// ctx.craft: what each output physically does, so one controller script can wire itself to ANY craft
+// (a quad, a hexacopter, a lopsided tri-rotor...). Rotors are props driven by a motor output; x / y / z are the
+// prop's position about the centre of mass in body axes (x forward, y up, z right), spin is +1 / -1 and thrust the
+// rated static thrust (N). Every output is also listed with its kind.
+std::string craftWiringJSON(const sim::CraftSim& sim) {
+    auto num = [](double v) { char b[32]; std::snprintf(b, sizeof b, "%.6g", std::isfinite(v) ? v : 0.0); return std::string(b); };
+    auto str = [](const std::string& v) { std::string o = "\""; for (char c : v) { if (c == '"' || c == '\\') o += '\\'; o += c; } return o + "\""; };
+    std::string r = "{\"mass\":" + num(sim.mass()) + ",\"rotors\":[";
+    const auto& parts = sim.parts();
+    const auto poses = sim.partPoses();
+    const Quatd inv = sim.orientation().conjugate();
+    bool first = true;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        const auto& p = parts[i];
+        if (!p.is(sim::PartType::Prop) || p.motor < 0) continue;
+        const int out = sim.outputIndex(poses[std::size_t(p.motor)].partID);
+        if (out < 0) continue;
+        const Vec3d d = inv.act(poses[i].position - sim.position());
+        if (!first) r += ",";
+        first = false;
+        r += "{\"output\":" + str(sim.outputs()[std::size_t(out)].name) + ",\"x\":" + num(d.x) + ",\"y\":" + num(d.y) + ",\"z\":" + num(d.z) +
+             ",\"spin\":" + num(p.kSpin) + ",\"thrust\":" + num(p.kThrust) + "}";
+    }
+    r += "],\"outputs\":[";
+    for (std::size_t i = 0; i < sim.outputs().size(); ++i) {
+        if (i) r += ",";
+        r += "{\"name\":" + str(sim.outputs()[i].name) + ",\"kind\":" + str(sim::outputKindName(sim.outputs()[i].kind)) + "}";
+    }
+    return r + "]}";
+}
+
 // MARK: - worker
 static bool envFlag(const char* name, const char* value) { const char* v = std::getenv(name); return v && std::string(v) == value; }
 
@@ -259,6 +293,7 @@ EvalWorker::EvalWorker(std::shared_ptr<const ExperimentContext> ctx, std::unique
     baseSim_ = std::make_unique<sim::CraftSim>();
     loadSim(*baseSim_, ctx_->craftSpec);
     sim_ = baseSim_.get();
+    frame_.craftJSON = craftWiringJSON(*baseSim_);
     if (ctx_->mlpSizes.size() >= 2)
         mlp_ = std::make_unique<MLPPolicy>(ctx_->mlpSizes, e.genome.mlp ? e.genome.mlp->activation : "tanh", e.genome.mlp ? e.genome.mlp->outputActivation : "tanh");
     int m = 1;

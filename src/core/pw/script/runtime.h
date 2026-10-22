@@ -90,6 +90,7 @@ struct ControlFrame {
     int tick = 0;
     bool done = false;
     std::string doneReason;         // "", "time", "crash", "nan", "bounds", "script"
+    std::string craftJSON = "{}";   // ctx.craft: static craft wiring (rotor geometry per output), set once per worker
     ControlFrame() = default;
     ControlFrame(std::vector<std::string> in, std::vector<std::string> out, std::vector<std::string> t);
 };

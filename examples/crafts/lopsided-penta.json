@@ -1,0 +1,827 @@
+{
+ "name": "Lopsided penta",
+ "controls": {
+  "controller": "multirotor"
+ },
+ "parts": [
+  {
+   "id": "q0",
+   "type": "box",
+   "name": "Plate",
+   "color": "#232830",
+   "mass": 0.25,
+   "pos": [
+    0,
+    0,
+    0
+   ],
+   "rot": [
+    0,
+    17,
+    0
+   ],
+   "p": {
+    "sx": 0.2,
+    "sy": 0.02,
+    "sz": 0.14,
+    "cd": 0.3
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "q1",
+   "type": "box",
+   "name": "Battery (off-centre)",
+   "color": "#2f6fd6",
+   "mass": 0.45,
+   "pos": [
+    0.05,
+    -0.04,
+    0.09
+   ],
+   "rot": [
+    0,
+    17,
+    0
+   ],
+   "p": {
+    "sx": 0.13,
+    "sy": 0.045,
+    "sz": 0.06,
+    "cd": 0.3
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "q2",
+   "type": "cone",
+   "name": "Sensor mast",
+   "color": "#e23a2e",
+   "mass": 0.04,
+   "pos": [
+    -0.06,
+    0.06,
+    -0.04
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.02,
+    "h": 0.08,
+    "cd": 0.2
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "q3",
+   "type": "box",
+   "name": "Skid",
+   "color": "#c9ccd2",
+   "mass": 0.04,
+   "pos": [
+    0,
+    -0.1,
+    0
+   ],
+   "rot": [
+    0,
+    17,
+    0
+   ],
+   "p": {
+    "sx": 0.3,
+    "sy": 0.02,
+    "sz": 0.24,
+    "cd": 0.2
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "a0",
+   "type": "box",
+   "name": "Arm A",
+   "color": "#3a3f48",
+   "mass": 0.041999999999999996,
+   "pos": [
+    0.1494,
+    0,
+    -0.0131
+   ],
+   "rot": [
+    0,
+    5,
+    0
+   ],
+   "p": {
+    "sx": 0.3,
+    "sy": 0.012,
+    "sz": 0.025,
+    "cd": 0.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b0",
+   "type": "cylinder",
+   "name": "Motor bell A",
+   "color": "#5a6270",
+   "mass": 0.038,
+   "pos": [
+    0.2989,
+    0.02,
+    -0.0261
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.022,
+    "h": 0.03,
+    "cd": 0.6
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "m0",
+   "type": "motor",
+   "name": "Motor A",
+   "color": "#5a6270",
+   "mass": 0.001,
+   "pos": [
+    0.0,
+    0,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "torque": 0.5,
+    "vmax": 3000,
+    "reversible": 0,
+    "cd": 0,
+    "size": 0.04
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p0",
+   "type": "prop",
+   "name": "Prop A (CW)",
+   "color": "#ff3b6b",
+   "mass": 0.012,
+   "pos": [
+    0.2989,
+    0.045,
+    -0.0261
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "d": 0.2,
+    "thrust": 6.81,
+    "vmax": 60,
+    "spin": 1,
+    "chord": 0.02,
+    "thick": 0.005
+   },
+   "servo": null,
+   "invert": false,
+   "motor": "m0"
+  },
+  {
+   "id": "a1",
+   "type": "box",
+   "name": "Arm B",
+   "color": "#3a3f48",
+   "mass": 0.046799999999999994,
+   "pos": [
+    0.0183,
+    0,
+    -0.2092
+   ],
+   "rot": [
+    0,
+    85,
+    0
+   ],
+   "p": {
+    "sx": 0.42,
+    "sy": 0.012,
+    "sz": 0.025,
+    "cd": 0.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b1",
+   "type": "cylinder",
+   "name": "Motor bell B",
+   "color": "#5a6270",
+   "mass": 0.04568,
+   "pos": [
+    0.0366,
+    0.02,
+    -0.4184
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.0308,
+    "h": 0.03,
+    "cd": 0.6
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "m1",
+   "type": "motor",
+   "name": "Motor B",
+   "color": "#5a6270",
+   "mass": 0.001,
+   "pos": [
+    0.0,
+    0,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "torque": 0.5,
+    "vmax": 3000,
+    "reversible": 0,
+    "cd": 0,
+    "size": 0.04
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p1",
+   "type": "prop",
+   "name": "Prop B (CCW)",
+   "color": "#ffd23f",
+   "mass": 0.016800000000000002,
+   "pos": [
+    0.0366,
+    0.045,
+    -0.4184
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "d": 0.28,
+    "thrust": 13.34,
+    "vmax": 60,
+    "spin": -1,
+    "chord": 0.028000000000000004,
+    "thick": 0.005
+   },
+   "servo": null,
+   "invert": false,
+   "motor": "m1"
+  },
+  {
+   "id": "a2",
+   "type": "box",
+   "name": "Arm C",
+   "color": "#3a3f48",
+   "mass": 0.039599999999999996,
+   "pos": [
+    -0.1039,
+    0,
+    -0.06
+   ],
+   "rot": [
+    0,
+    150,
+    0
+   ],
+   "p": {
+    "sx": 0.24,
+    "sy": 0.012,
+    "sz": 0.025,
+    "cd": 0.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b2",
+   "type": "cylinder",
+   "name": "Motor bell C",
+   "color": "#5a6270",
+   "mass": 0.03648,
+   "pos": [
+    -0.2078,
+    0.02,
+    -0.12
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.019799999999999998,
+    "h": 0.03,
+    "cd": 0.6
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "m2",
+   "type": "motor",
+   "name": "Motor C",
+   "color": "#5a6270",
+   "mass": 0.001,
+   "pos": [
+    0.0,
+    0,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "torque": 0.5,
+    "vmax": 3000,
+    "reversible": 0,
+    "cd": 0,
+    "size": 0.04
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p2",
+   "type": "prop",
+   "name": "Prop C (CW)",
+   "color": "#3bd1ff",
+   "mass": 0.010799999999999999,
+   "pos": [
+    -0.2078,
+    0.045,
+    -0.12
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "d": 0.18,
+    "thrust": 5.51,
+    "vmax": 60,
+    "spin": 1,
+    "chord": 0.018,
+    "thick": 0.005
+   },
+   "servo": null,
+   "invert": false,
+   "motor": "m2"
+  },
+  {
+   "id": "a3",
+   "type": "box",
+   "name": "Arm D",
+   "color": "#3a3f48",
+   "mass": 0.0452,
+   "pos": [
+    -0.1556,
+    0,
+    0.109
+   ],
+   "rot": [
+    0,
+    215,
+    0
+   ],
+   "p": {
+    "sx": 0.38,
+    "sy": 0.012,
+    "sz": 0.025,
+    "cd": 0.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b3",
+   "type": "cylinder",
+   "name": "Motor bell D",
+   "color": "#5a6270",
+   "mass": 0.042499999999999996,
+   "pos": [
+    -0.3113,
+    0.02,
+    0.218
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.027499999999999997,
+    "h": 0.03,
+    "cd": 0.6
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "m3",
+   "type": "motor",
+   "name": "Motor D",
+   "color": "#5a6270",
+   "mass": 0.001,
+   "pos": [
+    0.0,
+    0,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "torque": 0.5,
+    "vmax": 3000,
+    "reversible": 0,
+    "cd": 0,
+    "size": 0.04
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p3",
+   "type": "prop",
+   "name": "Prop D (CCW)",
+   "color": "#7dff6a",
+   "mass": 0.015,
+   "pos": [
+    -0.3113,
+    0.045,
+    0.218
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "d": 0.25,
+    "thrust": 10.63,
+    "vmax": 60,
+    "spin": -1,
+    "chord": 0.024999999999999998,
+    "thick": 0.005
+   },
+   "servo": null,
+   "invert": false,
+   "motor": "m3"
+  },
+  {
+   "id": "a4",
+   "type": "box",
+   "name": "Arm E",
+   "color": "#3a3f48",
+   "mass": 0.0432,
+   "pos": [
+    0.0618,
+    0,
+    0.153
+   ],
+   "rot": [
+    0,
+    292,
+    0
+   ],
+   "p": {
+    "sx": 0.33,
+    "sy": 0.012,
+    "sz": 0.025,
+    "cd": 0.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "b4",
+   "type": "cylinder",
+   "name": "Motor bell E",
+   "color": "#5a6270",
+   "mass": 0.040580000000000005,
+   "pos": [
+    0.1236,
+    0.02,
+    0.306
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.0253,
+    "h": 0.03,
+    "cd": 0.6
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "m4",
+   "type": "motor",
+   "name": "Motor E",
+   "color": "#5a6270",
+   "mass": 0.001,
+   "pos": [
+    0.0,
+    0,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "torque": 0.5,
+    "vmax": 3000,
+    "reversible": 0,
+    "cd": 0,
+    "size": 0.04
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p4",
+   "type": "prop",
+   "name": "Prop E (CW)",
+   "color": "#c08bff",
+   "mass": 0.013800000000000002,
+   "pos": [
+    0.1236,
+    0.045,
+    0.306
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "d": 0.23,
+    "thrust": 9.0,
+    "vmax": 60,
+    "spin": 1,
+    "chord": 0.023,
+    "thick": 0.005
+   },
+   "servo": null,
+   "invert": false,
+   "motor": "m4"
+  },
+  {
+   "id": "p20",
+   "type": "sensor",
+   "name": "att",
+   "color": "#4da3ff",
+   "mass": 0.002,
+   "pos": [
+    0,
+    0.03,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "range": 200,
+    "noise": 0,
+    "tx": 0,
+    "ty": 100,
+    "tz": 0,
+    "kind": "attitude",
+    "dir": "down",
+    "ref": "",
+    "size": 0.05
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p21",
+   "type": "sensor",
+   "name": "rate",
+   "color": "#4da3ff",
+   "mass": 0.002,
+   "pos": [
+    0,
+    0.03,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "range": 200,
+    "noise": 0,
+    "tx": 0,
+    "ty": 100,
+    "tz": 0,
+    "kind": "angularRate",
+    "dir": "down",
+    "ref": "",
+    "size": 0.05
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p22",
+   "type": "sensor",
+   "name": "alt",
+   "color": "#4da3ff",
+   "mass": 0.002,
+   "pos": [
+    0,
+    0.03,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "range": 200,
+    "noise": 0,
+    "tx": 0,
+    "ty": 100,
+    "tz": 0,
+    "kind": "altitudeAGL",
+    "dir": "down",
+    "ref": "",
+    "size": 0.05
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p23",
+   "type": "sensor",
+   "name": "vs",
+   "color": "#4da3ff",
+   "mass": 0.002,
+   "pos": [
+    0,
+    0.03,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "range": 200,
+    "noise": 0,
+    "tx": 0,
+    "ty": 100,
+    "tz": 0,
+    "kind": "verticalSpeed",
+    "dir": "down",
+    "ref": "",
+    "size": 0.05
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p24",
+   "type": "sensor",
+   "name": "air",
+   "color": "#4da3ff",
+   "mass": 0.002,
+   "pos": [
+    0,
+    0.03,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "range": 200,
+    "noise": 0,
+    "tx": 0,
+    "ty": 100,
+    "tz": 0,
+    "kind": "airspeed",
+    "dir": "down",
+    "ref": "",
+    "size": 0.05
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "p25",
+   "type": "sensor",
+   "name": "target",
+   "color": "#4da3ff",
+   "mass": 0.002,
+   "pos": [
+    0,
+    0.03,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "range": 200,
+    "noise": 0,
+    "tx": 0,
+    "ty": 10,
+    "tz": 0,
+    "kind": "target",
+    "dir": "down",
+    "ref": "",
+    "size": 0.05
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  }
+ ]
+}

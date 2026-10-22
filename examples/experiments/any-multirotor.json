@@ -1,0 +1,80 @@
+{
+ "algorithm": {
+  "kind": "cmaes",
+  "values": {
+   "sigma0": 0.3
+  }
+ },
+ "checkpointEvery": 10,
+ "controller": {
+  "hz": 100,
+  "mode": "script"
+ },
+ "crafts": [
+  {
+   "path": "../crafts/heavy-hex.json"
+  }
+ ],
+ "descriptorAxes": [],
+ "episode": {
+  "aggregate": "mean",
+  "commonRandomNumbers": true,
+  "crashSpeed": 6,
+  "duration": 12,
+  "episodesPerCandidate": 2,
+  "physicsHz": 1000,
+  "spawn": {
+   "altitudeAGL": 0,
+   "headingDeg": 0,
+   "jitterAttitudeDeg": 0,
+   "jitterHeadingDeg": 0,
+   "jitterPosition": 0,
+   "jitterSpeed": 0,
+   "mode": "runway",
+   "speed": 0
+  },
+  "stopOnCrash": true,
+  "wind": {
+   "directionMaxDeg": 360,
+   "directionMinDeg": 0,
+   "speedMax": 3,
+   "speedMin": 0,
+   "turbulence": 0.3
+  }
+ },
+ "generations": 30,
+ "genome": {
+  "preset": "script",
+  "design": []
+ },
+ "headless": {
+  "breakables": false,
+  "oceanWaves": false,
+  "terrain": true,
+  "vegetation": false,
+  "water": true
+ },
+ "name": "Any multirotor - auto-wired waypoint hold",
+ "notes": "One controller for ANY multirotor: the script reads ctx.craft (rotor positions, spins, thrusts) and builds its own motor mixer, so the same experiment trains a quad, a hexacopter or a lopsided pentacopter. Swap the craft with pwcli --craft <file.json>. 9 gains, CMA-ES.",
+ "population": 24,
+ "rewardTerms": [
+  "height",
+  "hold",
+  "calm",
+  "drift",
+  "upright",
+  "spin",
+  "crash"
+ ],
+ "scripts": {
+  "callBudgetMs": 5,
+  "language": "javascript",
+  "source": "// ANY multirotor: fly to a waypoint 15 m out and hold it, in gusty wind - with ONE controller for every craft.\n// Nothing here names a motor. At init the script reads ctx.craft (each rotor's output, position about the centre\n// of mass, spin and rated thrust) and builds the motor mixer from the geometry: a least-squares allocation of\n// [lift, pitch moment, roll moment, yaw torque] onto however many rotors the craft has (quad, hex, lopsided penta...).\n// Evolution then tunes the 9 gains of the cascade for that craft's mass, inertia and layout.\n//   goal: (15, 8, 8) m from the spawn point (the craft's target sensor sits at (0, 10, 0))\nfunction terms() { return [\"height\", \"hold\", \"calm\", \"drift\", \"upright\", \"spin\", \"crash\"]; }\nvar GOAL = { x: 15, y: 8, z: 8 };\nfunction goal(i) { return { dx: i[\"target.dx\"] + GOAL.x, dy: i[\"target.dy\"] - 10 + GOAL.y, dz: i[\"target.dz\"] + GOAL.z }; }\n\nfunction reward(ctx) {\n  const i = ctx.in, dt = ctx.dt, g = goal(i);\n  const dh = Math.sqrt(g.dx * g.dx + g.dz * g.dz), d = Math.sqrt(dh * dh + g.dy * g.dy);\n  const tilt = Math.min(Math.sqrt(i[\"att.pitch\"] * i[\"att.pitch\"] + i[\"att.roll\"] * i[\"att.roll\"]) / 90, 1);\n  return {\n    height: -Math.min(Math.abs(g.dy), 20) / 10 * dt,\n    hold: d < 1.5 ? dt : 0,                                   // seconds within 1.5 m of the waypoint (headline)\n    calm: -Math.min(Math.abs(i.vs) / 5, 1) * (d < 3 ? 1 : 0.2) * dt * 0.5,\n    drift: -Math.min(dh / 20, 1) * dt,\n    upright: -tilt * dt * 0.5,\n    spin: -Math.min(Math.abs(i[\"rate.yaw\"]) / 180, 1) * dt * 0.3,\n  };\n}\nfunction failed(ctx) {\n  const i = ctx.in;\n  return ctx.state.crashed || Math.abs(i[\"att.pitch\"]) > 80 || Math.abs(i[\"att.roll\"]) > 80 || i.alt > 40;\n}\nfunction terminate(ctx) { return failed(ctx); }\nfunction fitness(ctx) {\n  const crash = failed(ctx) ? -1.5 * (ctx.info.duration - ctx.t) - 1 : 0;\n  const s = ctx.sum;\n  return { fitness: s.height + s.hold + s.calm + s.drift + s.upright + s.spin + crash, terms: { crash: crash } };\n}\n\nfunction genome(base) {\n  const g = (name, lo, hi, init) => base.genes.push({ name: name, group: \"script\", min: lo, max: hi, initial: init, sigma: (hi - lo) / 10 });\n  g(\"kAlt\", 0, 1, 0.1);        // lift fraction of weight per m of height error\n  g(\"kVs\", 0, 1, 0.1);         // per m/s of climb rate\n  g(\"kAltI\", 0, 0.5, 0.02);    // per m*s (trims thrust-model error)\n  g(\"kAtt\", 0, 0.1, 0.01);     // moment (weight x arm units) per deg of attitude error\n  g(\"kRate\", 0, 0.03, 0.002);  // per deg/s of body rate\n  g(\"kPos\", 0, 5, 0.5);        // deg of lean per m of position error\n  g(\"kVel\", 0, 10, 1);         // deg of lean per m/s of ground speed\n  g(\"kYaw\", 0, 0.06, 0.005);   // yaw torque units per deg/s of yaw rate\n  g(\"tilt\", 10, 45, 25);       // lean limit, deg\n  return base;\n}\n\n// --- auto-wiring: rotor geometry -> allocation matrix (pseudo-inverse), built once per episode\nfunction wire(ctx) {\n  const R = ctx.craft.rotors, n = R.length;\n  if (n < 4) throw new Error(\"this controller needs 4+ rotors, craft has \" + n);\n  let L = 0; R.forEach(r => L += Math.sqrt(r.x * r.x + r.z * r.z) / n);\n  // columns: lift (N), pitch (+x rotors raise the nose), roll (-z rotors raise the left side), yaw (spin +1 rotors yaw -rate)\n  const B = [R.map(() => 1), R.map(r => r.x / L), R.map(r => -r.z / L), R.map(r => r.spin)];\n  const M = [0, 1, 2, 3].map(a => [0, 1, 2, 3].map(b => B[a].reduce((s, v, k) => s + v * B[b][k], 0)));\n  const Mi = inv4(M);\n  // P = B^T (B B^T)^-1  (n x 4): rotor thrusts (N) for a wanted [lift N, pitch N, roll N, yaw N]\n  const P = R.map((r, k) => [0, 1, 2, 3].map(c => [0, 1, 2, 3].reduce((s, a) => s + B[a][k] * Mi[a][c], 0)));\n  return { R: R, P: P, W: ctx.craft.mass * 9.81 };\n}\nfunction inv4(m) {\n  const n = 4, a = m.map((r, i) => r.concat([0, 1, 2, 3].map(j => (i === j ? 1 : 0))));\n  for (let c = 0; c < n; c++) {\n    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(a[r][c]) > Math.abs(a[p][c])) p = r;\n    const t = a[c]; a[c] = a[p]; a[p] = t;\n    const d = a[c][c] || 1e-9; for (let j = 0; j < 2 * n; j++) a[c][j] /= d;\n    for (let r = 0; r < n; r++) if (r !== c) { const f = a[r][c]; for (let j = 0; j < 2 * n; j++) a[r][j] -= f * a[c][j]; }\n  }\n  return a.map(r => r.slice(n));\n}\n\nfunction control(ctx) {\n  const G = ctx.genome, i = ctx.in, m = ctx.memory, dt = ctx.dt;\n  if (!m.w) m.w = wire(ctx);\n  const w = m.w, g = goal(i);\n  const vx = m.pdx === undefined ? 0 : -(g.dx - m.pdx) / dt, vz = m.pdz === undefined ? 0 : -(g.dz - m.pdz) / dt;\n  m.vx = m.vx === undefined ? 0 : m.vx + (vx - m.vx) * 0.3; m.vz = m.vz === undefined ? 0 : m.vz + (vz - m.vz) * 0.3;\n  m.pdx = g.dx; m.pdz = g.dz;\n  const lim = G.get(\"tilt\"), kPos = G.get(\"kPos\"), kVel = G.get(\"kVel\");\n  const pitchSp = clamp(-(kPos * g.dx - kVel * m.vx), -lim, lim);\n  const rollSp = clamp(kPos * g.dz - kVel * m.vz, -lim, lim);\n  const tilt = Math.min(Math.sqrt(i[\"att.pitch\"] * i[\"att.pitch\"] + i[\"att.roll\"] * i[\"att.roll\"]), 80) * Math.PI / 180;\n  const ey = clamp(g.dy, -10, 10);\n  m.ai = clamp((m.ai || 0) + ey * dt, -5, 5);\n  const lift = w.W * (1 + G.get(\"kAlt\") * ey - G.get(\"kVs\") * i.vs + G.get(\"kAltI\") * m.ai) / Math.max(Math.cos(tilt), 0.3);\n  const kA = G.get(\"kAtt\"), kR = G.get(\"kRate\");\n  const u = [lift,\n    w.W * (kA * (pitchSp - i[\"att.pitch\"]) - kR * i[\"rate.pitch\"]),\n    w.W * (kA * (rollSp - i[\"att.roll\"]) - kR * i[\"rate.roll\"]),\n    -w.W * G.get(\"kYaw\") * i[\"rate.yaw\"]];\n  for (let k = 0; k < w.R.length; k++) {\n    const p = w.P[k];\n    const T = p[0] * u[0] + p[1] * u[1] + p[2] * u[2] + p[3] * u[3];\n    ctx.out[w.R[k].output] = Math.pow(clamp(T / w.R[k].thrust, 0, 1), 1.5);   // thrust fraction -> motor command\n  }\n}\n"
+ },
+ "seed": 1,
+ "version": 1,
+ "workers": 0,
+ "world": {
+  "source": "flat"
+ }
+}

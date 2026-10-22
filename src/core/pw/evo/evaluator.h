@@ -97,6 +97,9 @@ struct EvalStats {
 };
 
 /// Per-tick observer (replay recording only).
+/// JSON for ctx.craft: rotor geometry per motor output + every output's kind (see evaluator.cpp).
+std::string craftWiringJSON(const sim::CraftSim& sim);
+
 using TickObserver = std::function<void(const sim::CraftSim&, const ControlFrame&)>;
 
 struct EpisodeResult {

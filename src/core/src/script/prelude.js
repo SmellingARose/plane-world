@@ -144,7 +144,7 @@ function __accessors(obj, names, arr, writable, asBool) {
   });
   return obj;
 }
-function __bind(IN, OUT, T, SUM, inJSON, outJSON, termJSON, stateJSON) {
+function __bind(IN, OUT, T, SUM, inJSON, outJSON, termJSON, stateJSON, craftJSON) {
   var inNames = JSON.parse(inJSON), outNames = JSON.parse(outJSON), termNames = JSON.parse(termJSON), stateNames = JSON.parse(stateJSON);
   var S = __S; __IN = IN; __OUT = OUT; __T = T; __SUM = SUM; __termNames = termNames;
   __termIndex = Object.create(null); termNames.forEach(function (n, i) { __termIndex[n] = i; });
@@ -169,6 +169,7 @@ function __bind(IN, OUT, T, SUM, inJSON, outJSON, termJSON, stateJSON) {
   Object.defineProperty(c, "dt", { enumerable: true, get: function () { return S[1]; } });
   Object.defineProperty(c, "tick", { enumerable: true, get: function () { return S[2]; } });
   Object.defineProperty(c, "doneReason", { enumerable: true, get: function () { return __REASONS[S[9]] || ""; } });
+  c.craft = JSON.parse(craftJSON || "{}");   // { mass, rotors: [{ output, x, y, z, spin, thrust }], outputs: [{ name, kind }] }
   c.memory = {};
   c.rng = __rng;
   c.genome = __genome;
