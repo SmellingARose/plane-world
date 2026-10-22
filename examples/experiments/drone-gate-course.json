@@ -1,0 +1,802 @@
+{
+ "algorithm": {
+  "kind": "cmaes",
+  "values": {
+   "sigma0": 0.3
+  }
+ },
+ "checkpointEvery": 5,
+ "controller": {
+  "hz": 100,
+  "mode": "script"
+ },
+ "crafts": [
+  {
+   "name": "Racer quad"
+  }
+ ],
+ "descriptorAxes": [],
+ "episode": {
+  "aggregate": "mean",
+  "commonRandomNumbers": true,
+  "crashSpeed": 6,
+  "duration": 25,
+  "episodesPerCandidate": 2,
+  "physicsHz": 1000,
+  "spawn": {
+   "altitudeAGL": 0,
+   "headingDeg": 0,
+   "jitterAttitudeDeg": 0,
+   "jitterHeadingDeg": 0,
+   "jitterPosition": 0,
+   "jitterSpeed": 0,
+   "mode": "runway",
+   "speed": 0
+  },
+  "stopOnCrash": true,
+  "wind": {
+   "directionMaxDeg": 360,
+   "directionMinDeg": 0,
+   "speedMin": 0,
+   "speedMax": 2,
+   "turbulence": 0.3
+  }
+ },
+ "generations": 200,
+ "genome": {
+  "preset": "script",
+  "design": []
+ },
+ "headless": {
+  "breakables": false,
+  "oceanWaves": false,
+  "terrain": true,
+  "vegetation": false,
+  "water": true
+ },
+ "name": "Racer quad - gate course (evolved PID gains)",
+ "notes": "Racer quad threads a 5-gate course: drone-race's evolved PID gains plus a 'lead' gene. The reference run (CMA-ES, pop 32, 2 x 25 s flights, 200 generations) went from best 2.59 at gen 0 to 81.5 at gen 186 (5/5 gates, about 13.5 s).",
+ "population": 32,
+ "rewardTerms": [
+  "gates",
+  "time",
+  "progress",
+  "hold",
+  "upright",
+  "spin",
+  "crash"
+ ],
+ "scripts": {
+  "callBudgetMs": 5,
+  "language": "javascript",
+  "source": "// Racer quad: thread a course of 5 gates as fast as possible, then hold at the last one.\n// Same cascaded PID + quad mixer as drone-race.json; genome = its 9 gains + \"lead\" (how far past the current gate it aims).\n// Reward terms:\n//   gates    - +10 per gate passed (pass = within 3 m of the gate centre, in order)\n//   time     - one-off when the last gate is passed: 2 points per second of episode left (faster = more)\n//   progress - always-on penalty: distance to the next gate / 100 per second\n//   hold     - seconds within 3 m of the last gate after finishing, slower than 3 m/s\n//   upright, spin - small penalties (lean past 85 deg, yaw rate)\n//   crash    - crash, flip or above 60 m: -2 per second of episode lost, -1\nconst GATES = [[25, 6, 0], [55, 12, 15], [85, 7, -12], [115, 15, 10], [145, 8, 0]];\nfunction terms() { return [\"gates\", \"time\", \"progress\", \"hold\", \"upright\", \"spin\", \"crash\"]; }\nfunction pos(i) { return { x: -i[\"target.dx\"], y: 10 - i[\"target.dy\"], z: -i[\"target.dz\"] }; }\nfunction aim(ctx) {\n  const i = ctx.in, m = ctx.memory, p = pos(i), k = Math.min(m.gate || 0, GATES.length - 1), g = GATES[k];\n  let tx = g[0], ty = g[1], tz = g[2];\n  const lead = ctx.genome ? ctx.genome.get(\"lead\") : 0;\n  if (k + 1 < GATES.length && (m.gate || 0) < GATES.length) {   // aim a little past the gate, toward the next one\n    const n = GATES[k + 1], d = Math.hypot(n[0] - g[0], n[1] - g[1], n[2] - g[2]);\n    tx += (n[0] - g[0]) / d * lead; ty += (n[1] - g[1]) / d * lead; tz += (n[2] - g[2]) / d * lead;\n  }\n  return { dx: tx - p.x, dy: ty - p.y, dz: tz - p.z };\n}\nfunction reward(ctx) {\n  const i = ctx.in, s = ctx.state, dt = ctx.dt, m = ctx.memory, p = pos(i);\n  if (m.gate === undefined) m.gate = 0;\n  let gates = 0, time = 0, dist = 0;\n  if (m.gate < GATES.length) {\n    const g = GATES[m.gate];\n    dist = Math.hypot(g[0] - p.x, g[1] - p.y, g[2] - p.z);\n    if (dist < 3) { m.gate++; gates = 10; if (m.gate === GATES.length) { m.tFinish = ctx.t; time = 2 * (ctx.info.duration - ctx.t); } }\n  }\n  const L = GATES[GATES.length - 1], dl = Math.hypot(L[0] - p.x, L[1] - p.y, L[2] - p.z);\n  const speed = Math.sqrt(s.vx * s.vx + s.vy * s.vy + s.vz * s.vz);\n  const lean = Math.sqrt(i[\"att.pitch\"] * i[\"att.pitch\"] + i[\"att.roll\"] * i[\"att.roll\"]);\n  return {\n    gates: gates, time: time,\n    progress: m.gate < GATES.length ? -dist / 100 * dt : 0,\n    hold: (m.gate >= GATES.length && dl < 3 && speed < 3) ? dt : 0,\n    upright: lean > 85 ? -dt : 0,\n    spin: -Math.min(Math.abs(i[\"rate.yaw\"]) / 180, 1) * dt * 0.3,\n  };\n}\nfunction failed(ctx) { const i = ctx.in; return ctx.state.crashed || Math.abs(i[\"att.roll\"]) > 120 || i.alt > 60; }\nfunction terminate(ctx) { return failed(ctx); }\nfunction fitness(ctx) {\n  const crash = failed(ctx) ? -2 * (ctx.info.duration - ctx.t) - 1 : 0;\n  const s = ctx.sum;\n  return { fitness: s.gates + s.time + s.progress + s.hold + s.upright + s.spin + crash, terms: { crash: crash } };\n}\nfunction descriptor(ctx) { return [ctx.memory.tFinish || ctx.info.duration, ctx.memory.gate || 0]; }\n// Genes: the drone-race timid hover tune as the start point, plus lead.\nfunction genome(base) {\n  const g = (name, lo, hi, init) => base.genes.push({ name: name, group: \"script\", min: lo, max: hi, initial: init, sigma: (hi - lo) / 10 });\n  g(\"hover\", 0.05, 0.2, 0.1);\n  g(\"kAlt\", 0, 0.1, 0.02);\n  g(\"kVs\", 0, 0.1, 0.03);\n  g(\"kAtt\", 0, 0.01, 0.003);\n  g(\"kRate\", 0, 0.003, 0.0006);\n  g(\"kPos\", 0, 5, 0.5);\n  g(\"kVel\", 0, 10, 2);\n  g(\"kYaw\", 0, 0.006, 0.002);\n  g(\"tiltMax\", 10, 80, 45);\n  g(\"lead\", 0, 15, 0);\n  return base;\n}\nfunction control(ctx) {\n  const G = ctx.genome;\n  quad(ctx, { hover: G.get(\"hover\"), kAlt: G.get(\"kAlt\"), kVs: G.get(\"kVs\"), kAtt: G.get(\"kAtt\"), kRate: G.get(\"kRate\"),\n    kPos: G.get(\"kPos\"), kVel: G.get(\"kVel\"), kYaw: G.get(\"kYaw\"), tiltMax: G.get(\"tiltMax\") }, aim(ctx), 0);\n  if (ctx.memory.gate === undefined) ctx.memory.gate = 0;\n}\n\n// --- Quad flight controller (shared by drone-hover / drone-race). Cascade: position -> lean angle -> attitude PD\n//     -> motor mixer, plus altitude PD and yaw-rate damping, all in thrust-fraction units (0..1 of static thrust).\n//     tgt = offset to the goal (m, world axes); yawSp = yaw-rate setpoint (deg/s).\nfunction quad(ctx, G, tgt, yawSp) {\n  const i = ctx.in, m = ctx.memory, dt = ctx.dt;\n  const dx = tgt.dx, dy = tgt.dy, dz = tgt.dz;\n  // ground velocity from the rate of change of the target offset (there is no velocity sensor), lightly filtered\n  const vx = m.pdx === undefined ? 0 : -(dx - m.pdx) / dt, vz = m.pdz === undefined ? 0 : -(dz - m.pdz) / dt;\n  m.vx = m.vx === undefined ? 0 : m.vx + (vx - m.vx) * 0.3; m.vz = m.vz === undefined ? 0 : m.vz + (vz - m.vz) * 0.3;\n  m.pdx = dx; m.pdz = dz;\n  const lim = G.tiltMax;\n  const pitchSp = clamp(-(G.kPos * dx - G.kVel * m.vx), -lim, lim);   // nose down to go +x\n  const rollSp = clamp(G.kPos * dz - G.kVel * m.vz, -lim, lim);       // roll positive to go +z\n  const tilt = Math.min(Math.sqrt(i[\"att.pitch\"] * i[\"att.pitch\"] + i[\"att.roll\"] * i[\"att.roll\"]), 80) * Math.PI / 180;\n  const f = (G.hover + G.kAlt * clamp(dy, -10, 10) - G.kVs * i.vs) / Math.max(Math.cos(tilt), 0.3);   // tilt compensation\n  const p = G.kAtt * (pitchSp - i[\"att.pitch\"]) - G.kRate * i[\"rate.pitch\"];\n  const r = G.kAtt * (rollSp - i[\"att.roll\"]) - G.kRate * i[\"rate.roll\"];\n  const y = -G.kYaw * (i[\"rate.yaw\"] - (yawSp || 0));   // speeding up the CW pair (FL, RR) yaws the body to negative rate\n  const e = (v) => Math.pow(clamp(v, 0, 1), 1.5);   // thrust fraction -> motor command (static thrust ~ power^2/3)\n  ctx.out[\"Motor FL\"] = e(f + p + r + y);\n  ctx.out[\"Motor FR\"] = e(f + p - r - y);\n  ctx.out[\"Motor RL\"] = e(f - p + r - y);\n  ctx.out[\"Motor RR\"] = e(f - p - r + y);\n}\n"
+ },
+ "seed": 1,
+ "version": 1,
+ "workers": 0,
+ "world": {
+  "source": "inline",
+  "inline": {
+   "version": 1,
+   "name": "Gate course A",
+   "terrain": {
+    "kind": "flat",
+    "params": {}
+   },
+   "water": {
+    "oceanEnabled": false,
+    "seaLevel": 0,
+    "windSpeed": 8,
+    "windDirectionDeg": 0,
+    "fetchKm": 100,
+    "lakes": [],
+    "rivers": [],
+    "fluidZones": []
+   },
+   "environment": {
+    "timeOfDayHours": 15.5,
+    "sunAzimuthDeg": 230,
+    "windSpeed": 0,
+    "windDirectionDeg": 270,
+    "turbidity": 2,
+    "fogDensity": 1
+   },
+   "vegetation": {},
+   "objects": [
+    {
+     "id": "g0",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       25,
+       4.75,
+       -3.5
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      9.5,
+      0.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "cylinder",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g1",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       25,
+       4.75,
+       3.5
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      9.5,
+      0.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "cylinder",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g2",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       25,
+       9.5,
+       0
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      0.35,
+      7.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "box",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g3",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       25,
+       2.5,
+       0
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      0.35,
+      7.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "box",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g4",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       55,
+       7.75,
+       11.5
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      15.5,
+      0.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "cylinder",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g5",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       55,
+       7.75,
+       18.5
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      15.5,
+      0.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "cylinder",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g6",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       55,
+       15.5,
+       15
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      0.35,
+      7.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "box",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g7",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       55,
+       8.5,
+       15
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      0.35,
+      7.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "box",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g8",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       85,
+       5.25,
+       -15.5
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      10.5,
+      0.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "cylinder",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g9",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       85,
+       5.25,
+       -8.5
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      10.5,
+      0.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "cylinder",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g10",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       85,
+       10.5,
+       -12
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      0.35,
+      7.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "box",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g11",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       85,
+       3.5,
+       -12
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      0.35,
+      7.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "box",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g12",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       115,
+       9.25,
+       6.5
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      18.5,
+      0.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "cylinder",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g13",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       115,
+       9.25,
+       13.5
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      18.5,
+      0.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "cylinder",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g14",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       115,
+       18.5,
+       10
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      0.35,
+      7.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "box",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g15",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       115,
+       11.5,
+       10
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      0.35,
+      7.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "box",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g16",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       145,
+       5.75,
+       -3.5
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      11.5,
+      0.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "cylinder",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g17",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       145,
+       5.75,
+       3.5
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      11.5,
+      0.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "cylinder",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g18",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       145,
+       11.5,
+       0
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      0.35,
+      7.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "box",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    },
+    {
+     "id": "g19",
+     "kind": "prop",
+     "transform": {
+      "position": [
+       145,
+       4.5,
+       0
+      ],
+      "rotation": [
+       0,
+       0,
+       0,
+       1
+      ]
+     },
+     "scale": [
+      0.35,
+      0.35,
+      7.35
+     ],
+     "breakable": false,
+     "params": {
+      "shape": "box",
+      "color": [
+       0.24,
+       0.96,
+       0.78
+      ],
+      "emissive": 1.5,
+      "roughness": 0.4,
+      "collide": false
+     }
+    }
+   ],
+   "spawn": {
+    "position": [
+     0,
+     2,
+     0
+    ],
+    "rotation": [
+     0,
+     0,
+     0,
+     1
+    ]
+   }
+  }
+ }
+}

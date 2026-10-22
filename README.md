@@ -47,9 +47,29 @@ C++20 core, Qt 6 Quick UI, Metal and Direct3D 12 renderers with shaders written 
 - **FLY:** 1 kHz physics, chase / orbit / cockpit cameras, per-output sliders, HUD, aero model picker and the
   EQUATIONS panel (every fast-model equation with live values).
 - **WORLD:** flat, procedural (GPU erosion), heightmap or real-world terrain; sculpt and paint; ocean, lakes, rivers,
-  vegetation, props and breakables; sky and wind. New → *Manhattan (Midtown)* builds a detailed, flyable Midtown.
+  vegetation, props and breakables; sky and wind. New → *Manhattan (Midtown)*, *Los Angeles (Downtown)*, *Tel Aviv
+  (Coast)* or *Dubai (Downtown)* builds a flyable procedural city (approximate massing, not GIS data).
 - **EVOLVE:** GA, CMA-ES, sep-CMA-ES, OpenAI-ES, NEAT, MAP-Elites, novelty search or your own algorithm in JavaScript;
   neural controllers, craft designs or both; headless parallel training, charts, replays in the viewport.
+
+### Built-in example experiments
+
+EVOLVE → New → *Examples* (or `Ctrl+K`, "EVOLVE: example: …") opens any of `examples/experiments/*.json`; the same
+files train headless with `pwcli --train`. Any craft × any world × any reward:
+
+| Example | Craft | What is optimised |
+|---|---|---|
+| `missile-intercept.json` | Racer quad | Intercept an incoming ballistic missile (`threat` block) far from the defended pad; CMA-ES evolves a lead-guidance law + flight gains |
+| `hoverslam-ducted-rocket.json` | Ducted rocket (grid fins) | SpaceX-style suicide burn: engine off as long as possible, touch down upright on the pad at ~0 m/s with the least fuel |
+| `any-multirotor.json` | Heavy hex / Lopsided penta / any multirotor | One script builds its own motor mixer from `ctx.craft` (never names a motor) and holds a waypoint in gusty wind |
+| `drone-gate-course.json` | Racer quad | Thread a 5-gate course as fast as possible |
+| `drone-race.json`, `drone-hover.json` | Racer quad | Race to a point / hold a hover box (evolved PID gains) |
+| `hover-pid.json`, `hover-ducted-rocket.json` | Ducted rocket | Hover (PID gains / CMA-ES) |
+| `hold100-*.json`, `glide-cmaes.json`, `neural.json`, `design.json` | Trainer | Hold 100 m (GA / NEAT / MAP-Elites), glide distance, neural controller, craft design |
+
+Example crafts (*Ducted rocket*, *Ducted rocket (grid fins)*, *Heavy hex*, *Lopsided penta*) are built in next to the
+stock crafts; any other craft file trains with `pwcli --train exp.json --craft <file.json>`. *Training worlds → Add a
+world → Built-in city* trains in any of the city presets.
 
 ## Using the app
 
@@ -124,8 +144,9 @@ pwcli --info                                               # CPU features, GPU b
 ```
 
 `--train` also takes `--workers`, `--population`, `--seed`, `--aero <profile>`, `--script-engine`.
-The app takes `--tab`, `--experiment <file.json>`, `--color-scheme`, `--size WxH`, `--command "<palette entry>"` (or `"wait <s>"`, run in order) and
-`--screenshot out.png --quit-after <s>` (how the screenshots above were made).
+The app takes `--tab`, `--experiment <file.json>`, `--craft <file.json>`, `--color-scheme`, `--size WxH`, `--command "<palette entry>"` (or `"wait <s>"`, run in order) and
+`--screenshot out.png --quit-after <s>` (how the screenshots above were made). `--open-run <dir> --replay best|g<N>` replays
+a finished run (e.g. one from `pwcli --train --out`); add `--record-dir <dir> [--record-fps 30]` for frame-exact footage.
 
 ## Docs
 

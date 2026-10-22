@@ -142,6 +142,21 @@ bool presetsCompile(Context& c) {
             } catch (const ScriptException& x) { k.fail(ex.file + ": " + x.what()); }
         }
         k.expect(nEx >= 5, "example experiments with scripts: " + std::to_string(nEx));
+        // Every craft / world file an example references ("../crafts/x.json", "../worlds/y.json") is built in, so the
+        // app's EVOLVE > New > Examples menu opens each example stand-alone.
+        for (auto& ex : presets::examples()) {
+            auto r = json::parse(ex.json);
+            auto base = [](const std::string& p) { auto i = p.find_last_of('/'); return i == std::string::npos ? p : p.substr(i + 1); };
+            for (auto& c : r.value["crafts"].items()) {
+                if (!c["path"].isString()) continue;
+                bool found = false;
+                for (auto& e : craft::presets::examples()) found = found || base(c["path"].str()) == e.file;
+                k.expect(found, ex.file + ": craft " + c["path"].str() + " is a built-in example craft");
+            }
+            const auto& w = r.value["world"];
+            if (w["source"].str() == "file" && w["path"].isString())
+                k.expect(!presets::exampleWorld(base(w["path"].str())).empty(), ex.file + ": world " + w["path"].str() + " is embedded");
+        }
         // syntax error → compile error with the user's line number
         auto s = catching([&] { compiled(e, "function control(ctx) {\n  var x = 1;\n  var y = ;\n}"); });
         k.expect(s && s->hook == "compile" && s->line == 3, "syntax error at line 3 (got " + (s ? s->describe() : std::string("no error")) + ")");

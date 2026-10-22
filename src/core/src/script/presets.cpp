@@ -80,4 +80,6 @@ const std::vector<Example>& examples() {
     }();
     return ex;
 }
+
+std::string exampleWorld(const std::string& file) { return blob(("worlds/" + file).c_str()); }
 }

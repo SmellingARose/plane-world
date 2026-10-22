@@ -23,4 +23,6 @@ craft::CraftDocument addStandardSensors(const craft::CraftDocument& craft);
 /// Example experiments shipped in examples/experiments (file name → JSON text), for tests and the app.
 struct Example { std::string file; std::string json; };
 const std::vector<Example>& examples();
+/// An example world file the examples reference as "../worlds/<file>" (JSON text; empty when not shipped).
+std::string exampleWorld(const std::string& file);
 }

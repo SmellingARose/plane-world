@@ -118,6 +118,11 @@ ColumnLayout {
                 onTriggered: tw.pick(modelData.kind, modelData.name)
             }
         }
+        Menu { title: qsTr("Built-in city")
+            MenuItem { text: qsTr("Manhattan (Midtown)"); onTriggered: tw.pick("city", "manhattan") }
+            MenuItem { text: qsTr("Los Angeles (Downtown)"); onTriggered: tw.pick("city", "losangeles") }
+            MenuItem { text: qsTr("Tel Aviv (Coast)"); onTriggered: tw.pick("city", "telaviv") }
+            MenuItem { text: qsTr("Dubai (Downtown)"); onTriggered: tw.pick("city", "dubai") } }
         MenuSeparator {}
         MenuItem { text: qsTr("Embedded copy of the open world"); onTriggered: tw.pick("embedded")
                    ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Stored inside the experiment, so it travels with it") }

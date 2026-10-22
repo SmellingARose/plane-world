@@ -17,6 +17,8 @@
 #include "pw/evo/evaluator.h"
 #include "pw/evo/script.h"
 #include "pw/json.h"
+#include "pw/script/presets.h"
+#include "pw/world/presets.h"
 #include "pw/sim/craft_sim.h"
 #include "pw/sim/craft_spec.h"
 #include "worldmodel.h"
@@ -145,6 +147,105 @@ EvolveModel::~EvolveModel() {
 QStringList EvolveModel::presets() const {
     QStringList l; for (auto& n : evo::presets::names()) l << QString::fromStdString(n); return l;
 }
+// Built-in example experiments (examples/experiments, embedded at build time). The showcase ones come first, in the
+// order of the "one platform: any craft x any world x any reward" story; the rest follow by name.
+namespace {
+const char* const kExampleOrder[] = {"missile-intercept.json", "hoverslam-ducted-rocket.json", "any-multirotor.json",
+                                     "drone-gate-course.json", "drone-race.json", "drone-hover.json"};
+int exampleRank(const std::string& f) {
+    for (int i = 0; i < int(std::size(kExampleOrder)); ++i) if (f == kExampleOrder[i]) return i;
+    return int(std::size(kExampleOrder));
+}
+// Replace (or add) `key` in a JSON object, keeping member order.
+json::Value withKey(const json::Value& o, const std::string& key, json::Value v, const std::string& drop = {}) {
+    json::Value out = json::Value::object();
+    bool done = false;
+    for (auto& [k, x] : o.members()) {
+        if (!drop.empty() && k == drop) continue;
+        if (k == key) { if (!done) out.set(k, v); done = true; }
+        else out.set(k, x);
+    }
+    if (!done) out.set(key, std::move(v));
+    return out;
+}
+std::string baseName(const std::string& p) { return std::filesystem::path(p).filename().string(); }
+// Examples reference their craft / world files relative to examples/experiments ("../crafts/x.json"); the app has
+// those crafts built in (by name) and the worlds embedded, so rewrite the references to make the example stand alone.
+json::Value selfContainedExample(json::Value v) {
+    if (v["crafts"].isArray()) {
+        json::Value cr = json::Value::array();
+        for (auto& c : v["crafts"].items()) {
+            json::Value r = c;
+            if (c["path"].isString())
+                for (auto& e : craft::presets::examples())
+                    if (baseName(c["path"].str()) == e.file) { r = withKey(c, "name", json::Value::string(e.name), "path"); break; }
+            cr.push(std::move(r));
+        }
+        v = withKey(v, "crafts", std::move(cr));
+    }
+    auto fixWorld = [](const json::Value& w) -> json::Value {
+        if (w["source"].str() != "file" || !w["path"].isString()) return w;
+        const std::string text = script::presets::exampleWorld(baseName(w["path"].str()));
+        if (text.empty()) return w;
+        auto r = json::parse(text);
+        if (!r.ok) return w;
+        return withKey(withKey(w, "source", json::Value::string("inline"), "path"), "inline", r.value);
+    };
+    if (v.has("world")) v = withKey(v, "world", fixWorld(v["world"]));
+    if (v["worlds"].isArray()) {
+        json::Value ws = json::Value::array();
+        for (auto& w : v["worlds"].items()) ws.push(fixWorld(w));
+        v = withKey(v, "worlds", std::move(ws));
+    }
+    return v;
+}
+}
+
+QVariantList EvolveModel::examples() const {
+    std::vector<const script::presets::Example*> ex;
+    for (auto& e : script::presets::examples()) ex.push_back(&e);
+    std::stable_sort(ex.begin(), ex.end(), [](auto* a, auto* b) {
+        const int ra = exampleRank(a->file), rb = exampleRank(b->file);
+        return ra != rb ? ra < rb : a->file < b->file;
+    });
+    QVariantList l;
+    for (auto* e : ex) {
+        auto r = json::parse(e->json);
+        if (!r.ok) continue;
+        QVariantMap m;
+        m["file"] = QString::fromStdString(e->file);
+        m["name"] = QString::fromStdString(r.value["name"].str().empty() ? e->file : r.value["name"].str());
+        m["notes"] = QString::fromStdString(r.value["notes"].str());
+        m["showcase"] = exampleRank(e->file) < 4;
+        l << m;
+    }
+    return l;
+}
+
+bool EvolveModel::openExample(const QString& file) {
+    for (auto& e : script::presets::examples()) {
+        if (QString::fromStdString(e.file) != file) continue;
+        try {
+            auto r = json::parse(e.json);
+            if (!r.ok) throw std::runtime_error(r.error);
+            auto d = evo::ExperimentDocument::fromJson(selfContainedExample(r.value));
+            stopReplay();
+            newRun();
+            m_path.clear();   // Save writes a copy to the experiment library
+            setDoc(d, false);
+            m_scriptMsg.clear(); m_errLine = 0; m_scriptOk = false; emit scriptChanged();
+            refreshRunDirs();
+            setStatus(tr("Opened example “%1”").arg(QString::fromStdString(d.name)));
+            return true;
+        } catch (const std::exception& x) {
+            setStatus(tr("Open failed: %1").arg(QString::fromUtf8(x.what())));
+            return false;
+        }
+    }
+    setStatus(tr("No example named %1").arg(file));
+    return false;
+}
+
 QStringList EvolveModel::algorithmKinds() const {
     QStringList l; for (auto& k : evo::registry::kinds()) l << QString::fromStdString(k);
     if (!l.contains("script")) l << "script";
@@ -231,6 +332,11 @@ std::optional<evo::WorldRef> makeWorldRef(const QString& kind, const QString& ar
         const QUrl u(arg);
         w.source = "file"; w.path = (u.isLocalFile() ? u.toLocalFile() : arg).toStdString();
     } else if (kind == "embedded") { w.source = "inline"; w.inlineDoc = WorldModel::instance()->currentDocument(); }
+    else if (kind == "city") {   // a built-in city preset ("manhattan", "losangeles", "telaviv", "dubai"), stored inline
+        auto d = world::presets::city(arg.toStdString());
+        if (!d) return std::nullopt;
+        w.source = "inline"; w.inlineDoc = std::move(*d);
+    }
     else return std::nullopt;
     return w;
 }

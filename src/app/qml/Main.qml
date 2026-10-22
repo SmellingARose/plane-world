@@ -68,6 +68,10 @@ ApplicationWindow {
         { name: "EVOLVE: check script", shortcut: "", run: () => { selectTab(3); EvolveModel.checkScript() } },
         { name: "EVOLVE: fly best with the evolved autopilot", shortcut: "", run: () => EvolveModel.flyWithAutopilot() },
         { name: "FLY: toggle evolved autopilot", shortcut: "O", run: () => { App.autopilot = !App.autopilot } },
+        { name: "EVOLVE: example: missile interception (Racer quad)", shortcut: "", run: () => { selectTab(3); EvolveModel.openExample("missile-intercept.json") } },
+        { name: "EVOLVE: example: suicide-burn landing (hoverslam, ducted rocket)", shortcut: "", run: () => { selectTab(3); EvolveModel.openExample("hoverslam-ducted-rocket.json") } },
+        { name: "EVOLVE: example: any multirotor, auto-wired (heavy hex)", shortcut: "", run: () => { selectTab(3); EvolveModel.openExample("any-multirotor.json") } },
+        { name: "EVOLVE: example: gate course (Racer quad)", shortcut: "", run: () => { selectTab(3); EvolveModel.openExample("drone-gate-course.json") } },
         { name: "EVOLVE: show controller wiring", shortcut: "", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.showWiring() } },
         { name: "EVOLVE: replay best", shortcut: "", run: () => { selectTab(3); EvolveModel.replay("best") } },
         { name: "Quit", shortcut: "Ctrl+Q", run: () => Qt.quit() }

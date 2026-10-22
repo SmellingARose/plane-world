@@ -6,7 +6,11 @@ set(_pw_presets
   "Rover=${PROJECT_SOURCE_DIR}/data/crafts/rover.json"
   "Sounding rocket=${PROJECT_SOURCE_DIR}/data/crafts/sounding-rocket.json"
   "Racer quad=${PROJECT_SOURCE_DIR}/data/crafts/racer-quad.json")
-set(_pw_examples "Ducted rocket=${PROJECT_SOURCE_DIR}/examples/crafts/ducted-rocket.json")
+set(_pw_examples
+  "Ducted rocket=${PROJECT_SOURCE_DIR}/examples/crafts/ducted-rocket.json"
+  "Ducted rocket (grid fins)=${PROJECT_SOURCE_DIR}/examples/crafts/ducted-rocket-gridfins.json"
+  "Heavy hex=${PROJECT_SOURCE_DIR}/examples/crafts/heavy-hex.json"
+  "Lopsided penta=${PROJECT_SOURCE_DIR}/examples/crafts/lopsided-penta.json")
 set(_pw_craft_files)
 foreach(pair IN LISTS _pw_presets _pw_examples)
   string(FIND "${pair}" "=" eq)

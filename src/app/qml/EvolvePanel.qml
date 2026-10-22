@@ -111,7 +111,14 @@ Rectangle {
                     Menu { id: newMenu
                         MenuItem { text: qsTr("Quick start — learns in ~10 s"); onTriggered: ev.quickStart() }
                         MenuSeparator {}
-                        Repeater { model: ev.presets; MenuItem { required property string modelData; text: modelData; onTriggered: ev.newFromPreset(modelData) } } }
+                        Repeater { model: ev.presets; MenuItem { required property string modelData; text: modelData; onTriggered: ev.newFromPreset(modelData) } }
+                        MenuSeparator {}
+                        // built-in example experiments (examples/experiments): any craft x any world x any reward
+                        Menu { title: qsTr("Examples")
+                            Repeater { model: ev.examples
+                                MenuItem { required property var modelData; text: modelData.name; font.weight: modelData.showcase ? Font.DemiBold : Font.Normal
+                                           onTriggered: ev.openExample(modelData.file)
+                                           ToolTip.visible: hovered && modelData.notes !== ""; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: modelData.notes } } } }
                 }
                 Button { Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0;
                     text: qsTr("Open"); onClicked: { ev.refreshLibrary(); libMenu.popup() }

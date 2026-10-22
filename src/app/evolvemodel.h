@@ -34,6 +34,7 @@ class EvolveModel : public QObject, public ReplayProvider {
     Q_PROPERTY(QString filePath READ filePath NOTIFY experimentChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY experimentChanged)
     Q_PROPERTY(QStringList presets READ presets CONSTANT)
+    Q_PROPERTY(QVariantList examples READ examples CONSTANT)
     Q_PROPERTY(QVariantList library READ library NOTIFY libraryChanged)
     Q_PROPERTY(QString libraryDir READ libraryDir CONSTANT)
     Q_PROPERTY(QStringList crafts READ crafts NOTIFY libraryChanged)
@@ -86,6 +87,7 @@ public:
     QString filePath() const { return m_path; }
     bool dirty() const { return m_dirty; }
     QStringList presets() const;
+    QVariantList examples() const;   // built-in example experiments [{file, name, notes}] (examples/experiments)
     QVariantList library() const { return m_library; }
     QString libraryDir() const;
     QStringList crafts() const { return m_crafts; }
@@ -131,6 +133,7 @@ public:
     /// stay level from an air start over flat ground (population 32, 40 generations, 20 s episodes).
     Q_INVOKABLE void quickStart();
     Q_INVOKABLE bool open(const QString& pathOrUrl);
+    Q_INVOKABLE bool openExample(const QString& file);   // a built-in example experiment by file name
     Q_INVOKABLE bool save();
     Q_INVOKABLE bool saveAs(const QString& pathOrUrl);
     Q_INVOKABLE void duplicate();
