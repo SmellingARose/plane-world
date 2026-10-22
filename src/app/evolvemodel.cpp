@@ -843,6 +843,32 @@ QVariantList EvolveModel::replayOutputs() const {
     return l;
 }
 
+QVariantMap EvolveModel::replayTelemetry() const {
+    QVariantMap m;
+    if (!m_traj || m_traj->frames.empty()) return m;
+    const double T = replayDuration(), t = m_replayTime, h = 0.05;
+    auto f = m_traj->sample(t);
+    auto a = m_traj->sample(std::max(0.0, t - h)), b = m_traj->sample(std::min(T, t + h));
+    if (!f || !a || !b) return m;
+    const auto& p = f->origin.position;
+    const double span = std::min(T, t + h) - std::max(0.0, t - h);
+    Vec3d v{};
+    if (span > 1e-6) v = (b->origin.position - a->origin.position) * (1.0 / span);
+    // tilt: angle between the craft's up axis and world up
+    const Vec3d up = f->origin.rotation.act(Vec3d{0, 1, 0});
+    const double tilt = std::acos(std::clamp(up.y / std::max(1e-9, length(up)), -1.0, 1.0)) * 180 / 3.141592653589793;
+    m["t"] = t;
+    m["alt"] = p.y - WorldModel::instance()->heightAt(p.x, p.z);
+    m["vs"] = v.y;
+    m["speed"] = length(v);
+    m["hspeed"] = std::sqrt(v.x * v.x + v.z * v.z);
+    m["tilt"] = tilt;
+    m["dist"] = std::sqrt(p.x * p.x + p.z * p.z);   // from the world origin (the pad in landing worlds)
+    m["ended"] = t >= T - 1e-6;
+    m["doneReason"] = QString::fromStdString(m_traj->doneReason);
+    return m;
+}
+
 const craft::CraftDocument* EvolveModel::replayCraft(uint64_t& version) const {
     version = m_trajVersion;
     return m_traj ? &m_traj->craft : nullptr;

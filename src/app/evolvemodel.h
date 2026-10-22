@@ -71,6 +71,8 @@ class EvolveModel : public QObject, public ReplayProvider {
     Q_PROPERTY(double replaySpeed MEMBER m_replaySpeed NOTIFY replayChanged)
     Q_PROPERTY(bool replayPlaying READ replayPlaying WRITE setReplayPlaying NOTIFY replayChanged)
     Q_PROPERTY(QVariantList replayOutputs READ replayOutputs NOTIFY replayTimeChanged)
+    // flight readout for the replay HUD: { t, alt, vs, speed, hspeed, tilt, dist } (m, m/s, deg) at replayTime
+    Q_PROPERTY(QVariantMap replayTelemetry READ replayTelemetry NOTIFY replayTimeChanged)
 public:
     explicit EvolveModel(QObject* parent);   // no default: QML must use create() (one shared instance)
     ~EvolveModel() override;
@@ -119,6 +121,7 @@ public:
     bool replayPlaying() const { return m_playing; }
     void setReplayPlaying(bool p) { if (p != m_playing) { m_playing = p; emit replayChanged(); } }
     QVariantList replayOutputs() const;
+    QVariantMap replayTelemetry() const;
 
     // document
     Q_INVOKABLE void set(const QString& path, const QVariant& value);

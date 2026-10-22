@@ -67,6 +67,8 @@ SpawnSettings spawnFromJson(const Value& v) {
     s.headingDeg = rNum(v, "headingDeg"); s.altitudeAGL = rNum(v, "altitudeAGL"); s.speed = rNum(v, "speed");
     s.jitterPosition = rNum(v, "jitterPosition"); s.jitterHeadingDeg = rNum(v, "jitterHeadingDeg");
     s.jitterSpeed = rNum(v, "jitterSpeed"); s.jitterAttitudeDeg = rNum(v, "jitterAttitudeDeg");
+    s.verticalSpeed = oNum(v, "verticalSpeed").value_or(0); s.jitterVerticalSpeed = oNum(v, "jitterVerticalSpeed").value_or(0);
+    s.jitterAltitude = oNum(v, "jitterAltitude").value_or(0);
     return s;
 }
 WindRandomization windFromJson(const Value& v) {
@@ -285,6 +287,9 @@ Value ExperimentDocument::toJson() const {
     sp.set("headingDeg", Value::number(s.headingDeg)); sp.set("altitudeAGL", Value::number(s.altitudeAGL)); sp.set("speed", Value::number(s.speed));
     sp.set("jitterPosition", Value::number(s.jitterPosition)); sp.set("jitterHeadingDeg", Value::number(s.jitterHeadingDeg));
     sp.set("jitterSpeed", Value::number(s.jitterSpeed)); sp.set("jitterAttitudeDeg", Value::number(s.jitterAttitudeDeg));
+    if (s.verticalSpeed != 0) sp.set("verticalSpeed", Value::number(s.verticalSpeed));
+    if (s.jitterVerticalSpeed != 0) sp.set("jitterVerticalSpeed", Value::number(s.jitterVerticalSpeed));
+    if (s.jitterAltitude != 0) sp.set("jitterAltitude", Value::number(s.jitterAltitude));
     ep.set("spawn", std::move(sp));
     Value wd = Value::object(); auto& wr = episode.wind;
     wd.set("speedMin", Value::number(wr.speedMin)); wd.set("speedMax", Value::number(wr.speedMax));

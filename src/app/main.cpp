@@ -2,6 +2,7 @@
 // renderer sharing Qt's device (GpuViewport).
 //   pwapp [--quit-after <s>] [--screenshot <file.png>] [--tab build|fly|world|evolve] [--color-scheme dark|light]
 //         [--size <w>x<h>] [--command "<palette entry>" | "wait <s>"]...   (commands run 1 s after launch, in order)
+//         scripted commands: "evolve-resume <run dir>", "evolve-replay best|g<N>", "evolve-speed <x>", "world-open <file>"
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
@@ -13,6 +14,7 @@
 #include <memory>
 #include "appcontroller.h"
 #include "evolvemodel.h"
+#include "worldmodel.h"
 #include "pw/cpu.h"
 #include "pw/gpu.h"
 
@@ -62,6 +64,11 @@ int main(int argc, char** argv) {
             for (; i < commands.size(); ++i) {
                 const QString& c = commands[i];
                 if (c.startsWith("wait ")) { QTimer::singleShot(int(c.mid(5).toDouble() * 1000), win, [run, i] { (*run)(i + 1); }); return; }
+                // scripted EVOLVE review / recording steps (not palette entries)
+                if (c.startsWith("evolve-resume ")) { EvolveModel::instance()->resumeDir(c.mid(14)); continue; }
+                if (c.startsWith("evolve-replay ")) { EvolveModel::instance()->replay(c.mid(14)); continue; }
+                if (c.startsWith("evolve-speed ")) { EvolveModel::instance()->setProperty("replaySpeed", c.mid(13).toDouble()); continue; }
+                if (c.startsWith("world-open ")) { WorldModel::instance()->open(c.mid(11)); continue; }
                 QVariant ok;
                 QMetaObject::invokeMethod(win, "runCommand", Q_RETURN_ARG(QVariant, ok), Q_ARG(QVariant, c));
                 if (!ok.toBool()) qWarning("--command: no palette entry named \"%s\"", qPrintable(c));

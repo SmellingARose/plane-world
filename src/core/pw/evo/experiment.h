@@ -71,6 +71,9 @@ struct SpawnSettings {
     std::optional<std::vector<double>> position;
     double headingDeg = 0, altitudeAGL = 0, speed = 0;
     double jitterPosition = 0, jitterHeadingDeg = 0, jitterSpeed = 0, jitterAttitudeDeg = 0;
+    // "air" mode: world-vertical velocity at spawn (m/s, negative = falling) and its jitter, plus altitude jitter.
+    // Optional in JSON (written only when non-zero) so older experiments are unchanged. Used by drop / landing tasks.
+    double verticalSpeed = 0, jitterVerticalSpeed = 0, jitterAltitude = 0;
 };
 
 struct WindRandomization { double speedMin = 0, speedMax = 0, directionMinDeg = 0, directionMaxDeg = 360, turbulence = 0; };
