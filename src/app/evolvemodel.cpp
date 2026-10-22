@@ -617,14 +617,14 @@ void EvolveModel::start() {
     });
 }
 
-void EvolveModel::resumeDir(const QString& dir) {
+void EvolveModel::resumeDir(const QString& dir, bool train) {
     if (running() || m_preparing) return;
     m_preparing = true; m_runError.clear(); emit runChanged();
     setStatus(tr("Resuming %1…").arg(QFileInfo(dir).fileName()));
     if (m_prep.joinable()) m_prep.join();
     QPointer<EvolveModel> self(this);
     const std::string d = dir.toStdString(), path = m_path.toStdString();
-    m_prep = std::thread([self, d, path] {
+    m_prep = std::thread([self, d, path, train] {
         std::unique_ptr<evo::EvolutionRun> run; QString err;
         try {
             auto cp = json::parseFile(d + "/run.json");
@@ -632,17 +632,17 @@ void EvolveModel::resumeDir(const QString& dir) {
             run = evo::EvolutionRun::resume(d, evo::EvoWorld::resolveAll(e, path, evo::EvoWorld::flat()));
         } catch (const std::exception& x) { err = QString::fromUtf8(x.what()); }
         auto* raw = run.release();
-        QMetaObject::invokeMethod(QCoreApplication::instance(), [self, raw, err] {
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [self, raw, err, train] {
             std::unique_ptr<evo::EvolutionRun> r(raw);
             if (!self) return;
             self->m_preparing = false;
             if (!r) { self->m_runError = err; emit self->runChanged(); self->setStatus(tr("Resume failed")); return; }
-            self->attach(std::move(r), false);
+            self->attach(std::move(r), false, train);
         }, Qt::QueuedConnection);
     });
 }
 
-void EvolveModel::attach(std::unique_ptr<evo::EvolutionRun> run, bool fresh) {
+void EvolveModel::attach(std::unique_ptr<evo::EvolutionRun> run, bool fresh, bool start) {
     if (m_run) { m_run->onGeneration = nullptr; m_run->onStateChange = nullptr; m_run->stop(); m_run->join(); }
     m_run = std::move(run);
     m_box = std::make_shared<Mailbox>();
@@ -679,6 +679,12 @@ void EvolveModel::attach(std::unique_ptr<evo::EvolutionRun> run, bool fresh) {
             if (st != evo::RunState::Running) self->refreshRunDirs();
         }, Qt::QueuedConnection);
     };
+    if (!start) {   // review only: history, hall of fame and replays, no training
+        m_state = evo::RunState::Finished;
+        emit runChanged();
+        setStatus(tr("Loaded %1 (%2 generations)").arg(runID()).arg(m_history.size()));
+        return;
+    }
     m_state = evo::RunState::Running;
     m_run->start();
     emit runChanged();

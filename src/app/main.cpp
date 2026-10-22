@@ -2,7 +2,7 @@
 // renderer sharing Qt's device (GpuViewport).
 //   pwapp [--quit-after <s>] [--screenshot <file.png>] [--tab build|fly|world|evolve] [--color-scheme dark|light]
 //         [--size <w>x<h>] [--command "<palette entry>" | "wait <s>"]...   (commands run 1 s after launch, in order)
-//         scripted commands: "evolve-resume <run dir>", "evolve-replay best|g<N>", "evolve-speed <x>", "world-open <file>"
+//         scripted commands: "evolve-resume <run dir>", "evolve-load <run dir>" (no training), "evolve-replay best|g<N>", "evolve-speed <x>", "world-open <file>"
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
@@ -66,7 +66,11 @@ int main(int argc, char** argv) {
                 if (c.startsWith("wait ")) { QTimer::singleShot(int(c.mid(5).toDouble() * 1000), win, [run, i] { (*run)(i + 1); }); return; }
                 // scripted EVOLVE review / recording steps (not palette entries)
                 if (c.startsWith("evolve-resume ")) { EvolveModel::instance()->resumeDir(c.mid(14)); continue; }
-                if (c.startsWith("evolve-replay ")) { EvolveModel::instance()->replay(c.mid(14)); continue; }
+                if (c.startsWith("evolve-load ")) { EvolveModel::instance()->resumeDir(c.mid(12), false); continue; }
+                if (c.startsWith("evolve-replay ")) {   // waits for a run that is still loading
+                    if (!EvolveModel::instance()->hasRun()) { QTimer::singleShot(250, win, [run, i] { (*run)(i); }); return; }
+                    EvolveModel::instance()->replay(c.mid(14)); continue;
+                }
                 if (c.startsWith("evolve-speed ")) { EvolveModel::instance()->setProperty("replaySpeed", c.mid(13).toDouble()); continue; }
                 if (c.startsWith("world-open ")) { WorldModel::instance()->open(c.mid(11)); continue; }
                 QVariant ok;
