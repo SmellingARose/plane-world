@@ -26,6 +26,8 @@ Rectangle {
     function saveFileAs() { saveDlg.open() }
 
     function num(path, def) { const v = ev.get(path); return v === undefined || v === null ? def : v }
+    // palette "EVOLVE: show controller wiring": Set up page, sensors -> controls table open and scrolled into view
+    function showWiring() { root.page = 0; ioSection.expanded = true; Qt.callLater(() => { const f = setupScroll.contentItem; f.contentY = Math.max(0, driveLabel.mapToItem(f.contentItem, 0, 0).y - 120) }) }
     function train() { root.page = 1; ev.running ? ev.pause() : (ev.hasRun && ev.runState === "idle" ? ev.resume() : ev.start()) }
     readonly property bool hasResults: ev.hasRun && ev.generations.length > 0
     readonly property color stateColor: ev.runState === "running" ? Theme.good : ev.runState === "stopping" || ev.runState === "preparing" ? Theme.warn
@@ -246,6 +248,7 @@ Rectangle {
 
                         // controller I/O table
                         PwSection {
+                            id: ioSection
                             visible: xp.genome && xp.genome.preset !== "design"
                             title: qsTr("Sensors → controls  (%1 in · %2 out)").arg((ev.io.inputs || []).filter(x => x.used).length).arg((ev.io.outputs || []).filter(x => x.used).length)
                             hint: qsTr("Tick what the controller can read and what it may move")
@@ -265,7 +268,7 @@ Rectangle {
                                 }
                             }
                             Label { visible: (ev.io.inputs || []).length === 0; text: qsTr("This craft has no sensors: standard flight sensors are added when the run starts."); color: Theme.textFaint; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: Theme.caption }
-                            Label { text: qsTr("WHAT IT DRIVES"); color: Theme.textFaint; font.pixelSize: Theme.micro; font.letterSpacing: Theme.sectionTracking; Layout.topMargin: Theme.s2 }
+                            Label { id: driveLabel; text: qsTr("WHAT IT DRIVES"); color: Theme.textFaint; font.pixelSize: Theme.micro; font.letterSpacing: Theme.sectionTracking; Layout.topMargin: Theme.s2 }
                             Repeater {
                                 model: ev.io.outputs || []
                                 delegate: RowLayout {
@@ -273,7 +276,8 @@ Rectangle {
                                     Layout.fillWidth: true
                                     CheckBox { checked: modelData.used; onToggled: ev.toggleIO("outputs", modelData.name, checked); padding: 0 }
                                     Label { text: modelData.name; Layout.fillWidth: true; elide: Text.ElideRight; color: modelData.used ? Theme.text : Theme.textFaint; font.pixelSize: Theme.small }
-                                    Label { text: modelData.kind + "  " + modelData.lo + "…" + modelData.hi; color: Theme.textFaint; font.pixelSize: Theme.micro; font.family: Theme.mono }
+                                    Label { text: modelData.where ? "→ " + modelData.where : modelData.kind + "  " + modelData.lo + "…" + modelData.hi
+                                            color: modelData.where ? Theme.text : Theme.textFaint; font.pixelSize: Theme.micro; font.family: Theme.mono }
                                 }
                             }
                         }

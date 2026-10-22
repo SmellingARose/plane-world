@@ -3,8 +3,10 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QPointer>
 #include <QThread>
 #include <QUrl>
@@ -12,6 +14,7 @@
 #include <cmath>
 #include <filesystem>
 #include "pw/craft/library.h"
+#include "pw/evo/evaluator.h"
 #include "pw/evo/script.h"
 #include "pw/json.h"
 #include "pw/sim/craft_sim.h"
@@ -489,8 +492,25 @@ void EvolveModel::refreshIO() {
             nIn += m["used"].toBool();
             ins << m;
         }
+        // what each output physically drives (rotor position about the CoM, spin, thrust) - the same ctx.craft
+        // wiring a geometry-aware controller script reads to wire itself to this craft
+        QHash<QString, QString> where;
+        {
+            sim::CraftSim probe; std::string perr;
+            if (probe.load(spec, &perr)) {
+                const QJsonObject w = QJsonDocument::fromJson(QByteArray::fromStdString(evo::craftWiringJSON(probe))).object();
+                for (const auto& rv : w["rotors"].toArray()) {
+                    const QJsonObject r = rv.toObject();
+                    where[r["output"].toString()] = QStringLiteral("rotor %1%2, %3%4 m  %5  %6 N")
+                        .arg(r["x"].toDouble() >= 0 ? "+" : "").arg(r["x"].toDouble(), 0, 'f', 2)
+                        .arg(r["z"].toDouble() >= 0 ? "+" : "").arg(r["z"].toDouble(), 0, 'f', 2)
+                        .arg(r["spin"].toDouble() > 0 ? "CW" : "CCW").arg(r["thrust"].toDouble(), 0, 'f', 1);
+                }
+            }
+        }
         for (auto& o : outputs) {
             QVariantMap m; m["name"] = QString::fromStdString(o.name); m["kind"] = QString::fromUtf8(sim::outputKindName(o.kind));
+            m["where"] = where.value(QString::fromStdString(o.name));
             m["lo"] = o.lo; m["hi"] = o.hi; m["used"] = used(mlp.outputs, o.name);
             nOut += m["used"].toBool();
             outs << m;
