@@ -317,11 +317,23 @@ static void drawThreat(pw::render::Renderer& r, const pw::render::Camera& cam, c
     if (v.eventT >= 0) {
         const double a = v.time - v.eventT;
         if (a >= 0 && a < 1.6) {
-            const double R = (v.destroyed ? 4 : 7) + a * (v.destroyed ? 26 : 34);
+            const double R = (v.destroyed ? 6 : 8) + a * (v.destroyed ? 55 : 40);
             const float f = float(std::pow(1 - a / 1.6, 1.5));
-            const Float4 core = v.destroyed ? Float4{8.0f * f, 6.0f * f, 3.0f * f, 1} : Float4{8.0f * f, 1.6f * f, 0.6f * f, 1};
+            const Float4 core = v.destroyed ? Float4{24.0f * f, 16.0f * f, 7.0f * f, 1} : Float4{20.0f * f, 3.5f * f, 1.2f * f, 1};
+            // fireball: a dense, short, white-hot burst over the first 0.35 s
+            if (a < 0.35) {
+                const float g = float(1 - a / 0.35);
+                unsigned q = 0x9E3779B9u;
+                for (int i = 0; i < 260; ++i) {
+                    q ^= q << 13; q ^= q >> 17; q ^= q << 5;
+                    const double u = (q & 1023) / 1023.0, w = ((q >> 10) & 1023) / 1023.0, l = ((q >> 20) & 1023) / 1023.0;
+                    const double th = 6.283185307179586 * u, ph = std::acos(2 * w - 1);
+                    const Vec3d dir{std::sin(ph) * std::cos(th), std::cos(ph), std::sin(ph) * std::sin(th)};
+                    d.line(v.eventPoint, v.eventPoint + dir * (R * 0.5 * l), Float4{40 * g, 34 * g, 24 * g, 1});
+                }
+            }
             unsigned h = 2166136261u;
-            for (int i = 0; i < 70; ++i) {
+            for (int i = 0; i < 160; ++i) {
                 h = (h ^ unsigned(i * 7919)) * 16777619u;
                 const double u = (h & 1023) / 1023.0, w = ((h >> 10) & 1023) / 1023.0, l = 0.55 + 0.45 * (((h >> 20) & 1023) / 1023.0);
                 const double th = 6.283185307179586 * u, ph = std::acos(2 * w - 1);
