@@ -234,7 +234,7 @@ bool presetsRoundtrip(selftest::Context& c) {
         k.expect(bool(d), std::string("bundled craft ") + pf.name);
         if (d) k.expect(jsonEqual(toJson(outputs::prepareForFlight(*d)), ref.value), std::string(pf.name) + ": prepareForFlight == Swift parity craft");
     }
-    k.expect(presets::bundled().size() == 9, "bundled = 5 presets + 4 example crafts (got " + std::to_string(presets::bundled().size()) + ")");
+    k.expect(presets::bundled().size() == 10, "bundled = 6 presets + 4 example crafts (got " + std::to_string(presets::bundled().size()) + ")");
     for (const char* n : {"Ducted rocket (grid fins)", "Heavy hex", "Lopsided penta"})
         k.expect(bool(presets::load(n)), std::string("example craft ") + n + " loads by name");
     return k.ok;

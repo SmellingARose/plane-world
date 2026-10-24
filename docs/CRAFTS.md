@@ -16,6 +16,7 @@ Every servo, motor, jet and solid becomes an output (a FLY slider, or a controll
 | **Jet trainer** | boxes, wings, jet, tank, servos, wheels | Turbojet with spool lag and fuel burn |
 | **Rover** | boxes, motor, servos, wheels | Ground vehicle: suspension and Pacejka-lite tyres, servo steering |
 | **Sounding rocket** | cone, cylinders, solid motor, fins | Unguided solid rocket with passive fin stability |
+| **Liquid rocket** | rocket engine (2-axis gimbal), tank, cylinders, cone, legs | 30 kN vacuum liquid-propellant rocket (Isp 285 s SL / 320 s vac, 40–100 % throttle, ±6° gimbal), T/W ≈ 1.4 full. Flown by the built-in `rocket` controller |
 | **Racer quad** | cylinder, cones, arms, 4 motors + props, sensors | 5" FPV-style racing quad, T/W ≈ 9.5. The craft for `drone-hover` and `drone-race` |
 
 ## Racer quad (`data/crafts/racer-quad.json`)
@@ -127,3 +128,23 @@ vanes below them. Total mass is about 13.8 kg (135 N weight). Static thrust is 2
 `pwcli --selftest physics.prop-counter-rotation` checks that the coaxial pair climbs and cancels yaw torque.
 `examples/experiments/hover-ducted-rocket.json` and `hover-pid.json` train controllers for it
 ([EVOLUTION.md §9](EVOLUTION.md#9-headless-training-cli)).
+
+## Liquid rocket (`data/crafts/liquid-rocket.json`)
+
+A single-engine liquid-propellant rocket with a gimballed engine, flown by the built-in `rocket` controller.
+
+- **Engine** (`rocket` part): 30 kN in vacuum, Isp 285 s at sea level and 320 s in vacuum, so 26.7 kN on the pad.
+  Thrust is s·F_vac − p_amb·A_e, with the nozzle exit area A_e taken from the two Isps. It throttles from 40 % to
+  100 % (0 = shut down) with a 0.15 s response and burns 9.6 kg/s from the tank at full throttle (about 160 s for
+  the full 1500 kg). The gimbal swings ±6° on two axes at 40°/s.
+- **Mass**: 478 kg dry + 1500 kg propellant; T/W ≈ 1.4 at lift-off, rising as it burns.
+- **Outputs**: `Engine` (throttle), `Engine gimbal pitch`, `Engine gimbal yaw`. Any controller or script can drive
+  them; the gimbal outputs are ids `eng.gimbal-pitch` / `eng.gimbal-yaw`.
+
+| Keys | Axis | Effect |
+|---|---|---|
+| W / S | throttle | Ramp up / down (stays where you leave it) |
+| ↑ / ↓ | pitch | Tilt forward / back up to 20°; release to return vertical |
+| ← / → | yaw | Tilt left / right; release to return vertical |
+
+There is no roll control (one engine cannot roll the rocket). `physics.rocket-gimbal` checks the thrust at sea level and in vacuum, the propellant flow, the gimbal limit, and that the controller holds a vertical climb and tilts on command.

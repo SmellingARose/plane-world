@@ -15,6 +15,7 @@ add_library(pwcore STATIC
   src/sim/fidelity.cpp
   src/sim/multirotor.cpp
   src/sim/controls.cpp
+  src/sim/rocket_fc.cpp
   src/sim/panel_aero.cpp
   src/sim/craft_sim.cpp
   src/sim/fast_gaps.cpp

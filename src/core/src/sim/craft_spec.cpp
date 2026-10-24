@@ -6,7 +6,7 @@
 namespace pw::sim {
 
 static const char* kTypeNames[kPartTypeCount] = {"box", "cylinder", "cone", "sphere", "wing", "servo", "wheel",
-                                                  "motor", "prop", "jet", "tank", "solid", "cad", "sensor"};
+                                                  "motor", "prop", "jet", "tank", "solid", "cad", "sensor", "rocket"};
 
 const char* partTypeName(PartType t) { return kTypeNames[int(t)]; }
 

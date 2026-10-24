@@ -19,6 +19,7 @@ keys / sliders / scripts ──► AXES ──► CONTROLLER ──► OUTPUTS (
 | Controller | What it does | Axes |
 |---|---|---|
 | `direct` | Each output = Σ gain × axis (a mix table). Elevons, flaperons, twin throttles. | any |
+| `rocket` | Attitude hold for a single gimballed liquid engine (`rocket` part): pitch/yaw command a tilt of the long axis up to 20° (released = hold vertical), throttle passes through (W/S ramp: it stays where you leave it). The gimbal-to-torque mapping is measured from the engine's position about the CoM and its mounting, so any layout works. | `throttle`, `pitch`, `yaw` |
 | `multirotor` | Angle-mode flight controller for 3+ rotors: throttle commands a climb rate (released = altitude hold), pitch/roll command a tilt up to 35° (released = self-level), yaw commands a turn rate. Its mixer comes from each rotor's position about the CoM and its spin direction, in thrust units (throttle = thrust^1.5), with "air mode" so it keeps authority at low throttle. Motors stay idle on the ground until you throttle up. | `throttle`, `yaw`, `pitch`, `roll` |
 
 The evolved autopilot (EVOLVE → "Fly it with the evolved autopilot") takes the outputs over while it is on; any

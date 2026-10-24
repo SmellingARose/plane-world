@@ -8,7 +8,7 @@
 
 namespace pw::craft {
 
-enum class OutputKind : uint8_t { Servo, Motor, Jet, Solid };
+enum class OutputKind : uint8_t { Servo, Motor, Jet, Solid, Rocket, Gimbal };
 const char* outputKindName(OutputKind k);
 
 struct CraftOutput {

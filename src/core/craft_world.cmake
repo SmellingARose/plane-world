@@ -5,7 +5,8 @@ set(_pw_presets
   "Jet trainer=${PROJECT_SOURCE_DIR}/data/crafts/jet-trainer.json"
   "Rover=${PROJECT_SOURCE_DIR}/data/crafts/rover.json"
   "Sounding rocket=${PROJECT_SOURCE_DIR}/data/crafts/sounding-rocket.json"
-  "Racer quad=${PROJECT_SOURCE_DIR}/data/crafts/racer-quad.json")
+  "Racer quad=${PROJECT_SOURCE_DIR}/data/crafts/racer-quad.json"
+  "Liquid rocket=${PROJECT_SOURCE_DIR}/data/crafts/liquid-rocket.json")
 set(_pw_examples
   "Ducted rocket=${PROJECT_SOURCE_DIR}/examples/crafts/ducted-rocket.json"
   "Ducted rocket (grid fins)=${PROJECT_SOURCE_DIR}/examples/crafts/ducted-rocket-gridfins.json"

@@ -17,12 +17,12 @@ namespace pw::craft { struct CraftDocument; }
 
 namespace pw::sim {
 
-enum class PartType : int { Box, Cylinder, Cone, Sphere, Wing, Servo, Wheel, Motor, Prop, Jet, Tank, Solid, Cad, Sensor };
-constexpr int kPartTypeCount = 14;
+enum class PartType : int { Box, Cylinder, Cone, Sphere, Wing, Servo, Wheel, Motor, Prop, Jet, Tank, Solid, Cad, Sensor, Rocket };
+constexpr int kPartTypeCount = 15;
 const char* partTypeName(PartType t);
 std::optional<PartType> partTypeFromName(const std::string& s);
 /// servo / motor / jet / solid become user outputs.
-constexpr bool isOutputType(PartType t) { return t == PartType::Servo || t == PartType::Motor || t == PartType::Jet || t == PartType::Solid; }
+constexpr bool isOutputType(PartType t) { return t == PartType::Servo || t == PartType::Motor || t == PartType::Jet || t == PartType::Solid || t == PartType::Rocket; }
 
 /// A JSON parameter value (Swift JSONValue subset used by part parameters).
 struct ParamValue {

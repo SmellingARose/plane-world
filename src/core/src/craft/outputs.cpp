@@ -7,7 +7,8 @@
 namespace pw::craft {
 
 const char* outputKindName(OutputKind k) {
-    switch (k) { case OutputKind::Servo: return "servo"; case OutputKind::Motor: return "motor"; case OutputKind::Jet: return "jet"; case OutputKind::Solid: return "solid"; }
+    switch (k) { case OutputKind::Servo: return "servo"; case OutputKind::Motor: return "motor"; case OutputKind::Jet: return "jet"; case OutputKind::Solid: return "solid";
+               case OutputKind::Rocket: return "rocket"; case OutputKind::Gimbal: return "gimbal"; }
     return "";
 }
 
@@ -87,6 +88,19 @@ std::vector<CraftOutput> list(const CraftDocument& doc) {
             o.kind = OutputKind::Solid; o.lo = 0; o.hi = 1;
             o.info = "solid " + n(p.param("thrust")) + " N \xC3\x97 " + n(p.param("burn")) + "s \xC2\xB7 ignites >50%";
             break;
+        case PartType::Rocket: {
+            // three outputs: throttle (the part id) and the two gimbal axes ("<id>.gimbal-pitch" / ".gimbal-yaw")
+            o.kind = OutputKind::Rocket; o.lo = 0; o.hi = 1;
+            o.info = "rocket " + n(p.param("thrust")) + " N vac \xC2\xB7 Isp " + n(p.param("ispSL")) + "/" + n(p.param("ispVac")) + " s \xC2\xB7 min " +
+                     n(p.param("minThrottle") * 100) + "%";
+            out.push_back(o);
+            for (const char* ax : {"pitch", "yaw"}) {
+                CraftOutput g; g.id = p.id + ".gimbal-" + ax; g.name = p.name + " gimbal " + ax; g.kind = OutputKind::Gimbal;
+                g.info = "gimbal \xC2\xB1" + n(p.param("gimbal")) + "\xC2\xB0 \xC2\xB7 " + n(p.param("gimbalRate")) + "\xC2\xB0/s";
+                out.push_back(std::move(g));
+            }
+            continue;
+        }
         default: continue;
         }
         out.push_back(std::move(o));

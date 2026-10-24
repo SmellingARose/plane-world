@@ -32,7 +32,8 @@ QVariantList vec3(const Vec3d& v) { return {v.x, v.y, v.z}; }
 
 const char* kindLabel(pc::OutputKind k) {
     switch (k) { case pc::OutputKind::Servo: return "servo"; case pc::OutputKind::Motor: return "motor";
-                 case pc::OutputKind::Jet: return "jet"; case pc::OutputKind::Solid: return "solid"; }
+                 case pc::OutputKind::Jet: return "jet"; case pc::OutputKind::Solid: return "solid";
+                 case pc::OutputKind::Rocket: return "rocket"; case pc::OutputKind::Gimbal: return "gimbal"; }
     return "";
 }
 

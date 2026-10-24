@@ -10,10 +10,12 @@
 //                 output that has part keybinds ("keys"), mixed 1:1 — the classic per-output behaviour.
 //   multirotor  — angle-mode flight controller (see multirotor.h) on axes "throttle" (climb rate), "yaw",
 //                 "pitch", "roll"; it computes all rotor throttles every step.
+//   rocket      — attitude hold through a gimballed liquid engine (see rocket_fc.h) on axes "throttle" (0..1,
+//                 passed through), "pitch" and "yaw" (tilt of the long axis; released = hold vertical).
 //
 // Craft JSON (optional, top level):
 //   "controls": {
-//     "controller": "direct" | "multirotor",
+//     "controller": "direct" | "multirotor" | "rocket",
 //     "axes": [ { "name": "pitch", "keys": { "pos": "up", "neg": "down", "mode": "spring", "rate": 3 }, "lo": -1, "hi": 1 } ],
 //     "mix":  [ { "axis": "pitch", "output": "Elevon L", "gain": 1 }, { "axis": "roll", "output": "Elevon L", "gain": -1 } ]
 //   }
@@ -24,12 +26,13 @@
 #include <vector>
 #include "pw/craft/document.h"
 #include "pw/sim/multirotor.h"
+#include "pw/sim/rocket_fc.h"
 
 namespace pw::sim {
 
 class CraftSim;
 
-enum class ControllerKind : uint8_t { Direct, Multirotor };
+enum class ControllerKind : uint8_t { Direct, Multirotor, Rocket };
 
 struct ControlAxis {
     std::string name;
@@ -71,6 +74,7 @@ private:
     std::vector<Term> terms_;
     std::vector<int> owned_;
     MultirotorFC fc_;
+    RocketFC rocket_;
     int aThrottle_ = -1, aYaw_ = -1, aPitch_ = -1, aRoll_ = -1;
 };
 

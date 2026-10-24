@@ -26,7 +26,7 @@
 
 namespace pw::sim {
 
-enum class OutputKind { Servo, Motor, Jet, Solid };
+enum class OutputKind { Servo, Motor, Jet, Solid, Rocket, Gimbal };
 const char* outputKindName(OutputKind k);
 
 struct CraftOutput {
@@ -72,6 +72,7 @@ struct SimPart {
     double angle = 0, load = 0, loadShown = 0; bool overload = false;
     double spinAngle = 0, omega = 0;
     double thrustNow = 0; bool burning = false; double ignitedAt = 0, spool = 0;
+    double gimbalCmd[2] = {0, 0}, gimbal[2] = {0, 0};   // rocket: commanded (-1..1) / actual (rad) pitch, yaw
     std::vector<Vec3d> corners;
     int mesh = -1;                        // index into CraftSim meshes
     double flapChord = 0;
@@ -90,6 +91,7 @@ struct SimPart {
     int meshSlot = -1, itemStart = 0, itemCount = 0;
     int wingGroup = -1;
     double kIrot = 0;
+    double kIspVac = 0, kAe = 0, kMinThrottle = 0, kGimbal = 0, kGimbalRate = 0;   // rocket
     bool isBlocker = false;
 
     bool is(PartType t) const { return type && *type == t; }
@@ -245,6 +247,7 @@ private:
     double groundHeight(const SimEnvironment& env, double x, double z) const { return env.terrain ? env.terrain->height(x, z) : 0; }
     Vec3d groundNormal(const SimEnvironment& env, double x, double z) const { return env.terrain ? env.terrain->normal(x, z) : Vec3d{0, 1, 0}; }
     int outputTarget(int i) const { return i >= 0 && i < int(outputTargets_.size()) ? outputTargets_[std::size_t(i)] : -1; }
+    int outputChannel(int i) const { return i >= 0 && i < int(outputChannels_.size()) ? outputChannels_[std::size_t(i)] : 0; }
     void runStrips(int lo, int hi, const Quatd& q, const Vec3d& origin, const Vec3d& wW, const WindField::Prepared& wind,
                    double sos, double rho, double nu, const TerrainProvider* terrain);
     void runPanelItems(int lo, int hi);
@@ -267,7 +270,8 @@ private:
     CraftSpec craft_;
     bool loaded_ = false;
     std::vector<CraftOutput> outputs_;
-    std::vector<int> outputTargets_;    // output index -> part index (-1 none)
+    std::vector<int> outputTargets_;
+    std::vector<int> outputChannels_;   // 0 = the part's main output, 1 / 2 = rocket gimbal pitch / yaw    // output index -> part index (-1 none)
     std::vector<SimPart> parts_;
     std::vector<WingStrip> strips_;
     std::vector<StripResult> stripBuf_;

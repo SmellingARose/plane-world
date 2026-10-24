@@ -94,7 +94,7 @@ std::optional<std::string> jsonString(const Value& v) {
 // ---------------------------------------------------------------- PartType
 
 static const char* kTypeNames[kPartTypeCount] = {"box", "cylinder", "cone", "sphere", "wing", "servo", "wheel",
-                                                 "motor", "prop", "jet", "tank", "solid", "cad", "sensor"};
+                                                 "motor", "prop", "jet", "tank", "solid", "cad", "sensor", "rocket"};
 const char* partTypeName(PartType t) { return t == PartType::Unknown ? "" : kTypeNames[int(t)]; }
 PartType partTypeFrom(std::string_view s) {
     for (int i = 0; i < kPartTypeCount; ++i) if (s == kTypeNames[i]) return PartType(i);
@@ -128,6 +128,11 @@ static PartDefaults makeDefaults(PartType t) {
         d.p.set("kind", Value::string("altitudeAGL"));
         d.p.set("dir", Value::string("down"));
         d.p.set("ref", Value::string(""));
+        break;
+    // Liquid rocket engine (burns the craft's tanks): vacuum thrust, sea-level / vacuum Isp, 2-axis gimbal.
+    case PartType::Rocket:
+        d = {"#3a3d42", 180, n({{"thrust", 25000}, {"ispVac", 320}, {"ispSL", 285}, {"minThrottle", 0.4}, {"gimbal", 6},
+                                {"gimbalRate", 40}, {"r", 0.35}, {"len", 1.2}})};
         break;
     case PartType::Unknown: d = {"#cccccc", 1, {}}; break;
     }

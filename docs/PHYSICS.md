@@ -81,6 +81,9 @@ bodies and nothing better. There is no clean published error figure (see §9).
 | Turbojet lapse | T/T₀ = σ^0.7 (1 − 0.25M + 0.45M²), σ = ρ/ρ₀ | `aero.cpp:145` |
 | Spool | dN/dt = (N_cmd − N)/τ, τ = 1.6 s up, 0.9 s down | `aero.cpp:146` |
 | Solid motor | T = T₀ · ramp(0.08 s) · (0.3 + 0.7·tail-off) · (1 + 0.08(1 − p/p₀)) | `aero.cpp:150` |
+| Liquid rocket thrust | T = s·F_vac − p_amb·A_e, A_e = F_vac (1 − Isp_SL/Isp_vac) / p₀; throttle s ∈ {0} ∪ [s_min, 1], ds/dt = (s_cmd − s)/0.15 s | `craft_sim.cpp` (`PartType::Rocket`) |
+| Liquid rocket propellant | ṁ = s·F_vac / (Isp_vac g₀), drawn from the craft's tanks | same |
+| Rocket gimbal | thrust axis turned by pitch (about the engine's local z) and yaw (local y), each slewing to ±gimbal at gimbalRate; the torque comes from the thrust acting at the engine | same |
 
 ## 6. Rotor slipstream (actuator disk)
 

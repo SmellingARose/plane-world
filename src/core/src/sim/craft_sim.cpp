@@ -15,7 +15,7 @@ inline bool isBodyType(std::optional<PartType> t) {
     if (!t) return false;
     switch (*t) {
     case PartType::Box: case PartType::Cylinder: case PartType::Cone: case PartType::Sphere: case PartType::Cad:
-    case PartType::Tank: case PartType::Jet: case PartType::Solid: case PartType::Motor: return true;
+    case PartType::Tank: case PartType::Jet: case PartType::Solid: case PartType::Rocket: case PartType::Motor: return true;
     default: return false;
     }
 }
@@ -25,7 +25,8 @@ std::string swiftDouble(double v) { ParamValue p{v}; return *p.asString(); }
 }
 
 const char* outputKindName(OutputKind k) {
-    switch (k) { case OutputKind::Servo: return "servo"; case OutputKind::Motor: return "motor"; case OutputKind::Jet: return "jet"; default: return "solid"; }
+    switch (k) { case OutputKind::Servo: return "servo"; case OutputKind::Motor: return "motor"; case OutputKind::Jet: return "jet"; case OutputKind::Rocket: return "rocket";
+               case OutputKind::Gimbal: return "gimbal"; default: return "solid"; }
 }
 
 bool CraftSim::slipstreamDefault() {
@@ -101,6 +102,7 @@ bool CraftSim::load(const CraftSpec& craft, std::string* err) {
         SimPart& p = parts_[std::size_t(i)];
         const PartSpec& d = docOf(p);
         if (p.type && isOutputType(*p.type)) targets[d.id] = i;
+        if (p.is(PartType::Rocket)) { targets[d.id + ".gimbal-pitch"] = i; targets[d.id + ".gimbal-yaw"] = i; }
         if (p.autoMotor) {
             std::string id = "auto-motor:" + d.id;
             targets[id] = i;
@@ -112,7 +114,11 @@ bool CraftSim::load(const CraftSpec& craft, std::string* err) {
         }
     }
     outputTargets_.assign(outputs_.size(), -1);
-    for (std::size_t i = 0; i < outputs_.size(); ++i) { auto it = targets.find(outputs_[i].id); if (it != targets.end()) outputTargets_[i] = it->second; }
+    outputChannels_.assign(outputs_.size(), 0);
+    for (std::size_t i = 0; i < outputs_.size(); ++i) {
+        auto it = targets.find(outputs_[i].id); if (it != targets.end()) outputTargets_[i] = it->second;
+        if (outputs_[i].kind == OutputKind::Gimbal) outputChannels_[i] = outputs_[i].id.size() > 4 && outputs_[i].id.ends_with("-yaw") ? 2 : 1;
+    }
     buildHull();
     buildSensors();
     resetFuel();
@@ -148,6 +154,14 @@ void CraftSim::bake(SimPart& sp) {
     else if (t == PartType::Wheel) sp.kIrot = 0.5 * sp.docMass * sp.kR * sp.kR;
     else sp.kIrot = 0;
     sp.isBlocker = sp.isBody && t != PartType::Motor;
+    if (t == PartType::Rocket) {
+        // Nozzle exit area from the two Isps: F_vac - F_SL = p0 A_e (same mass flow), so thrust falls with ambient pressure.
+        sp.kIspVac = smax(1, p("ispVac", 320));
+        sp.kAe = smax(0, sp.kThrust * (1 - p("ispSL", 285) / sp.kIspVac)) / 101325.0;
+        sp.kFlow = sp.kThrust / (sp.kIspVac * kGravity);   // full-throttle propellant flow, kg/s
+        sp.kMinThrottle = clamp(p("minThrottle", 0.4), 0, 1);
+        sp.kGimbal = p("gimbal", 6) * kDeg; sp.kGimbalRate = p("gimbalRate", 40) * kDeg;
+    }
 }
 
 void CraftSim::bakeParts() {
@@ -223,6 +237,16 @@ std::vector<CraftOutput> CraftSim::makeOutputs(const CraftSpec& craft) {
             break;
         }
         case PartType::Jet: o.kind = OutputKind::Jet; o.lo = 0; o.hi = 1; o.info = "jet " + intStr(p.param("thrust")) + " N"; break;
+        case PartType::Rocket: {   // throttle + two gimbal axes (same ids as craft::outputs::list)
+            o.kind = OutputKind::Rocket; o.lo = 0; o.hi = 1; o.info = "rocket " + intStr(p.param("thrust")) + " N vac";
+            out.push_back(o);
+            for (const char* ax : {"pitch", "yaw"}) {
+                CraftOutput g; g.id = p.id + ".gimbal-" + ax; g.name = p.name + " gimbal " + ax; g.kind = OutputKind::Gimbal;
+                g.info = "gimbal \xC2\xB1" + intStr(p.param("gimbal")) + "\xC2\xB0";
+                out.push_back(g);
+            }
+            continue;
+        }
         default:
             o.kind = OutputKind::Solid; o.lo = 0; o.hi = 1;
             o.info = "solid " + intStr(p.param("thrust")) + " N \xC3\x97 " + swiftDouble(p.param("burn")) + "s \xC2\xB7 ignites >50%";
@@ -249,7 +273,9 @@ void CraftSim::setOutput(int i, double value) {
     double v = clamp(std::isfinite(value) ? value : 0, o.lo, o.hi);
     o.value = v;
     int pi = outputTarget(i);
-    if (pi >= 0) parts_[std::size_t(pi)].out = v;
+    if (pi < 0) return;
+    if (int ch = outputChannel(i); ch > 0) parts_[std::size_t(pi)].gimbalCmd[ch - 1] = v;
+    else parts_[std::size_t(pi)].out = v;
 }
 
 void CraftSim::setPartMesh(const std::string& partID, const std::vector<Vec3d>& soup) {
@@ -287,7 +313,7 @@ std::pair<Vec3d, Vec3d> CraftSim::bounds(const PartSpec& d) {
     case PartType::Wheel: return {{2 * p("r"), 2 * p("r"), p("width")}, {}};
     case PartType::Motor: return {Vec3d::splat(0.5 * d.param("size", 1)), {}};   // optional "size" scale (matches craft::partMesh)
     case PartType::Prop: return {{d.param("thick", 0.06), p("d"), d.param("chord", 0.14)}, {}};
-    case PartType::Jet: case PartType::Tank: case PartType::Solid: return {{p("len"), 2 * p("r"), 2 * p("r")}, {}};
+    case PartType::Jet: case PartType::Tank: case PartType::Solid: case PartType::Rocket: return {{p("len"), 2 * p("r"), 2 * p("r")}, {}};
     case PartType::Cad:
         if (d.cad) {
             auto s = PanelMesh::decodePrototypeCAD(*d.cad, d.param("scale", 1));
@@ -350,6 +376,7 @@ void CraftSim::resetFuel() {
         if (p.is(PartType::Tank)) { p.fuelCapacity = docOf(p).param("capacity"); p.fuel = p.fuelCapacity * clamp(docOf(p).param("fill"), 0, 1); }
         else if (p.is(PartType::Solid)) { p.fuelCapacity = docOf(p).param("fuel"); p.fuel = p.fuelCapacity; p.burning = false; }
         p.angle = 0; p.spinAngle = 0; p.omega = 0; p.spool = 0; p.load = 0; p.vi = 0; p.wakeQ = 0;
+        p.gimbal[0] = p.gimbal[1] = 0;
     }
 }
 
@@ -782,6 +809,26 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
             P[i].spinAngle += P[i].spool * 300 * h;
             break;
         }
+        case PartType::Rocket: {
+            // Liquid rocket: throttle 0 = shut down, otherwise clamped to [minThrottle, 1]; ~0.15 s throttle response.
+            // F = throttle * F_vac - p_amb * A_e (pressure thrust); propellant flow = throttle * F_vac / (Isp_vac g0).
+            const double cmd = P[i].out > 0.01 && liquid > 0 ? clamp(P[i].out, P[i].kMinThrottle, 1) : 0;
+            P[i].spool += (cmd - P[i].spool) * smin(1, h / 0.15);
+            for (int a = 0; a < 2; ++a) {   // gimbal slews toward the command at gimbalRate
+                const double tgt = clamp(P[i].gimbalCmd[a], -1, 1) * P[i].kGimbal, step = P[i].kGimbalRate * h;
+                P[i].gimbal[a] += clamp(tgt - P[i].gimbal[a], -step, step);
+            }
+            if (P[i].spool > 0.01 && liquid > 0) {
+                // engine frame: thrust along local +x; gimbal pitch turns it about local +z, yaw about local +y
+                const Quatd g = Quatd::angleAxis(P[i].gimbal[1], {0, 1, 0}) * Quatd::angleAxis(P[i].gimbal[0], {0, 0, 1});
+                Vec3d dir = q.act(P[i].effQ.act(g.act({1, 0, 0}))), pw = origin + q.act(P[i].basePos);
+                const double Tn = smax(0, P[i].spool * P[i].kThrust - atm.pressure * P[i].kAe);
+                apply(dir * Tn, pw);
+                liquidUse += P[i].spool * P[i].kFlow * h;
+                P[i].thrustNow = Tn; thrustTotal += Tn;
+            }
+            break;
+        }
         case PartType::Solid: {
             if (!P[i].burning && P[i].out > 0.5 && P[i].fuel > 0) { P[i].burning = true; P[i].ignitedAt = time_; }
             if (P[i].burning) {
@@ -1153,7 +1200,7 @@ std::unique_ptr<CraftSim> CraftSim::clone() const {
         d.mesh = mesh;
     }
     c->rebuildPanelBatch();
-    c->outputs_ = outputs_; c->outputTargets_ = outputTargets_; c->telemetry_ = telemetry_;
+    c->outputs_ = outputs_; c->outputTargets_ = outputTargets_; c->outputChannels_ = outputChannels_; c->telemetry_ = telemetry_;
     c->groupState_ = groupState_;
     c->mass_ = mass_; c->comLocal_ = comLocal_; c->inertia_ = inertia_; c->inertiaInv_ = inertiaInv_;
     c->position_ = position_; c->orientation_ = orientation_; c->velocity_ = velocity_; c->angularMomentum_ = angularMomentum_;

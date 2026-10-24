@@ -354,6 +354,56 @@ void registerPhysicsTests() {
         return ex.ok;
     });
 
+    selftest::add("physics.rocket-gimbal", [](Context& c) {
+        // Liquid rocket preset: Isp-based thrust and propellant flow, gimbal limit, and the rocket controller holding
+        // vertical on the climb and tilting when asked.
+        Expect ex{c};
+        craft::CraftDocument doc; std::string err;
+        for (const auto* b = craft::embedded::presets(); b->name; ++b)
+            if (std::string(b->name) == "Liquid rocket") craft::parseCraft({b->data, b->size}, doc, err);
+        const auto flight = craft::outputs::prepareForFlight(doc);
+        CraftSim sim; ex(sim.load(CraftSpec::fromDocument(flight)), "liquid rocket loads");
+        const int eng = sim.partIndex("eng");
+        const double Fvac = 30000, g0 = kGravity, mdot = Fvac / (320 * g0), Fsl = Fvac * 285.0 / 320.0;
+        auto fire = [&](double alt, double secs, double gimbal, double& thrust, double& fuelUsed) {
+            sim.load(CraftSpec::fromDocument(flight));
+            sim.groundEnabled = false;   // free flight for 2 s: thrust depends only on throttle and ambient pressure
+            SimEnvironment env;
+            sim.reset(sim.restingSpawn() + Vec3d{0, alt, 0});
+            const double fuel0 = sim.totalFuel();
+            sim.setOutput("eng", 1); sim.setOutput("eng.gimbal-pitch", gimbal);
+            for (double t = 0; t < secs; t += 0.01) sim.step(0.01, env);
+            thrust = sim.parts()[std::size_t(eng)].thrustNow; fuelUsed = fuel0 - sim.totalFuel();
+        };
+        double tSL, fSL, tVac, fVac;
+        fire(0, 2, 0, tSL, fSL); fire(80000, 2, 0, tVac, fVac);
+        c.note(fmt("thrust SL %.0f N (expect %.0f), vac %.0f N (expect %.0f); propellant %.2f kg/s (expect %.2f)", tSL, Fsl, tVac, Fvac, fSL / 2, mdot));
+        ex(std::abs(tSL - Fsl) < 0.02 * Fsl && std::abs(tVac - Fvac) < 0.02 * Fvac, "thrust follows ambient pressure (Isp SL / vac)");
+        ex(std::abs(fSL / 2 - mdot) < 0.08 * mdot, "propellant flow = F_vac / (Isp_vac g0) (incl. 0.15 s spool)");
+        double tg, fg; fire(0, 1, 1, tg, fg);
+        const double gim = sim.parts()[std::size_t(eng)].gimbal[0] / kDeg;
+        ex(std::abs(gim - 6) < 0.01, "gimbal saturates at its 6 deg range");
+        // flight under the rocket controller
+        auto fly = [&](double pitchAt, CraftSim& s) {
+            s.load(CraftSpec::fromDocument(flight));
+            ControlSystem cs; cs.load(ControlScheme::fromDocument(flight), s);
+            SimEnvironment env;
+            cs.setAxis(cs.axisIndex("throttle"), 1);
+            for (double t = 0; t < 8; t += 0.01) {
+                cs.setAxis(cs.axisIndex("pitch"), t >= pitchAt ? 1 : 0);
+                cs.step(s, [](const std::string&) { return false; }, 0.01);
+                s.step(0.01, env);
+            }
+        };
+        CraftSim v; fly(1e9, v);
+        CraftSim tlt; fly(2, tlt);
+        const double upV = v.orientation().act({0, 1, 0}).y, tiltDeg = std::acos(std::clamp(tlt.orientation().act({0, 1, 0}).y, -1.0, 1.0)) / kDeg;
+        c.note(fmt("vertical climb: alt %.0f m, vy %.1f m/s, up.y %.4f; pitch command: tilt %.1f deg, vx %.1f m/s", v.position().y, v.velocity().y, upV, tiltDeg, tlt.velocity().x));
+        ex(v.velocity().y > 15 && upV > 0.995, "climbs and holds vertical");
+        ex(tiltDeg > 12 && tiltDeg < 28 && tlt.velocity().x > 3, "pitch axis tilts it forward (~20 deg) and it moves +x");
+        return ex.ok;
+    });
+
     selftest::add("physics.trainer-full-throttle-roll", [](Context& c) {
         Expect ex{c};
         CraftSim sim; sim.load(PhysicsPresets::trainer());

@@ -240,6 +240,7 @@ MeshData partMesh(const CraftPart& part) {
     case PartType::Motor: { const float s = float(part.param("size", 1)); return rotZ(cylinder(0.22f * s, 0.25f * s, 0.5f * s, 16)); }
     case PartType::Prop: return box({float(part.param("thick", 0.06)), f("d"), float(part.param("chord", 0.14))});
     case PartType::Jet: return rotZ(cylinder(f("r") * 0.75f, f("r"), f("len")));
+    case PartType::Rocket: return rotZ(cylinder(f("r") * 0.35f, f("r"), f("len"), 20));   // bell: narrow throat, wide exit (-x end)
     case PartType::Tank: return rotZ(capsule(f("r"), std::max(0.01f, f("len") - 2 * f("r"))));
     case PartType::Solid: return rotZ(cylinder(f("r") * 0.8f, f("r"), f("len"), 16));
     case PartType::Cad: return triangleSoup(geo::floatsFromBase64(part.cad ? *part.cad : std::string()), f("scale"));

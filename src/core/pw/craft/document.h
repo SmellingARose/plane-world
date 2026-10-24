@@ -42,12 +42,12 @@ std::optional<double> jsonDouble(const Value& v);
 std::optional<std::string> jsonString(const Value& v);
 std::string swiftDoubleString(double d);
 
-enum class PartType : uint8_t { Box, Cylinder, Cone, Sphere, Wing, Servo, Wheel, Motor, Prop, Jet, Tank, Solid, Cad, Sensor, Unknown };
-constexpr int kPartTypeCount = 14;
+enum class PartType : uint8_t { Box, Cylinder, Cone, Sphere, Wing, Servo, Wheel, Motor, Prop, Jet, Tank, Solid, Cad, Sensor, Rocket, Unknown };
+constexpr int kPartTypeCount = 15;
 const char* partTypeName(PartType t);
 PartType partTypeFrom(std::string_view s);
 /// Parts whose value is user-controlled in FLY (each becomes a named slider output).
-inline bool isOutput(PartType t) { return t == PartType::Servo || t == PartType::Motor || t == PartType::Jet || t == PartType::Solid; }
+inline bool isOutput(PartType t) { return t == PartType::Servo || t == PartType::Motor || t == PartType::Jet || t == PartType::Solid || t == PartType::Rocket; }
 
 struct PartDefaults { std::string color; double mass = 1; JsonObject p; };
 /// Prototype TYPES table (colour, mass, parameter defaults). Unknown -> empty defaults.
