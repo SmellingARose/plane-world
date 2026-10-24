@@ -462,6 +462,31 @@ bool parityRun(Context& c, const std::string& name, int workers, ScriptRuntimeFa
 }
 
 void registerRunTests() {
+    selftest::add("evolution.standard-sensors-fill-gaps", [](Context& c) -> bool {
+        // A craft that already carries some sensors (attitude + target, no airspeed) must still get the missing standard
+        // ones, so the neural-controller / quick-start inputs ("air", "alt", ...) resolve; its own sensors are kept.
+        craft::CraftDocument d = *craft::presets::load("Trainer");
+        auto add = [&](const char* id, const char* name, const char* kind) {
+            auto p = craft::CraftPart::make(id, craft::PartType::Sensor, name); p.setParam("kind", std::string(kind)); d.parts.push_back(p);
+        };
+        add("my-att", "att", "attitude"); add("my-tgt", "target", "target");
+        const auto out = presets::addStandardSensors(d);
+        auto count = [&](const std::string& kind) { int n = 0; for (auto& p : out.parts) n += p.partType() == craft::PartType::Sensor && p.paramString("kind") == kind; return n; };
+        bool ok = expect(c, count("airspeed") == 1 && count("altitudeAGL") == 1 && count("verticalSpeed") == 1, "missing standard sensors added");
+        ok &= expect(c, count("attitude") == 1 && out.part(std::string_view("my-att")) && out.part(std::string_view("my-tgt")), "existing sensors kept, attitude not duplicated");
+        ok &= expect(c, presets::addStandardSensors(out).parts.size() == out.parts.size(), "idempotent");
+        // and the quick-start style experiment resolves its MLP inputs on such a craft
+        ExperimentDocument e = presets::make("Neural controller", "Trainer");
+        e.crafts = {CraftRef{}}; e.crafts[0].inlineDoc = d;
+        std::string err; auto craft = resolveCraft(&e.crafts[0], "", err);
+        ok &= expect(c, craft.has_value(), "craft resolves: " + err);
+        if (craft) {
+            try { ExperimentContext ctx(e, *craft, EvoWorld::flat()); ok &= expect(c, true, ""); }
+            catch (const std::exception& ex) { ok &= expect(c, false, std::string("experiment context: ") + ex.what()); }
+        }
+        return ok;
+    });
+
     selftest::add("evolution.rng-determinism", [](Context& c) -> bool {
         EvoRNG a(42), b(42), cc(43);
         bool ok = true, same = true, diff = false;

@@ -1,5 +1,6 @@
 // Experiment presets (port of Swift Core/Presets.swift). See pw/script/presets.h.
 #include "pw/script/presets.h"
+#include "pw/evo/experiment.h"
 
 #include <cstring>
 
@@ -58,18 +59,7 @@ std::string makeJSON(const std::string& name, const std::string& craftName) { re
 
 std::string script(const std::string& name) { return make(name)["scripts"]["source"].str(); }
 
-craft::CraftDocument addStandardSensors(const craft::CraftDocument& c) {
-    for (auto& p : c.parts) if (p.partType() == craft::PartType::Sensor) return c;
-    craft::CraftDocument out = c;
-    const char* s[][3] = {{"sn-alt", "alt", "altitudeAGL"}, {"sn-att", "att", "attitude"}, {"sn-rate", "rate", "angularRate"},
-                          {"sn-air", "air", "airspeed"},    {"sn-vs", "vs", "verticalSpeed"}, {"sn-aero", "aero", "aero"}};
-    for (auto& x : s) {
-        auto p = craft::CraftPart::make(x[0], craft::PartType::Sensor, x[1]);
-        p.setParam("kind", std::string(x[2]));
-        out.parts.push_back(std::move(p));
-    }
-    return out;
-}
+craft::CraftDocument addStandardSensors(const craft::CraftDocument& c) { return evo::presets::addStandardSensors(c); }
 
 const std::vector<Example>& examples() {
     static const std::vector<Example> ex = [] {
