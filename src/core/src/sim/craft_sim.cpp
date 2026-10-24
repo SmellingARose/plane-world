@@ -1,6 +1,7 @@
 // Port of Sources/Physics/CraftSim.swift (+ the load-time parts of Slipstream.swift). Expression order and
 // operation choice follow the Swift source line by line; see pw/math.h for the simd-equivalent primitives.
 #include "pw/sim/craft_sim.h"
+#include "pw/rocket_geometry.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -137,6 +138,11 @@ void CraftSim::bake(SimPart& sp) {
     sp.invert = d.invert; sp.docMass = d.mass;
     sp.kRange = p("range"); sp.kTorque = p("torque"); sp.kSpeed = p("speed");
     sp.kCd = p("cd", 0.3);
+    // cylinder / cone: optional axial drag coefficient (flow along the local y axis) on the true end area pi r^2;
+    // "cd" then covers cross-flow on the side (2r x h). Without it one cd applies to every face of the bounding box.
+    sp.kCdAxial = -1;
+    if (t == PartType::Cylinder || t == PartType::Cone)
+        if (auto ca = d.rawDouble("cdAxial")) sp.kCdAxial = smax(0, *ca);
     sp.kThrust = p("thrust"); sp.kD = p("d"); sp.kPropVmax = p("vmax", 80); sp.kSpin = p("spin", 1) < 0 ? -1 : 1;
     sp.kFlow = p("flow"); sp.kBurn = p("burn");
     sp.kR = p("r"); sp.kGrip = p("grip", 0.9); sp.kRoll = p("roll", 0.02);
@@ -161,6 +167,7 @@ void CraftSim::bake(SimPart& sp) {
         sp.kFlow = sp.kThrust / (sp.kIspVac * kGravity);   // full-throttle propellant flow, kg/s
         sp.kMinThrottle = clamp(p("minThrottle", 0.4), 0, 1);
         sp.kGimbal = p("gimbal", 6) * kDeg; sp.kGimbalRate = p("gimbalRate", 40) * kDeg;
+        sp.kPivot = rocketGeometry(p("r"), p("len"), p("expansion")).xPivot;   // gimbal block on top of the engine
     }
 }
 
@@ -496,8 +503,18 @@ std::vector<PartPose> CraftSim::partPoses() const {
         Quatd q = p.effQ;
         if (p.is(PartType::Prop)) q = q * Quatd::angleAxis(p.spinAngle, {1, 0, 0});
         if (p.is(PartType::Wheel)) q = q * Quatd::angleAxis(-p.spinAngle, {0, 0, 1});
+        Vec3d pos = p.basePos;
+        double glow = 0;
+        if (p.is(PartType::Rocket)) {
+            // gimballed engine: same rotation as the thrust axis, swivelling about the pivot (which stays put)
+            const Quatd g = Quatd::angleAxis(p.gimbal[1], {0, 1, 0}) * Quatd::angleAxis(p.gimbal[0], {0, 0, 1});
+            const Vec3d pivot{p.kPivot, 0, 0};
+            pos = p.basePos + p.effQ.act(pivot) - (p.effQ * g).act(pivot);
+            q = p.effQ * g;
+            glow = p.thrustNow > 0 ? p.spool : 0;
+        }
         // Transform composition: o * (basePos, q)
-        out.push_back({docOf(p).id, op + oq.act(p.basePos), (oq * q).normalized()});
+        out.push_back({docOf(p).id, op + oq.act(pos), (oq * q).normalized(), glow});
     }
     return out;
 }
@@ -735,7 +752,13 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
                 if (sp < 0.1) continue;
                 Vec3d vl = (q * P[i].effQ).inverse().act(v) / sp, s = P[i].size;
                 double A = std::fabs(vl.x) * s.y * s.z + std::fabs(vl.y) * s.x * s.z + std::fabs(vl.z) * s.x * s.y;
-                double cd = P[i].kCd * (sp / atm.speedOfSound > 0.8 ? 1 + 6 * std::pow(sp / atm.speedOfSound - 0.8, 2) : 1);
+                const double rise = sp / atm.speedOfSound > 0.8 ? 1 + 6 * std::pow(sp / atm.speedOfSound - 0.8, 2) : 1;
+                double cd = P[i].kCd * rise;
+                if (P[i].kCdAxial >= 0) {   // round body: cross-flow cd on the side faces + axial cd on pi r^2 (same drag rise)
+                    const double side = std::fabs(vl.x) * s.y * s.z + std::fabs(vl.z) * s.x * s.y, end = std::fabs(vl.y) * 0.25 * kPi * s.x * s.z;
+                    A = side + end;
+                    cd = A > 0 ? (P[i].kCd * side + P[i].kCdAxial * end) * rise / A : 0;
+                }
                 apply(v * (-0.5 * rho * sp * cd * A), pw);
                 if (capOn) captureBodyDrag(i, rho, sp, cd, A, v, pw, *cap);
             }
@@ -821,7 +844,8 @@ CraftSim::SubstepOut CraftSim::substepCore(double h, const SimEnvironment& env) 
             if (P[i].spool > 0.01 && liquid > 0) {
                 // engine frame: thrust along local +x; gimbal pitch turns it about local +z, yaw about local +y
                 const Quatd g = Quatd::angleAxis(P[i].gimbal[1], {0, 1, 0}) * Quatd::angleAxis(P[i].gimbal[0], {0, 0, 1});
-                Vec3d dir = q.act(P[i].effQ.act(g.act({1, 0, 0}))), pw = origin + q.act(P[i].basePos);
+                // the thrust line runs along the gimballed nozzle axis through the gimbal pivot
+                Vec3d dir = q.act(P[i].effQ.act(g.act({1, 0, 0}))), pw = origin + q.act(P[i].basePos + P[i].effQ.act({P[i].kPivot, 0, 0}));
                 const double Tn = smax(0, P[i].spool * P[i].kThrust - atm.pressure * P[i].kAe);
                 apply(dir * Tn, pw);
                 liquidUse += P[i].spool * P[i].kFlow * h;

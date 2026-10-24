@@ -1,7 +1,7 @@
 // Plane World (Qt 6 Quick). Native Qt Quick Controls style per OS; the 3D viewport is our own Metal / D3D12
 // renderer sharing Qt's device (GpuViewport).
 //   pwapp [--quit-after <s>] [--screenshot <file.png>] [--tab build|fly|world|evolve] [--color-scheme dark|light]
-//         [--craft <craft.json>] [--size <w>x<h>] [--command "<palette entry>" | "wait <s>" | "open <craft.json>"]...   (commands run 1 s after launch, in order)
+//         [--craft <craft.json>] [--size <w>x<h>] [--command "<palette entry>" | "wait <s>" | "open <craft.json>" | "key-down <key>" | "key-up <key>"]...   (commands run 1 s after launch, in order)
 //         [--open-run <dir> [--replay g<gen>|best] [--replay-speed <x>]]
 //         scripted commands: "evolve-resume <run dir>", "evolve-load <run dir>" (no training), "evolve-replay best|g<N>", "evolve-speed <x>", "world-open <file>", "autopilot on"
 #include <QGuiApplication>
@@ -125,6 +125,9 @@ int main(int argc, char** argv) {
                     EvolveModel::instance()->replay(c.mid(14)); continue;
                 }
                 if (c.startsWith("evolve-speed ")) { EvolveModel::instance()->setProperty("replaySpeed", c.mid(13).toDouble()); continue; }
+                // "key-down <name>" / "key-up <name>": hold a FLY control key (e.g. "w", "up") for scripted flights
+                if (c.startsWith("key-down ") && AppController::instance()) { AppController::instance()->holdKey(c.mid(9), true); continue; }
+                if (c.startsWith("key-up ") && AppController::instance()) { AppController::instance()->holdKey(c.mid(7), false); continue; }
                 if (c.startsWith("world-open ")) { WorldModel::instance()->open(c.mid(11)); continue; }
                 // "autopilot on" (re)starts the evolved autopilot from the spawn
                 if (c == "autopilot on" && AppController::instance()) { AppController::instance()->setAutopilot(false); AppController::instance()->setAutopilot(true); continue; }

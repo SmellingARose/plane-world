@@ -59,6 +59,7 @@ other's induced flow (strip theory), except through the downwash effect in §7.
 | What | Equation | Code |
 |---|---|---|
 | Primitive bodies | D = ½ρV² C_D S_proj (C_D = part `cd`, default 0.3, × transonic rise above M 0.8), along the local flow | `craft_sim.cpp:709-711` |
+| Round bodies with `cdAxial` (cylinder, cone) | D = ½ρV² (cd · S_side + cdAxial · πr² · \|v̂·ŷ\|) × transonic rise, S_side = 2r·h projected; without `cdAxial` the plain box rule above applies | `craft_sim.cpp` (body drag) |
 | CAD panels, windward (modified Newtonian) | f = −n · C_p,max cos²θ · q · A, C_p,max = 1 + M²/4, skipped if shadowed | `src/core/src/sim/panel_aero.cpp:157` |
 | CAD panels, leeward | f = n · 0.25 cosθ · q · A (base suction) | `src/core/src/sim/panel_aero.cpp:159` |
 | Skin friction (Schlichting turbulent) | C_f = 0.455 / (log₁₀ Re)^2.58, along the tangential flow | `src/core/src/sim/panel_aero.cpp:163` |
@@ -83,7 +84,7 @@ bodies and nothing better. There is no clean published error figure (see §9).
 | Solid motor | T = T₀ · ramp(0.08 s) · (0.3 + 0.7·tail-off) · (1 + 0.08(1 − p/p₀)) | `aero.cpp:150` |
 | Liquid rocket thrust | T = s·F_vac − p_amb·A_e, A_e = F_vac (1 − Isp_SL/Isp_vac) / p₀; throttle s ∈ {0} ∪ [s_min, 1], ds/dt = (s_cmd − s)/0.15 s | `craft_sim.cpp` (`PartType::Rocket`) |
 | Liquid rocket propellant | ṁ = s·F_vac / (Isp_vac g₀), drawn from the craft's tanks | same |
-| Rocket gimbal | thrust axis turned by pitch (about the engine's local z) and yaw (local y), each slewing to ±gimbal at gimbalRate; the torque comes from the thrust acting at the engine | same |
+| Rocket gimbal | thrust axis turned by pitch (about the engine's local z) and yaw (local y), each slewing to ±gimbal at gimbalRate; the thrust acts through the gimbal pivot at the top of the engine (x = len/2 − 0.045·len, `pw/rocket_geometry.h`), and the rendered engine turns about the same pivot (`CraftSim::partPoses`) | same |
 
 ## 6. Rotor slipstream (actuator disk)
 

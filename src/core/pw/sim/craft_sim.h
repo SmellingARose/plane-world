@@ -58,7 +58,9 @@ const std::vector<SensorChannel>& sensorChannels(SensorKind k);
 /// The inputs list of a craft (BUILD shows it; CraftSim::inputs() has the same order and names).
 std::vector<CraftInput> craftInputs(const CraftSpec& craft);
 
-struct PartPose { std::string partID; Vec3d position; Quatd rotation; };
+/// World pose of one part for rendering. Rocket engines include the current gimbal rotation (about the gimbal pivot);
+/// `glow` is the engine's throttle while it fires (0 otherwise), for an exhaust plume.
+struct PartPose { std::string partID; Vec3d position; Quatd rotation; double glow = 0; };
 
 /// Per-part simulation state + constants baked at load (the substep never touches strings or maps).
 struct SimPart {
@@ -92,6 +94,8 @@ struct SimPart {
     int wingGroup = -1;
     double kIrot = 0;
     double kIspVac = 0, kAe = 0, kMinThrottle = 0, kGimbal = 0, kGimbalRate = 0;   // rocket
+    double kPivot = 0;                    // rocket: gimbal pivot on the engine axis (local x); thrust acts through it
+    double kCdAxial = -1;                 // round bodies: optional drag coefficient for flow along the axis, on pi r^2 (< 0: use cd on the box face)
     bool isBlocker = false;
 
     bool is(PartType t) const { return type && *type == t; }

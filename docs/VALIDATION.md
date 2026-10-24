@@ -175,8 +175,9 @@ centre-of-pressure offset.
   wing panel. A panel whose `ar` disagrees with its planform gets the wrong lift slope and induced drag.
   Deriving AR from wing groups would need another parity flag.
 - **Primitive bodies use box projected areas.** A sphere or cylinder presents (2r)² instead of πr², which is
-  27 % more, and the part's `cd` absorbs the difference. Drag acts along the flow, so bodies produce no
-  crossflow lift.
+  27 % more, and the part's `cd` absorbs the difference. Cylinders and cones may set `cdAxial` instead, an axial
+  coefficient on the true πr² with `cd` left for cross-flow (used by New Shepard). Drag acts along the flow, so
+  bodies produce no crossflow lift, and parts do not shield each other.
 - **Water forces are incomplete.**
   - No added mass or added inertia.
   - No wave-making resistance and no hydrodynamic lift, so planing hulls and hydrofoils get only buoyancy and

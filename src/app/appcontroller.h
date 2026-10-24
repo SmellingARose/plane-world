@@ -165,6 +165,8 @@ public:
     /// EVOLVE → FLY: the trained controller that "Fly with the evolved autopilot" hands over.
     void setAutopilotSource(std::shared_ptr<const pw::evo::ExperimentContext> ctx, pw::evo::Genome genome, pw::evo::ScriptRuntimeFactory factory);
     Q_INVOKABLE void airStart(double altitude, double speed);   // FLY: reset in the air, level, moving forward
+    /// Scripted FLY input (--command "key-down <name>" / "key-up <name>"): hold or release a control key by name.
+    Q_INVOKABLE void holdKey(const QString& name, bool down);
     Q_INVOKABLE void setKeybind(const QString& id, const QVariant& pos, const QVariant& neg, const QString& mode, double rate);
     Q_INVOKABLE void clearKeybind(const QString& id);
     Q_INVOKABLE void renameOutput(const QString& id, const QString& name);
@@ -212,7 +214,8 @@ public:
     // ---- render snapshot (GpuViewport, GUI thread blocked)
     const pw::craft::CraftDocument& document() const { return m_doc; }
     /// World transform of each document part (document order) for the current state.
-    void partWorldPoses(std::vector<pw::geo::Transform>& out) const;
+    /// World pose of every document part (FLY: from the sim, incl. engine gimbal); `glow` = rocket throttle per part.
+    void partWorldPoses(std::vector<pw::geo::Transform>& out, std::vector<float>* glow = nullptr) const;
     /// Craft centre of mass (world) and orientation / velocity for the cameras.
     pw::Vec3d focusPoint() const;
     pw::Quatd craftRotation() const;

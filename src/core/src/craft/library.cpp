@@ -19,7 +19,7 @@ namespace presets {
 const std::vector<EmbeddedCraft>& all() {
     static const std::vector<EmbeddedCraft> v = [] {
         std::vector<EmbeddedCraft> r;
-        for (const char* n : {"Trainer", "Jet trainer", "Rover", "Sounding rocket", "Liquid rocket", "Racer quad"})
+        for (const char* n : {"Trainer", "Jet trainer", "Rover", "Sounding rocket", "New Shepard", "Racer quad"})
             for (const auto* e = embedded::presets(); e->name; ++e) if (std::string_view(e->name) == n) r.push_back({e->name, e->file, {e->data, e->size}});
         return r;
     }();

@@ -18,13 +18,15 @@ public:
     int setCraft(const craft::CraftDocument& doc);
     /// All parts at their document layout under one craft transform.
     void setCraftPose(const geo::Transform& craftPose);
-    /// Per-part world transforms (same order as the document's parts).
-    void setPartPoses(const std::vector<geo::Transform>& poses);
+    /// Per-part world transforms (same order as the document's parts); `glow` (optional, same order) is each rocket
+    /// engine's throttle while it fires and draws its exhaust plume.
+    void setPartPoses(const std::vector<geo::Transform>& poses, const std::vector<float>& glow = {});
     /// World-space bounds of the last pose (empty before the first pose).
     const geo::AABB& worldBounds() const { return bounds; }
     std::size_t partCount() const { return parts.size(); }
 private:
-    struct Part { std::unique_ptr<GpuMesh> mesh; Float3 albedo; float roughness = 0.38f, metallic = 0.05f; geo::Transform local; };
+    struct Sub { std::unique_ptr<GpuMesh> mesh; Float3 albedo; float roughness = 0.38f, metallic = 0.05f, emissive = 0; };
+    struct Part { std::vector<Sub> subs; std::unique_ptr<GpuMesh> plume; double plumeX = 0; geo::Transform local; };
     gpu::Device& dev;
     std::vector<Part> parts;
     geo::AABB bounds;

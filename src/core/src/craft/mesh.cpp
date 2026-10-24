@@ -1,4 +1,5 @@
 #include "pw/craft/mesh.h"
+#include "pw/rocket_geometry.h"
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
@@ -62,8 +63,10 @@ MeshData box(const Vec3f& size) {
             p = {p.x * h.x, p.y * h.y, p.z * h.z};
             m.add(p, f.n, {(q[0] + 1) / 2, (q[1] + 1) / 2});
         }
+        // counter-clockwise seen from outside (the renderer culls back faces with CCW front; the old order drew boxes
+        // inside out, so a box against another part showed that part through its near face)
         float cr = geo::dot(geo::cross(f.a, f.b), f.n);
-        if (cr < 0) m.indices.insert(m.indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+        if (cr > 0) m.indices.insert(m.indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
         else m.indices.insert(m.indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
     }
     return m;
@@ -217,6 +220,222 @@ MeshData rotated(MeshData m, float qx, float qy, float qz, float qw) {
 }
 } // namespace meshbuilder
 
+// ---------------------------------------------------------------- liquid rocket engine
+
+namespace {
+using Profile = std::vector<std::pair<double, double>>;   // (x along the engine axis, radius)
+
+/// Surface of revolution about the local x axis. The profile runs top -> bottom along the outside of the solid
+/// (so the outward normal is the tangent turned towards +r); `inward` flips it (nozzle inner wall).
+MeshData lathe(const Profile& pr, int segs, bool inward = false) {
+    MeshData m;
+    const int n = int(pr.size());
+    if (n < 2) return m;
+    for (int i = 0; i < n; ++i) {
+        const auto& a = pr[std::size_t(std::max(0, i - 1))];
+        const auto& b = pr[std::size_t(std::min(n - 1, i + 1))];
+        double dx = b.first - a.first, dr = b.second - a.second, l = std::hypot(dx, dr);
+        if (l < 1e-12) { dx = -1; dr = 0; l = 1; }
+        float nx = float(dr / l), nr = float(-dx / l);
+        if (inward) { nx = -nx; nr = -nr; }
+        for (int s = 0; s <= segs; ++s) {
+            const float ph = float(s) / float(segs) * 2 * kPiF, c = std::cos(ph), sn = std::sin(ph), r = float(pr[std::size_t(i)].second);
+            m.add({float(pr[std::size_t(i)].first), r * c, r * sn}, geo::normalize(Vec3f{nx, nr * c, nr * sn}), {float(s) / float(segs), float(i) / float(n - 1)});
+        }
+    }
+    const uint32_t row = uint32_t(segs + 1);
+    for (uint32_t i = 0; i + 1 < uint32_t(n); ++i)
+        for (uint32_t s = 0; s < uint32_t(segs); ++s) {
+            const uint32_t a = i * row + s, b = a + row;
+            m.indices.insert(m.indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+        }
+    // wind every triangle to agree with its vertex normals (degenerate apex triangles have no area anyway)
+    for (std::size_t t = 0; t < m.indices.size() / 3; ++t) {
+        uint32_t ia = m.indices[t * 3], ib = m.indices[t * 3 + 1], ic = m.indices[t * 3 + 2];
+        Vec3f fn = geo::cross(m.positions[ib] - m.positions[ia], m.positions[ic] - m.positions[ia]);
+        if (geo::dot(fn, m.normals[ia] + m.normals[ib] + m.normals[ic]) < 0) std::swap(m.indices[t * 3 + 1], m.indices[t * 3 + 2]);
+    }
+    return m;
+}
+
+/// Torus about the x axis: ring centre x0, ring radius R0, tube radius rr.
+MeshData torusX(float x0, float R0, float rr, int segs = 48, int tube = 10) {
+    MeshData m;
+    for (int i = 0; i <= tube; ++i) {
+        const float th = float(i) / float(tube) * 2 * kPiF, cx = std::cos(th), cr = std::sin(th);
+        for (int s = 0; s <= segs; ++s) {
+            const float ph = float(s) / float(segs) * 2 * kPiF, c = std::cos(ph), sn = std::sin(ph), r = R0 + rr * cr;
+            m.add({x0 + rr * cx, r * c, r * sn}, {cx, cr * c, cr * sn});
+        }
+    }
+    const uint32_t row = uint32_t(segs + 1);
+    for (uint32_t i = 0; i < uint32_t(tube); ++i)
+        for (uint32_t s = 0; s < uint32_t(segs); ++s) {
+            const uint32_t a = i * row + s, b = a + row;
+            m.indices.insert(m.indices.end(), {a, a + 1, b, a + 1, b + 1, b});
+        }
+    for (std::size_t t = 0; t < m.indices.size() / 3; ++t) {
+        uint32_t ia = m.indices[t * 3], ib = m.indices[t * 3 + 1], ic = m.indices[t * 3 + 2];
+        Vec3f fn = geo::cross(m.positions[ib] - m.positions[ia], m.positions[ic] - m.positions[ia]);
+        if (geo::dot(fn, m.normals[ia] + m.normals[ib] + m.normals[ic]) < 0) std::swap(m.indices[t * 3 + 1], m.indices[t * 3 + 2]);
+    }
+    return m;
+}
+
+MeshData translated(MeshData m, Vec3f d) { for (auto& p : m.positions) p = p + d; return m; }
+
+/// Capped cylinder of radius r between two points.
+MeshData tube(Vec3f a, Vec3f b, float r, int segs = 14) {
+    Vec3f d = b - a;
+    const float L = std::max(1e-4f, geo::length(d));
+    d = d * (1 / L);
+    MeshData m = meshbuilder::cylinder(r, r, L, segs);
+    const Vec3f y{0, 1, 0};
+    Vec3f ax = geo::cross(y, d);
+    const float s = geo::length(ax), c = geo::dot(y, d);
+    if (s > 1e-6f) {
+        float q[4];
+        axisAngleF(std::atan2(s, c), ax * (1 / s), q);
+        m = meshbuilder::rotated(std::move(m), q[0], q[1], q[2], q[3]);
+    } else if (c < 0) {
+        for (auto& p : m.positions) p = {p.x, -p.y, -p.z};
+        for (auto& n : m.normals) n = {n.x, -n.y, -n.z};
+    }
+    return translated(std::move(m), (a + b) * 0.5f);
+}
+
+void append(MeshData& dst, const MeshData& src, const char* color, float metallic, float roughness, float emissive = 0) {
+    const uint32_t base = uint32_t(dst.positions.size()), first = uint32_t(dst.indices.size());
+    dst.positions.insert(dst.positions.end(), src.positions.begin(), src.positions.end());
+    dst.normals.insert(dst.normals.end(), src.normals.begin(), src.normals.end());
+    dst.uvs.insert(dst.uvs.end(), src.uvs.begin(), src.uvs.end());
+    for (uint32_t i : src.indices) dst.indices.push_back(base + i);
+    MeshGroup g; g.first = first; g.count = uint32_t(src.indices.size());
+    g.color = color ? color : ""; g.metallic = metallic; g.roughness = roughness; g.emissive = emissive;
+    if (!dst.groups.empty() && dst.groups.back().first + dst.groups.back().count == first && dst.groups.back().color == g.color &&
+        dst.groups.back().metallic == metallic && dst.groups.back().roughness == roughness && dst.groups.back().emissive == emissive)
+        dst.groups.back().count += g.count;
+    else dst.groups.push_back(g);
+}
+
+Vec3f cyl(float x, float r, float phi) { return {x, r * std::cos(phi), r * std::sin(phi)}; }
+
+/// Detailed engine: regeneratively cooled chamber + throat + Rao bell (part colour), lighter radiatively cooled
+/// nozzle extension, sooty inner wall, coolant manifolds, gimbal mount (cardan block, ring, pins), two hydraulic
+/// gimbal actuators (pitch in the x-y plane, yaw in x-z), two turbopumps with feed lines and a turbine exhaust duct.
+MeshData rocketEngineMesh(float rExit, float len, float expansion) {
+    const RocketGeometry g = rocketGeometry(rExit, len, expansion);
+    const Profile contour = rocketContour(g, 28);
+    const int S = 48;
+    const float re = float(g.rExit), rc = float(g.rChamber), rt = float(g.rThroat);
+    const double wRegen = std::max(0.004, 0.022 * g.rExit), wExt = std::max(0.002, 0.007 * g.rExit);
+    MeshData m;
+    // split the contour at the nozzle-extension joint (first bell point below the throat at r >= rJoint)
+    std::size_t joint = contour.size() - 1;
+    for (std::size_t i = 0; i < contour.size(); ++i)
+        if (contour[i].first < g.xThroat && contour[i].second >= g.rJoint) { joint = i; break; }
+    // regen section outside: injector dome + chamber + convergent + throat + bell down to the joint
+    Profile outer;
+    const double rcw = g.rChamber + wRegen, domeH = g.xInjTop - g.xChamberTop;
+    for (int i = 0; i <= 8; ++i) {
+        const double ph = 0.5 * 3.14159265358979 * i / 8;
+        outer.push_back({g.xChamberTop + domeH * std::cos(ph), std::max(1e-4, rcw * std::sin(ph))});
+    }
+    for (std::size_t i = 1; i <= joint; ++i) outer.push_back({contour[i].first, contour[i].second + wRegen});
+    append(m, lathe(outer, S), nullptr, 0.85f, 0.42f);
+    // nozzle extension outside (from the joint flange to the exit)
+    Profile ext;
+    for (std::size_t i = joint; i < contour.size(); ++i) ext.push_back({contour[i].first, contour[i].second + wExt});
+    append(m, lathe(ext, S), "#9b9188", 0.9f, 0.32f);
+    // exit lip and the joint step (regen jacket is thicker than the extension wall)
+    append(m, lathe({{g.xExit, g.rExit + wExt}, {g.xExit, g.rExit}}, S), "#9b9188", 0.9f, 0.32f);
+    append(m, lathe({{contour[joint].first, contour[joint].second + wRegen}, {contour[joint].first, contour[joint].second + wExt}}, S), nullptr, 0.85f, 0.42f);
+    // inner wall seen from below: exit up through the throat into the chamber, closed by the injector face
+    Profile inner;
+    for (std::size_t i = contour.size(); i-- > 1;) inner.push_back(contour[i]);
+    std::reverse(inner.begin(), inner.end());
+    append(m, lathe(inner, S, true), "#191817", 0.3f, 0.85f);
+    append(m, lathe({{g.xChamberTop, 1e-4}, {g.xChamberTop, g.rChamber}}, S, true), "#24201d", 0.2f, 0.9f);
+    // coolant manifolds: at the extension joint and just below the throat
+    const float mr = std::max(0.006f, 0.035f * re);
+    append(m, torusX(float(contour[joint].first), float(contour[joint].second + wRegen) + 0.4f * mr, mr), "#6b6f75", 0.9f, 0.35f);
+    append(m, torusX(float(g.xThroat - 0.6 * rt), float(rt * 1.08 + wRegen) + 0.5f * mr, 0.85f * mr), "#6b6f75", 0.9f, 0.35f);
+    append(m, torusX(float(g.xChamberTop - 0.15 * (g.xChamberTop - g.xChamberBot)), rc + float(wRegen) + 0.3f * mr, 0.7f * mr), "#6b6f75", 0.9f, 0.35f);
+    // gimbal mount: base pad on the injector, cardan block with two crossed pins and a gimbal ring, thrust plate on top
+    const float bh = float(g.blockH), xp = float(g.xPivot), xt = float(g.xTop), xi = float(g.xInjTop);
+    append(m, tube({xi, 0, 0}, {xi + 0.3f * bh, 0, 0}, 0.6f * rc, 24), "#2c2f33", 0.7f, 0.45f);
+    append(m, translated(meshbuilder::box({0.42f * bh, 0.62f * rc, 0.62f * rc}), {xp, 0, 0}), "#2c2f33", 0.75f, 0.4f);
+    append(m, tube({xp, -0.85f * rc, 0}, {xp, 0.85f * rc, 0}, 0.11f * bh), "#8a9097", 0.9f, 0.3f);
+    append(m, tube({xp, 0, -0.85f * rc}, {xp, 0, 0.85f * rc}, 0.11f * bh), "#8a9097", 0.9f, 0.3f);
+    append(m, torusX(xp, 0.78f * rc, 0.09f * bh, 36, 8), "#3a3e43", 0.8f, 0.4f);
+    append(m, tube({xt - 0.16f * bh, 0, 0}, {xt, 0, 0}, 0.95f * rc, 32), "#2c2f33", 0.7f, 0.45f);
+    // hydraulic gimbal actuators: barrel (top) + chrome rod (bottom), clevis joints at both ends
+    const float xa = float(g.xChamberBot + 0.35 * (g.xChamberTop - g.xChamberBot)), ra = rc + float(wRegen) + 0.03f * re;
+    const float ru = std::min(0.82f * re, std::max(ra + 0.25f * re, 1.9f * rc)), xu = xt - 0.16f * bh;
+    const float rb = std::max(0.012f, 0.16f * rc);
+    for (float phi : {0.0f, kPiF / 2}) {
+        const Vec3f lo = cyl(xa, ra + rb, phi), hi = cyl(xu, ru, phi), mid = lo + (hi - lo) * 0.52f;
+        append(m, tube(mid, hi, rb), "#9aa0a6", 0.9f, 0.28f);
+        append(m, tube(lo, mid + (hi - lo) * 0.04f, 0.55f * rb), "#d6dadf", 1.0f, 0.12f);
+        append(m, translated(meshbuilder::sphere(1.25f * rb, 12, 6), lo), "#5a5f66", 0.85f, 0.35f);
+        append(m, translated(meshbuilder::sphere(1.25f * rb, 12, 6), hi), "#5a5f66", 0.85f, 0.35f);
+        // bracket on the chamber and on the thrust plate
+        append(m, translated(meshbuilder::box({2.6f * rb, 1.6f * rb, 1.6f * rb}), cyl(xa, ra, phi)), "#2c2f33", 0.7f, 0.45f);
+        append(m, tube(cyl(xu, ru, phi), cyl(xt - 0.08f * bh, ru, phi), 0.9f * rb), "#2c2f33", 0.7f, 0.45f);
+        // hydraulic hose from the barrel up to the plate
+        append(m, tube(mid + (hi - mid) * 0.3f + cyl(0, 1.2f * rb, phi + kPiF / 2), cyl(xt - 0.1f * bh, ru - 2.5f * rb, phi + 0.25f), 0.3f * rb, 8), "#1e2023", 0.4f, 0.6f);
+    }
+    // turbopumps (fuel: gold foil wrap, oxidiser: steel) beside the chamber, with turbine housings, discharge ducts
+    // into the injector dome and feed lines up to the thrust plate (propellant from the tanks)
+    const float rp = std::max(0.02f, 0.42f * rc), lp = 2.0f * rp;
+    const float xpc = float(g.xChamberBot + 0.55 * (g.xChamberTop - g.xChamberBot)), dpc = rc + float(wRegen) + rp + 0.02f * re;
+    struct Pump { float phi; const char* color; };
+    for (const Pump& p : {Pump{kPiF, "#b8954f"}, Pump{1.5f * kPiF, "#8c939b"}}) {
+        const Vec3f c = cyl(xpc, dpc, p.phi);
+        append(m, tube(c + Vec3f{-0.5f * lp, 0, 0}, c + Vec3f{0.5f * lp, 0, 0}, rp, 20), p.color, 0.85f, 0.3f);
+        append(m, translated(meshbuilder::sphere(0.85f * rp, 16, 8), c + Vec3f{-0.55f * lp, 0, 0}), "#5d6168", 0.85f, 0.4f);
+        // discharge duct: pump side -> injector dome
+        const Vec3f out = c + Vec3f{0.25f * lp, 0, 0} + cyl(0, -0.8f * rp, p.phi) * 0.5f;
+        const Vec3f dome = cyl(float(g.xChamberTop) + 0.5f * float(domeH), 0.7f * rc, p.phi + 0.35f);
+        append(m, tube(out, dome, 0.32f * rp, 10), "#a7adb4", 0.9f, 0.3f);
+        // feed line from the pump inlet up to the thrust plate
+        append(m, tube(c + Vec3f{0.5f * lp, 0, 0}, cyl(xt - 0.1f * bh, dpc * 0.92f, p.phi), 0.45f * rp, 12), "#a7adb4", 0.9f, 0.3f);
+    }
+    // turbine exhaust duct running down the bell (tap-off cycle dumps it overboard near the nozzle joint)
+    {
+        const float phi = 1.25f * kPiF;
+        const Vec3f a = cyl(xpc - 0.6f * lp, dpc * 0.95f, phi);
+        const float xj = float(contour[joint].first) + 0.1f * re;
+        double rAt = g.rExit;
+        for (auto& cp : contour) if (cp.first <= xj) { rAt = cp.second; break; }
+        const Vec3f b = cyl(xj, float(rAt + wRegen) + 0.06f * re, phi);
+        append(m, tube(a, b, 0.22f * rp, 10), "#7a7f86", 0.85f, 0.4f);
+        append(m, translated(meshbuilder::sphere(0.3f * rp, 10, 5), b), "#7a7f86", 0.85f, 0.4f);
+    }
+    return m;
+}
+} // namespace
+
+MeshData plumeMesh(const CraftPart& part, float* exitX) {
+    if (part.partType() != PartType::Rocket) return {};
+    const RocketGeometry g = rocketGeometry(part.param("r"), part.param("len"), part.param("expansion"));
+    if (exitX) *exitX = float(g.xExit);
+    // sea-level plume of an over-expanded nozzle: the jet necks in slightly below the exit (first shock cell), then
+    // tapers smoothly to a point ~6 exit radii downstream
+    const double re = g.rExit, L = 6 * re;
+    Profile pr;
+    pr.push_back({0, 1e-4});
+    pr.push_back({0, 0.94 * re});
+    const int n = 32;
+    for (int i = 1; i <= n; ++i) {
+        const double t = double(i) / n, x = -t * L;
+        const double neck = 1 - 0.1 * std::sin(std::min(1.0, t / 0.35) * 3.14159265358979);
+        pr.push_back({x, std::max(1e-4, 0.94 * re * neck * std::pow(1 - t, 0.6))});
+    }
+    // outer surface runs top (exit) -> bottom (tail): lathe expects decreasing x along the outside
+    return lathe(pr, 32);
+}
+
 MeshData partMesh(const CraftPart& part) {
     using namespace meshbuilder;
     auto f = [&](const char* k) { return float(part.param(k)); };
@@ -240,7 +459,7 @@ MeshData partMesh(const CraftPart& part) {
     case PartType::Motor: { const float s = float(part.param("size", 1)); return rotZ(cylinder(0.22f * s, 0.25f * s, 0.5f * s, 16)); }
     case PartType::Prop: return box({float(part.param("thick", 0.06)), f("d"), float(part.param("chord", 0.14))});
     case PartType::Jet: return rotZ(cylinder(f("r") * 0.75f, f("r"), f("len")));
-    case PartType::Rocket: return rotZ(cylinder(f("r") * 0.35f, f("r"), f("len"), 20));   // bell: narrow throat, wide exit (-x end)
+    case PartType::Rocket: return rocketEngineMesh(f("r"), f("len"), f("expansion"));   // thrust +x, nozzle exit at -x
     case PartType::Tank: return rotZ(capsule(f("r"), std::max(0.01f, f("len") - 2 * f("r"))));
     case PartType::Solid: return rotZ(cylinder(f("r") * 0.8f, f("r"), f("len"), 16));
     case PartType::Cad: return triangleSoup(geo::floatsFromBase64(part.cad ? *part.cad : std::string()), f("scale"));

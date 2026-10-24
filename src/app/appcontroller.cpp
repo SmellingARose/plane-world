@@ -762,6 +762,10 @@ bool AppController::isReservedKey(const QString& name) const {
     return name == "r" || name == "p" || name == "c" || name == "e" || name == "o" || name == "space";
 }
 
+void AppController::holdKey(const QString& name, bool down) {
+    if (down ? (m_held.contains(name) ? false : (m_held.insert(name), true)) : m_held.remove(name)) emit heldKeysChanged();
+}
+
 bool AppController::flyKey(QKeyEvent* e, bool press) {
     const QString name = keyName(e->key(), e->text());
     if (name.isEmpty()) return false;
@@ -1260,18 +1264,20 @@ void AppController::collectEquations() {
 
 // ---------------------------------------------------------------- render snapshot
 
-void AppController::partWorldPoses(std::vector<geo::Transform>& out) const {
+void AppController::partWorldPoses(std::vector<geo::Transform>& out, std::vector<float>* glow) const {
     out.clear();
     out.reserve(m_doc.parts.size());
-    std::map<std::string, geo::Transform> sp;
+    if (glow) glow->clear();
+    std::map<std::string, std::pair<geo::Transform, float>> sp;
     geo::Transform craft;
     if (m_sim) {
-        for (const auto& p : m_sim->partPoses()) sp[p.partID] = geo::Transform(p.position, p.rotation);
+        for (const auto& p : m_sim->partPoses()) sp[p.partID] = {geo::Transform(p.position, p.rotation), float(p.glow)};
         craft = geo::Transform(m_sim->originPosition(), m_sim->orientation());
     }
     for (const auto& p : m_doc.parts) {
         auto it = sp.find(p.id);
-        out.push_back(it != sp.end() ? it->second : craft * localPose(p));
+        out.push_back(it != sp.end() ? it->second.first : craft * localPose(p));
+        if (glow) glow->push_back(it != sp.end() ? it->second.second : 0.0f);
     }
 }
 

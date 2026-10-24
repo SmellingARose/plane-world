@@ -132,7 +132,7 @@ static PartDefaults makeDefaults(PartType t) {
     // Liquid rocket engine (burns the craft's tanks): vacuum thrust, sea-level / vacuum Isp, 2-axis gimbal.
     case PartType::Rocket:
         d = {"#3a3d42", 180, n({{"thrust", 25000}, {"ispVac", 320}, {"ispSL", 285}, {"minThrottle", 0.4}, {"gimbal", 6},
-                                {"gimbalRate", 40}, {"r", 0.35}, {"len", 1.2}})};
+                                {"gimbalRate", 40}, {"r", 0.35}, {"len", 1.2}, {"expansion", 12}})};
         break;
     case PartType::Unknown: d = {"#cccccc", 1, {}}; break;
     }

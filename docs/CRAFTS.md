@@ -4,7 +4,7 @@ Bundled presets are `data/crafts/*.json`; they and the example crafts in `exampl
 binary at build time (`src/core/src/craft/library.cpp:51`). User crafts are saved to `<library root>/crafts`:
 `~/Library/Application Support/PlaneWorld` on macOS, `%APPDATA%\PlaneWorld` on Windows, `PW_DATA_DIR` overrides
 (`src/core/pw/craft/library.h:4`). Every craft is a
-list of parts (`box`, `cylinder`, `cone`, `wing`, `prop`, `motor`, `jet`, `solid`, `tank`, `servo`, `wheel`,
+list of parts (`box`, `cylinder`, `cone`, `wing`, `prop`, `motor`, `jet`, `solid`, `rocket`, `tank`, `servo`, `wheel`,
 `sensor`, CAD meshes) with a position, rotation, mass and type parameters. Servos and motors are linked by id.
 Every servo, motor, jet and solid becomes an output (a FLY slider, or a controller output in EVOLVE).
 
@@ -16,7 +16,7 @@ Every servo, motor, jet and solid becomes an output (a FLY slider, or a controll
 | **Jet trainer** | boxes, wings, jet, tank, servos, wheels | Turbojet with spool lag and fuel burn |
 | **Rover** | boxes, motor, servos, wheels | Ground vehicle: suspension and Pacejka-lite tyres, servo steering |
 | **Sounding rocket** | cone, cylinders, solid motor, fins | Unguided solid rocket with passive fin stability |
-| **Liquid rocket** | rocket engine (2-axis gimbal), tank, cylinders, cone, legs | 30 kN vacuum liquid-propellant rocket (Isp 285 s SL / 320 s vac, 40–100 % throttle, ±6° gimbal), T/W ≈ 1.4 full. Flown by the built-in `rocket` controller |
+| **New Shepard** | BE-3PM rocket engine (2-axis gimbal), LOX + LH2 tanks, cylinders, sphere, ring fin + wedge fins + aft fins (wings), drag brakes, legs | Blue Origin's suborbital booster + crew capsule at real scale: 490 kN sea-level hydrolox engine, 35 t lift-off, T/W 1.43, 18 %-of-SL deep throttling. Flown by the built-in `rocket` controller |
 | **Racer quad** | cylinder, cones, arms, 4 motors + props, sensors | 5" FPV-style racing quad, T/W ≈ 9.5. The craft for `drone-hover` and `drone-race` |
 
 ## Racer quad (`data/crafts/racer-quad.json`)
@@ -129,17 +129,94 @@ vanes below them. Total mass is about 13.8 kg (135 N weight). Static thrust is 2
 `examples/experiments/hover-ducted-rocket.json` and `hover-pid.json` train controllers for it
 ([EVOLUTION.md §9](EVOLUTION.md#9-headless-training-cli)).
 
-## Liquid rocket (`data/crafts/liquid-rocket.json`)
+## New Shepard (`data/crafts/new-shepard.json`)
 
-A single-engine liquid-propellant rocket with a gimballed engine, flown by the built-in `rocket` controller.
+Blue Origin's New Shepard (single-stage VTVL booster + six-seat crew capsule) at real scale, flown by the built-in
+`rocket` controller. It replaces the earlier generic "Liquid rocket" preset.
 
-- **Engine** (`rocket` part): 30 kN in vacuum, Isp 285 s at sea level and 320 s in vacuum, so 26.7 kN on the pad.
-  Thrust is s·F_vac − p_amb·A_e, with the nozzle exit area A_e taken from the two Isps. It throttles from 40 % to
-  100 % (0 = shut down) with a 0.15 s response and burns 9.6 kg/s from the tank at full throttle (about 160 s for
-  the full 1500 kg). The gimbal swings ±6° on two axes at 40°/s.
-- **Mass**: 478 kg dry + 1500 kg propellant; T/W ≈ 1.4 at lift-off, rising as it burns.
-- **Outputs**: `Engine` (throttle), `Engine gimbal pitch`, `Engine gimbal yaw`. Any controller or script can drive
-  them; the gimbal outputs are ids `eng.gimbal-pitch` / `eng.gimbal-yaw`.
+### Published figures used
+
+| Figure | Value | Source |
+|---|---|---|
+| Engine | one BE-3PM, LOX/LH2, pump-fed tap-off cycle | [1], [2] |
+| Sea-level thrust | 110,000 lbf (490 kN) | [1], [2], [3] |
+| Deep throttling | 18–100 %; ~20,000 lbf (89 kN) for landing | [1], [2] |
+| Length / diameter | 19.2 m / 3.8 m (we use 3.7 m, the figure quoted for the booster barrel) | [3] |
+| Launch mass | 35,000 kg | [3] |
+| Aero surfaces | ring fin + wedge fins near the top, four aft fins at the base, drag brakes that deploy from the ring fin and halve the descent speed (eight on the first landing) | [3], [4], [5] |
+| Landing gear | four legs | [3] |
+| Capsule | 6 seats, 6 large windows, 15 m³, three parachutes | [3] |
+
+Our six windows, four legs and eight drag brakes follow these sources (four legs, not six: [3] and the design
+overviews agree on four).
+
+### Engineering estimates (not published)
+
+- **Isp**: 328 s at sea level, 410 s in vacuum. Hydrolox at mixture ratio ~5.5 with an assumed ~7 MPa chamber and a
+  sea-level nozzle (area ratio 25, `expansion`): ideal vacuum Isp ≈ 430 s × 0.95 efficiency ≈ 410 s; the
+  sea-level thrust coefficient is (C_F,vac − ε p₀/p_c) / C_F,vac ≈ 0.80 of vacuum, so 328 s.
+  These give F_vac = 490 kN × 410/328 = 612.5 kN (the `thrust` param) and a nozzle exit area
+  A_e = (F_vac − F_SL)/p₀ = 1.21 m², i.e. the 0.62 m exit radius (`r`) of the engine mesh: the
+  thrust model and the geometry agree. Full-throttle propellant flow is 152 kg/s.
+- **Minimum throttle**: the model's pressure-loss term (s·F_vac − p·A_e) is evaluated with `minThrottle` = 0.345 so
+  that the sea-level minimum is the published 89 kN (18 % of 490 kN). A real nozzle at that chamber pressure
+  separates and loses less, which is why the flow fraction is higher than 18 %.
+- **Gimbal**: ±6° at 20°/s (typical for an engine this size).
+- **Masses**: capsule 4.0 t, booster dry 12.0 t (engine 1.0 t, structure/skin 5.4 t, tanks 2.5 t, ring fin + brakes +
+  wedge fins 1.5 t, aft fins 0.6 t, legs 1.0 t), propellant 19.0 t to make the published 35 t lift-off mass.
+  19 t is ~125 s at full throttle, in line with the ~110–140 s powered flight [3].
+- **Propellant split**: LOX 16,286 kg + LH2 2,714 kg (6 : 1 by mass), in two internal `tank` parts (the LH2 tank is
+  6 m long for the 38 m³ it needs; the tanks have `cd` 0 because they are inside the skin). Both drain together.
+- **Geometry**: booster 15.4 m (engine bay 2.15–3.85 m, LOX section to 7.0 m, LH2 section to 13.2 m, forward skirt with
+  the ring fin to 15.4 m), capsule 3.8 m (heat shield, cabin, hemispherical dome, parachute cover). Ring fin: 16
+  wing panels at 2.3 m radius, 1.1 m chord; four wedge fins tie it to the body; four 1.9 × 1.0 m aft fins; the
+  nozzle exit sits 0.8 m above the ground on the deployed legs.
+
+### Aerodynamics
+
+Every surface is a normal part of the fast aero model:
+
+- **Fins are wings** (strip theory): ring-fin panels `ar` 4 (an annular wing has about twice the lift slope of its
+  flat span), aft fins `ar` 1.1 and wedge fins `ar` 1 (span doubled by the body), all 0.12–0.16 m thick, uncambered.
+- **Cylinders use `cdAxial`** (axial drag on πr²) and `cd` (cross-flow on the 2r·h side). Cross-flow `cd` 0.6 is the
+  supercritical circular-cylinder value at Re ~10⁷. Axial values are a textbook build-up on the 10.75 m² frontal
+  area [6]: turbulent skin friction C_f = 0.002 on each section's wetted area, the capsule's blunt-dome forebody
+  pressure drag 0.15, base drag 0.15 on the aft skirt (power off), and 0.02 ring-fin/body interference.
+  The capsule's drag is carried by the cabin cylinder (its cross-flow `cd` is raised to cover the dome's side
+  area), so the dome sphere has `cd` 0.
+- **Drag brakes** are stowed flush in the ring fin (`cd` 0; their area is the ring fin's). Deploying them is left
+  to a future servo-driven version.
+
+Whole-vehicle drag at Mach 0.5, sea level, measured by `physics.rocket-gimbal`:
+
+| Configuration | C_D (on 10.75 m²) |
+|---|---|
+| Clean (legs stowed, as on the real ascent) | **0.42** |
+| As modelled (landing legs deployed, foot pads face-on) | 0.71 |
+
+0.42 is inside the 0.3–0.6 range expected for a blunt capsule on a cylinder with fins (forebody 0.15 + friction
+0.04 + base 0.15 + fins/interference ~0.05). The preset keeps the legs deployed because it lands; that costs
+0.29, mostly the face-on foot pads (`cdAxial` 1.1, a disc). The model has no part-to-part shielding, so the legs
+in the base wake are counted in full.
+
+### Engine and gimbal
+
+The `rocket` part is drawn as a real engine (`pw/rocket_geometry.h`, `craft::partMesh`): gimbal block with cardan
+pins and ring on a thrust plate, injector dome, cylindrical chamber (contraction ratio 3.2), 30° convergent
+section, throat, and an 80 % Rao bell (0.382 r_t throat arc to the inflection angle, Bézier to the exit angle,
+both from the area ratio) split into a dark regeneratively cooled section and a lighter nozzle extension, with
+coolant manifolds, a sooty inner wall, two hydraulic actuators (pitch and yaw planes), two turbopumps with
+discharge ducts and feed lines, and a turbine exhaust duct. Parts' meshes can carry per-sub-mesh materials
+(`MeshData::groups`). In FLY the engine visibly swivels about its gimbal pivot (the same point the thrust acts
+through) and a plume glows below the nozzle, scaled with throttle.
+
+### Flying it
+
+- **Outputs**: `BE-3PM engine` (throttle), `… gimbal pitch`, `… gimbal yaw` (ids `eng`, `eng.gimbal-pitch`,
+  `eng.gimbal-yaw`).
+- **Lift-off**: T/W 1.43 at full throttle; the climb is ~4 m/s² rising as it burns.
+- **Landing**: near the end of the burn (~17 t) it hovers at ~48 % throttle; minimum throttle (89 kN) is well below
+  the weight, so it can descend onto the pad.
 
 | Keys | Axis | Effect |
 |---|---|---|
@@ -147,4 +224,15 @@ A single-engine liquid-propellant rocket with a gimballed engine, flown by the b
 | ↑ / ↓ | pitch | Tilt forward / back up to 20°; release to return vertical |
 | ← / → | yaw | Tilt left / right; release to return vertical |
 
-There is no roll control (one engine cannot roll the rocket). `physics.rocket-gimbal` checks the thrust at sea level and in vacuum, the propellant flow, the gimbal limit, and that the controller holds a vertical climb and tilts on command.
+There is no roll control (one engine cannot roll the rocket). `physics.rocket-gimbal` checks the sea-level and
+vacuum thrust, the 89 kN minimum, the propellant flow, the 35 t lift-off mass and T/W, the gimbal limit, that the
+rendered engine turns by the gimbal angle about its pivot (nozzle axis = thrust axis), the Mach 0.5 drag, that the
+controller holds a vertical climb and tilts on command, and the end-of-burn hover.
+
+Sources:
+1. Blue Origin, BE-3 engine, https://www.blueorigin.com/engines/be-3
+2. Wikipedia, BE-3, https://en.wikipedia.org/wiki/BE-3
+3. Wikipedia, New Shepard, https://en.wikipedia.org/wiki/New_Shepard
+4. Blue Origin, New Shepard, https://www.blueorigin.com/new-shepard
+5. National Space Society, "Blue Origin Makes Historic Rocket Landing" (2015), https://nss.org/blue-origin-makes-historic-rocket-landing/
+6. S. F. Hoerner, *Fluid-Dynamic Drag* (1965), ch. 2–3 (skin friction, blunt forebodies, base drag) and ch. 13 (rockets)

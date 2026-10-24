@@ -11,6 +11,8 @@
 #include <set>
 #include <sstream>
 #include "pw/selftest.h"
+#include "pw/atmosphere.h"
+#include "pw/json.h"
 #include "pw/craft/document.h"
 #include "pw/craft/embedded_crafts.h"
 #include "pw/craft/outputs.h"
@@ -356,52 +358,137 @@ void registerPhysicsTests() {
     });
 
     selftest::add("physics.rocket-gimbal", [](Context& c) {
-        // Liquid rocket preset: Isp-based thrust and propellant flow, gimbal limit, and the rocket controller holding
-        // vertical on the climb and tilting when asked.
+        // New Shepard preset (BE-3PM): Isp-based thrust and propellant flow, gimbal limit, the rendered engine pose
+        // swivelling about the gimbal pivot, lift-off T/W, whole-vehicle drag at Mach 0.5, the rocket controller
+        // holding vertical on the climb and tilting when asked, and a hover near the end of the burn.
         Expect ex{c};
         craft::CraftDocument doc; std::string err;
         for (const auto* b = craft::embedded::presets(); b->name; ++b)
-            if (std::string(b->name) == "Liquid rocket") craft::parseCraft({b->data, b->size}, doc, err);
+            if (std::string(b->name) == "New Shepard") craft::parseCraft({b->data, b->size}, doc, err);
         const auto flight = craft::outputs::prepareForFlight(doc);
-        CraftSim sim; ex(sim.load(CraftSpec::fromDocument(flight)), "liquid rocket loads");
+        CraftSim sim; ex(sim.load(CraftSpec::fromDocument(flight)), "New Shepard loads");
         const int eng = sim.partIndex("eng");
-        const double Fvac = 30000, g0 = kGravity, mdot = Fvac / (320 * g0), Fsl = Fvac * 285.0 / 320.0;
+        const double Fvac = 612500, g0 = kGravity, mdot = Fvac / (410 * g0), Fsl = Fvac * 328.0 / 410.0;
         auto fire = [&](double alt, double secs, double gimbal, double& thrust, double& fuelUsed) {
             sim.load(CraftSpec::fromDocument(flight));
-            sim.groundEnabled = false;   // free flight for 2 s: thrust depends only on throttle and ambient pressure
+            sim.groundEnabled = false;   // free flight: thrust depends only on throttle and ambient pressure
             SimEnvironment env;
             sim.reset(sim.restingSpawn() + Vec3d{0, alt, 0});
-            const double fuel0 = sim.totalFuel();
+            double fuel1 = sim.totalFuel();
             sim.setOutput("eng", 1); sim.setOutput("eng.gimbal-pitch", gimbal);
-            for (double t = 0; t < secs; t += 0.01) sim.step(0.01, env);
-            thrust = sim.parts()[std::size_t(eng)].thrustNow; fuelUsed = fuel0 - sim.totalFuel();
+            for (double t = 0; t < secs; t += 0.01) { if (t < secs - 1) fuel1 = sim.totalFuel(); sim.step(0.01, env); }
+            thrust = sim.parts()[std::size_t(eng)].thrustNow; fuelUsed = fuel1 - sim.totalFuel();   // over the last second
         };
         double tSL, fSL, tVac, fVac;
         fire(0, 2, 0, tSL, fSL); fire(80000, 2, 0, tVac, fVac);
-        c.note(fmt("thrust SL %.0f N (expect %.0f), vac %.0f N (expect %.0f); propellant %.2f kg/s (expect %.2f)", tSL, Fsl, tVac, Fvac, fSL / 2, mdot));
-        ex(std::abs(tSL - Fsl) < 0.02 * Fsl && std::abs(tVac - Fvac) < 0.02 * Fvac, "thrust follows ambient pressure (Isp SL / vac)");
-        ex(std::abs(fSL / 2 - mdot) < 0.08 * mdot, "propellant flow = F_vac / (Isp_vac g0) (incl. 0.15 s spool)");
+        c.note(fmt("thrust SL %.0f N (expect %.0f = BE-3PM 110,000 lbf), vac %.0f N (expect %.0f); propellant %.1f kg/s (expect %.1f)", tSL, Fsl, tVac, Fvac, fSL, mdot));
+        ex(std::abs(tSL - 490000) < 0.02 * 490000 && std::abs(tVac - Fvac) < 0.02 * Fvac, "thrust follows ambient pressure (Isp SL / vac)");
+        ex(std::abs(fSL - mdot) < 0.02 * mdot, "propellant flow = F_vac / (Isp_vac g0)");
+        // deep throttling: minimum throttle gives ~20,000 lbf (89 kN) at sea level
+        {
+            sim.load(CraftSpec::fromDocument(flight)); sim.groundEnabled = false; SimEnvironment env;
+            sim.reset(sim.restingSpawn() + Vec3d{0, 0.001, 0});
+            sim.setOutput("eng", 0.05);
+            for (double t = 0; t < 2; t += 0.01) sim.step(0.01, env);
+            const double tMin = sim.parts()[std::size_t(eng)].thrustNow;
+            c.note(fmt("minimum-throttle thrust at sea level %.0f N (BE-3PM: 89 kN)", tMin));
+            ex(std::abs(tMin - 89000) < 0.05 * 89000, "minimum throttle ~ 89 kN at sea level");
+        }
+        // lift-off mass and T/W
+        sim.load(CraftSpec::fromDocument(flight));
+        const double m0 = sim.mass(), tw = 490000 / (m0 * g0);
+        c.note(fmt("lift-off mass %.0f kg, T/W %.2f, CoM y %.2f m, pitch inertia %.3g kg m^2", m0, tw, sim.comLocal().y, sim.inertia().c[2].z));
+        ex(std::abs(m0 - 35000) < 50 && tw > 1.35 && tw < 1.5, "lift-off mass 35 t, T/W ~1.43");
+        // gimbal limit + rendered pose: the engine turns by the gimbal angle about the pivot at its top
         double tg, fg; fire(0, 1, 1, tg, fg);
         const double gim = sim.parts()[std::size_t(eng)].gimbal[0] / kDeg;
         ex(std::abs(gim - 6) < 0.01, "gimbal saturates at its 6 deg range");
+        {
+            const SimPart& ep = sim.parts()[std::size_t(eng)];
+            const PartPose pose = sim.partPoses()[std::size_t(eng)];
+            const Vec3d o = sim.originPosition(); const Quatd q = sim.orientation();
+            const Quatd rest = (q * ep.effQ).normalized();
+            const double angle = 2 * std::acos(std::clamp(std::abs((rest.conjugate() * pose.rotation).w), 0.0, 1.0)) / kDeg;
+            const Vec3d pivotRest = o + q.act(ep.basePos + ep.effQ.act({ep.kPivot, 0, 0}));
+            const Vec3d pivotPose = pose.position + pose.rotation.act({ep.kPivot, 0, 0});
+            const double len = flight.part(std::string_view("eng"))->param("len");
+            const Vec3d exitRest = o + q.act(ep.basePos + ep.effQ.act({-len / 2, 0, 0})), exitPose = pose.position + pose.rotation.act({-len / 2, 0, 0});
+            const double swing = length(exitPose - exitRest), expect = 2 * (ep.kPivot + len / 2) * std::sin(6 * kDeg / 2);
+            c.note(fmt("rendered engine: turned %.2f deg, pivot moved %.2e m, nozzle exit swung %.3f m (expect %.3f), glow %.2f", angle, length(pivotPose - pivotRest), swing, expect, pose.glow));
+            ex(std::abs(angle - 6) < 0.05 && length(pivotPose - pivotRest) < 1e-9 && std::abs(swing - expect) < 1e-6, "rendered engine swivels by the gimbal angle about its pivot");
+            ex(pose.glow > 0.9, "firing engine pose carries its throttle (plume glow)");
+            const Vec3d nozzleAxis = pose.rotation.act({1, 0, 0});
+            const Quatd gq = Quatd::angleAxis(ep.gimbal[1], {0, 1, 0}) * Quatd::angleAxis(ep.gimbal[0], {0, 0, 1});
+            ex(length(nozzleAxis - q.act(ep.effQ.act(gq.act({1, 0, 0})))) < 1e-9, "rendered nozzle axis = thrust axis");
+        }
+        // whole-vehicle drag at Mach 0.5 (sea level, engine off): C_D on the 3.7 m frontal area, clean (legs stowed, as
+        // on the real ascent) and as modelled (landing legs deployed)
+        {
+            const double V = 0.5 * Atmosphere::isa(2).speedOfSound, rho = Atmosphere::isa(2).density, Aref = kPi * 1.85 * 1.85;
+            auto cdOf = [&](const craft::CraftDocument& dd, const Vec3d& vdir) {
+                CraftSim d; d.load(CraftSpec::fromDocument(dd)); d.groundEnabled = false;
+                SimEnvironment env; env.gravity = {0, 0, 0};
+                d.reset({0, 2, 0}); d.setVelocity(vdir * V, {0, 0, 0});
+                const double h = 1e-4; d.step(h, env);
+                return -dot(d.velocity() - vdir * V, vdir) / h * d.mass() / (0.5 * rho * V * V * Aref);
+            };
+            craft::CraftDocument clean = flight;
+            std::erase_if(clean.parts, [](const craft::CraftPart& p) { return p.id.starts_with("leg") || p.id.starts_with("foot"); });
+            const double cdClean = cdOf(clean, {0, 1, 0}), cdUp = cdOf(flight, {0, 1, 0}), cdDown = cdOf(flight, {0, -1, 0});
+            c.note(fmt("C_D at Mach 0.5 on %.2f m^2: clean ascent %.3f; legs deployed: ascent %.3f, engine-first descent %.3f", Aref, cdClean, cdUp, cdDown));
+            ex(cdClean > 0.3 && cdClean < 0.6, "clean C_D in the blunt-capsule-on-cylinder range (0.3 - 0.6)");
+            ex(cdUp > cdClean && cdUp < 0.8, "deployed legs add drag");
+        }
         // flight under the rocket controller
+        double maxGimbal = 0, maxTilt = 0;
         auto fly = [&](double pitchAt, CraftSim& s) {
             s.load(CraftSpec::fromDocument(flight));
             ControlSystem cs; cs.load(ControlScheme::fromDocument(flight), s);
             SimEnvironment env;
             cs.setAxis(cs.axisIndex("throttle"), 1);
-            for (double t = 0; t < 8; t += 0.01) {
+            maxGimbal = maxTilt = 0;
+            for (double t = 0; t < 10; t += 0.01) {
                 cs.setAxis(cs.axisIndex("pitch"), t >= pitchAt ? 1 : 0);
                 cs.step(s, [](const std::string&) { return false; }, 0.01);
                 s.step(0.01, env);
+                maxGimbal = std::max(maxGimbal, std::abs(s.parts()[std::size_t(eng)].gimbal[0]) / kDeg);
+                maxTilt = std::max(maxTilt, std::acos(std::clamp(s.orientation().act({0, 1, 0}).y, -1.0, 1.0)) / kDeg);
             }
         };
         CraftSim v; fly(1e9, v);
         CraftSim tlt; fly(2, tlt);
         const double upV = v.orientation().act({0, 1, 0}).y, tiltDeg = std::acos(std::clamp(tlt.orientation().act({0, 1, 0}).y, -1.0, 1.0)) / kDeg;
-        c.note(fmt("vertical climb: alt %.0f m, vy %.1f m/s, up.y %.4f; pitch command: tilt %.1f deg, vx %.1f m/s", v.position().y, v.velocity().y, upV, tiltDeg, tlt.velocity().x));
-        ex(v.velocity().y > 15 && upV > 0.995, "climbs and holds vertical");
+        c.note(fmt("vertical climb: alt %.0f m, vy %.1f m/s, up.y %.4f; pitch command: tilt %.1f deg (max %.1f), max gimbal %.1f deg, vx %.1f m/s",
+                   v.position().y, v.velocity().y, upV, tiltDeg, maxTilt, maxGimbal, tlt.velocity().x));
+        ex(maxTilt < 25, "tilt command does not overshoot much");
+        ex(v.velocity().y > 20 && upV > 0.995, "climbs and holds vertical");
         ex(tiltDeg > 12 && tiltDeg < 28 && tlt.velocity().x > 3, "pitch axis tilts it forward (~20 deg) and it moves +x");
+        // end of the burn (15 % propellant left): hovers on the throttle (feed-forward on the weight + PD on height)
+        // under the controller, and minimum throttle is below hover so it can descend onto the pad
+        {
+            craft::CraftDocument low = flight;
+            for (const char* t : {"loxTank", "lh2Tank"}) low.part(std::string_view(t))->p.set("fill", json::Value::number(0.15));
+            CraftSim s; s.load(CraftSpec::fromDocument(low));
+            ControlSystem cs; cs.load(ControlScheme::fromDocument(low), s);
+            SimEnvironment env;
+            s.reset(s.restingSpawn() + Vec3d{0, 200, 0});
+            const double y0 = s.position().y, pAe = Fvac * (1 - 328.0 / 410.0);
+            double thr = 0, worstVy = 0, worstUp = 1, lo = 1, hi = 0;
+            for (double t = 0; t < 20; t += 0.01) {
+                const double p = Atmosphere::isa(s.position().y).pressure / 101325;
+                const double want = s.mass() * (g0 - 0.6 * s.velocity().y - 0.1 * (s.position().y - y0));
+                thr = std::clamp((want + p * pAe) / Fvac, 0.0, 1.0);
+                cs.setAxis(cs.axisIndex("throttle"), thr);
+                cs.step(s, [](const std::string&) { return false; }, 0.01);
+                s.step(0.01, env);
+                if (t > 12) { worstVy = std::max(worstVy, std::abs(s.velocity().y)); worstUp = std::min(worstUp, s.orientation().act({0, 1, 0}).y); lo = std::min(lo, thr); hi = std::max(hi, thr); }
+            }
+            const double minThrust = 0.345 * Fvac - pAe;
+            c.note(fmt("end of burn: mass %.0f kg, hover throttle %.3f-%.3f, |vy| <= %.3f m/s, up.y >= %.4f; min-throttle thrust %.0f N vs weight %.0f N",
+                       s.mass(), lo, hi, worstVy, worstUp, minThrust, s.mass() * g0));
+            ex(worstVy < 0.2 && worstUp > 0.999 && lo > 0.345 && hi < 0.9, "hovers near the end of the burn inside the throttle range");
+            ex(minThrust < s.mass() * g0, "minimum throttle is below hover (it can descend)");
+        }
         return ex.ok;
     });
 

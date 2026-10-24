@@ -1,0 +1,1519 @@
+{
+ "name": "New Shepard",
+ "parts": [
+  {
+   "id": "eng",
+   "type": "rocket",
+   "name": "BE-3PM engine",
+   "color": "#4a4d52",
+   "mass": 1000,
+   "pos": [
+    0,
+    2.1,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "thrust": 612500,
+    "ispVac": 410,
+    "ispSL": 328,
+    "minThrottle": 0.345,
+    "gimbal": 6,
+    "gimbalRate": 20,
+    "r": 0.62,
+    "len": 2.6,
+    "expansion": 25
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "aft",
+   "type": "cylinder",
+   "name": "Aft skirt / engine bay",
+   "color": "#eef0f2",
+   "mass": 1600,
+   "pos": [
+    0,
+    3.0,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 1.85,
+    "h": 1.7,
+    "cd": 0.6,
+    "cdAxial": 0.1537
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "lox",
+   "type": "cylinder",
+   "name": "Booster LOX section",
+   "color": "#eef0f2",
+   "mass": 900,
+   "pos": [
+    0,
+    5.425,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 1.85,
+    "h": 3.15,
+    "cd": 0.6,
+    "cdAxial": 0.0068
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "lh2",
+   "type": "cylinder",
+   "name": "Booster LH2 section",
+   "color": "#eef0f2",
+   "mass": 1700,
+   "pos": [
+    0,
+    10.1,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 1.85,
+    "h": 6.2,
+    "cd": 0.6,
+    "cdAxial": 0.0134
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "fwd",
+   "type": "cylinder",
+   "name": "Forward skirt (ring-fin section)",
+   "color": "#eef0f2",
+   "mass": 1220,
+   "pos": [
+    0,
+    14.3,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 1.85,
+    "h": 2.2,
+    "cd": 0.6,
+    "cdAxial": 0.0248
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "loxTank",
+   "type": "tank",
+   "name": "LOX tank",
+   "color": "#c9ccd0",
+   "mass": 900,
+   "pos": [
+    0,
+    5.525,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "capacity": 16285.7,
+    "fill": 1,
+    "r": 1.6,
+    "len": 3.0,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "lh2Tank",
+   "type": "tank",
+   "name": "LH2 tank",
+   "color": "#c9a24a",
+   "mass": 1600,
+   "pos": [
+    0,
+    10.1,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    90
+   ],
+   "p": {
+    "capacity": 2714.3,
+    "fill": 1,
+    "r": 1.75,
+    "len": 6.0,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring0",
+   "type": "wing",
+   "name": "Ring fin 1",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    2.2125,
+    14.2,
+    0.4401
+   ],
+   "rot": [
+    0.0,
+    -11.25,
+    90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "brake0",
+   "type": "box",
+   "name": "Drag brake 1",
+   "color": "#c8ccd1",
+   "mass": 45,
+   "pos": [
+    2.2762,
+    14.15,
+    0.4528
+   ],
+   "rot": [
+    0.0,
+    -11.25,
+    0.0
+   ],
+   "p": {
+    "sx": 0.03,
+    "sy": 0.75,
+    "sz": 0.732,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring1",
+   "type": "wing",
+   "name": "Ring fin 2",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    1.8756,
+    14.2,
+    1.2533
+   ],
+   "rot": [
+    0.0,
+    -33.75,
+    90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring2",
+   "type": "wing",
+   "name": "Ring fin 3",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    1.2533,
+    14.2,
+    1.8756
+   ],
+   "rot": [
+    0.0,
+    -56.25,
+    90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "brake1",
+   "type": "box",
+   "name": "Drag brake 2",
+   "color": "#c8ccd1",
+   "mass": 45,
+   "pos": [
+    1.2894,
+    14.15,
+    1.9297
+   ],
+   "rot": [
+    0.0,
+    -56.25,
+    0.0
+   ],
+   "p": {
+    "sx": 0.03,
+    "sy": 0.75,
+    "sz": 0.732,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring3",
+   "type": "wing",
+   "name": "Ring fin 4",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    0.4401,
+    14.2,
+    2.2125
+   ],
+   "rot": [
+    0.0,
+    -78.75,
+    90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring4",
+   "type": "wing",
+   "name": "Ring fin 5",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    -0.4401,
+    14.2,
+    2.2125
+   ],
+   "rot": [
+    180.0,
+    -78.75,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "brake2",
+   "type": "box",
+   "name": "Drag brake 3",
+   "color": "#c8ccd1",
+   "mass": 45,
+   "pos": [
+    -0.4528,
+    14.15,
+    2.2762
+   ],
+   "rot": [
+    180.0,
+    -78.75,
+    180.0
+   ],
+   "p": {
+    "sx": 0.03,
+    "sy": 0.75,
+    "sz": 0.732,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring5",
+   "type": "wing",
+   "name": "Ring fin 6",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    -1.2533,
+    14.2,
+    1.8756
+   ],
+   "rot": [
+    180.0,
+    -56.25,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring6",
+   "type": "wing",
+   "name": "Ring fin 7",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    -1.8756,
+    14.2,
+    1.2533
+   ],
+   "rot": [
+    180.0,
+    -33.75,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "brake3",
+   "type": "box",
+   "name": "Drag brake 4",
+   "color": "#c8ccd1",
+   "mass": 45,
+   "pos": [
+    -1.9297,
+    14.15,
+    1.2894
+   ],
+   "rot": [
+    180.0,
+    -33.75,
+    180.0
+   ],
+   "p": {
+    "sx": 0.03,
+    "sy": 0.75,
+    "sz": 0.732,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring7",
+   "type": "wing",
+   "name": "Ring fin 8",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    -2.2125,
+    14.2,
+    0.4401
+   ],
+   "rot": [
+    180.0,
+    -11.25,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring8",
+   "type": "wing",
+   "name": "Ring fin 9",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    -2.2125,
+    14.2,
+    -0.4401
+   ],
+   "rot": [
+    180.0,
+    11.25,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "brake4",
+   "type": "box",
+   "name": "Drag brake 5",
+   "color": "#c8ccd1",
+   "mass": 45,
+   "pos": [
+    -2.2762,
+    14.15,
+    -0.4528
+   ],
+   "rot": [
+    180.0,
+    11.25,
+    180.0
+   ],
+   "p": {
+    "sx": 0.03,
+    "sy": 0.75,
+    "sz": 0.732,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring9",
+   "type": "wing",
+   "name": "Ring fin 10",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    -1.8756,
+    14.2,
+    -1.2533
+   ],
+   "rot": [
+    180.0,
+    33.75,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring10",
+   "type": "wing",
+   "name": "Ring fin 11",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    -1.2533,
+    14.2,
+    -1.8756
+   ],
+   "rot": [
+    180.0,
+    56.25,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "brake5",
+   "type": "box",
+   "name": "Drag brake 6",
+   "color": "#c8ccd1",
+   "mass": 45,
+   "pos": [
+    -1.2894,
+    14.15,
+    -1.9297
+   ],
+   "rot": [
+    180.0,
+    56.25,
+    180.0
+   ],
+   "p": {
+    "sx": 0.03,
+    "sy": 0.75,
+    "sz": 0.732,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring11",
+   "type": "wing",
+   "name": "Ring fin 12",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    -0.4401,
+    14.2,
+    -2.2125
+   ],
+   "rot": [
+    180.0,
+    78.75,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring12",
+   "type": "wing",
+   "name": "Ring fin 13",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    0.4401,
+    14.2,
+    -2.2125
+   ],
+   "rot": [
+    0.0,
+    78.75,
+    90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "brake6",
+   "type": "box",
+   "name": "Drag brake 7",
+   "color": "#c8ccd1",
+   "mass": 45,
+   "pos": [
+    0.4528,
+    14.15,
+    -2.2762
+   ],
+   "rot": [
+    0.0,
+    78.75,
+    0.0
+   ],
+   "p": {
+    "sx": 0.03,
+    "sy": 0.75,
+    "sz": 0.732,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring13",
+   "type": "wing",
+   "name": "Ring fin 14",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    1.2533,
+    14.2,
+    -1.8756
+   ],
+   "rot": [
+    0.0,
+    56.25,
+    90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring14",
+   "type": "wing",
+   "name": "Ring fin 15",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    1.8756,
+    14.2,
+    -1.2533
+   ],
+   "rot": [
+    0.0,
+    33.75,
+    90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "brake7",
+   "type": "box",
+   "name": "Drag brake 8",
+   "color": "#c8ccd1",
+   "mass": 45,
+   "pos": [
+    1.9297,
+    14.15,
+    -1.2894
+   ],
+   "rot": [
+    0.0,
+    33.75,
+    0.0
+   ],
+   "p": {
+    "sx": 0.03,
+    "sy": 0.75,
+    "sz": 0.732,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "ring15",
+   "type": "wing",
+   "name": "Ring fin 16",
+   "color": "#eef0f2",
+   "mass": 55.0,
+   "pos": [
+    2.2125,
+    14.2,
+    -0.4401
+   ],
+   "rot": [
+    0.0,
+    11.25,
+    90.0
+   ],
+   "p": {
+    "chord": 1.1,
+    "span": 0.915,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 4
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "wedge0",
+   "type": "wing",
+   "name": "Wedge fin 1",
+   "color": "#eef0f2",
+   "mass": 60,
+   "pos": [
+    1.4516,
+    14.0,
+    1.4516
+   ],
+   "rot": [
+    0.0,
+    45.0,
+    90.0
+   ],
+   "p": {
+    "chord": 1.5,
+    "span": 0.406,
+    "thick": 0.16,
+    "camber": 0,
+    "ar": 1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "wedge1",
+   "type": "wing",
+   "name": "Wedge fin 2",
+   "color": "#eef0f2",
+   "mass": 60,
+   "pos": [
+    -1.4516,
+    14.0,
+    1.4516
+   ],
+   "rot": [
+    0.0,
+    -45.0,
+    90.0
+   ],
+   "p": {
+    "chord": 1.5,
+    "span": 0.406,
+    "thick": 0.16,
+    "camber": 0,
+    "ar": 1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "wedge2",
+   "type": "wing",
+   "name": "Wedge fin 3",
+   "color": "#eef0f2",
+   "mass": 60,
+   "pos": [
+    -1.4516,
+    14.0,
+    -1.4516
+   ],
+   "rot": [
+    180.0,
+    -45.0,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.5,
+    "span": 0.406,
+    "thick": 0.16,
+    "camber": 0,
+    "ar": 1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "wedge3",
+   "type": "wing",
+   "name": "Wedge fin 4",
+   "color": "#eef0f2",
+   "mass": 60,
+   "pos": [
+    1.4516,
+    14.0,
+    -1.4516
+   ],
+   "rot": [
+    180.0,
+    45.0,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.5,
+    "span": 0.406,
+    "thick": 0.16,
+    "camber": 0,
+    "ar": 1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "fin0",
+   "type": "wing",
+   "name": "Aft fin 1",
+   "color": "#eef0f2",
+   "mass": 150,
+   "pos": [
+    2.35,
+    3.1,
+    0.0
+   ],
+   "rot": [
+    90.0,
+    90.0,
+    0.0
+   ],
+   "p": {
+    "chord": 1.9,
+    "span": 1.0,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 1.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "fin1",
+   "type": "wing",
+   "name": "Aft fin 2",
+   "color": "#eef0f2",
+   "mass": 150,
+   "pos": [
+    0.0,
+    3.1,
+    2.35
+   ],
+   "rot": [
+    0.0,
+    0.0,
+    90.0
+   ],
+   "p": {
+    "chord": 1.9,
+    "span": 1.0,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 1.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "fin2",
+   "type": "wing",
+   "name": "Aft fin 3",
+   "color": "#eef0f2",
+   "mass": 150,
+   "pos": [
+    -2.35,
+    3.1,
+    0.0
+   ],
+   "rot": [
+    -90.0,
+    -90.0,
+    0.0
+   ],
+   "p": {
+    "chord": 1.9,
+    "span": 1.0,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 1.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "fin3",
+   "type": "wing",
+   "name": "Aft fin 4",
+   "color": "#eef0f2",
+   "mass": 150,
+   "pos": [
+    -0.0,
+    3.1,
+    -2.35
+   ],
+   "rot": [
+    180.0,
+    -0.0,
+    -90.0
+   ],
+   "p": {
+    "chord": 1.9,
+    "span": 1.0,
+    "thick": 0.12,
+    "camber": 0,
+    "ar": 1.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "leg0",
+   "type": "box",
+   "name": "Landing leg 1",
+   "color": "#3a3d42",
+   "mass": 220,
+   "pos": [
+    1.7854,
+    1.76,
+    1.7854
+   ],
+   "rot": [
+    0.0,
+    -45.0,
+    26.724
+   ],
+   "p": {
+    "sx": 0.24,
+    "sy": 3.224,
+    "sz": 0.2,
+    "cd": 1.0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "foot0",
+   "type": "cylinder",
+   "name": "Foot pad 1",
+   "color": "#16181b",
+   "mass": 30,
+   "pos": [
+    2.2981,
+    0.11,
+    2.2981
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.36,
+    "h": 0.14,
+    "cd": 0.8,
+    "cdAxial": 1.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "leg1",
+   "type": "box",
+   "name": "Landing leg 2",
+   "color": "#3a3d42",
+   "mass": 220,
+   "pos": [
+    -1.7854,
+    1.76,
+    1.7854
+   ],
+   "rot": [
+    180.0,
+    -45.0,
+    -153.276
+   ],
+   "p": {
+    "sx": 0.24,
+    "sy": 3.224,
+    "sz": 0.2,
+    "cd": 1.0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "foot1",
+   "type": "cylinder",
+   "name": "Foot pad 2",
+   "color": "#16181b",
+   "mass": 30,
+   "pos": [
+    -2.2981,
+    0.11,
+    2.2981
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.36,
+    "h": 0.14,
+    "cd": 0.8,
+    "cdAxial": 1.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "leg2",
+   "type": "box",
+   "name": "Landing leg 3",
+   "color": "#3a3d42",
+   "mass": 220,
+   "pos": [
+    -1.7854,
+    1.76,
+    -1.7854
+   ],
+   "rot": [
+    180.0,
+    45.0,
+    -153.276
+   ],
+   "p": {
+    "sx": 0.24,
+    "sy": 3.224,
+    "sz": 0.2,
+    "cd": 1.0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "foot2",
+   "type": "cylinder",
+   "name": "Foot pad 3",
+   "color": "#16181b",
+   "mass": 30,
+   "pos": [
+    -2.2981,
+    0.11,
+    -2.2981
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.36,
+    "h": 0.14,
+    "cd": 0.8,
+    "cdAxial": 1.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "leg3",
+   "type": "box",
+   "name": "Landing leg 4",
+   "color": "#3a3d42",
+   "mass": 220,
+   "pos": [
+    1.7854,
+    1.76,
+    -1.7854
+   ],
+   "rot": [
+    0.0,
+    45.0,
+    26.724
+   ],
+   "p": {
+    "sx": 0.24,
+    "sy": 3.224,
+    "sz": 0.2,
+    "cd": 1.0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "foot3",
+   "type": "cylinder",
+   "name": "Foot pad 4",
+   "color": "#16181b",
+   "mass": 30,
+   "pos": [
+    2.2981,
+    0.11,
+    -2.2981
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.36,
+    "h": 0.14,
+    "cd": 0.8,
+    "cdAxial": 1.1
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "shield",
+   "type": "cylinder",
+   "name": "Capsule heat shield",
+   "color": "#3b2f27",
+   "mass": 600,
+   "pos": [
+    0,
+    15.54,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 1.87,
+    "h": 0.28,
+    "cd": 0.6,
+    "cdAxial": 0.0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "cabin",
+   "type": "cylinder",
+   "name": "Crew capsule",
+   "color": "#eef0f2",
+   "mass": 2380,
+   "pos": [
+    0,
+    16.515,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 1.85,
+    "h": 1.67,
+    "cd": 1.122,
+    "cdAxial": 0.1582
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "dome",
+   "type": "sphere",
+   "name": "Capsule dome",
+   "color": "#eef0f2",
+   "mass": 900,
+   "pos": [
+    0,
+    17.35,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 1.85,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "hatch",
+   "type": "cylinder",
+   "name": "Parachute cover",
+   "color": "#e4e6e8",
+   "mass": 60,
+   "pos": [
+    0,
+    19.16,
+    0
+   ],
+   "rot": [
+    0,
+    0,
+    0
+   ],
+   "p": {
+    "r": 0.55,
+    "h": 0.12,
+    "cd": 0,
+    "cdAxial": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "win0",
+   "type": "box",
+   "name": "Window 1",
+   "color": "#16181b",
+   "mass": 10,
+   "pos": [
+    1.6108,
+    16.53,
+    0.93
+   ],
+   "rot": [
+    0.0,
+    -30.0,
+    0.0
+   ],
+   "p": {
+    "sx": 0.08,
+    "sy": 1.05,
+    "sz": 0.72,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "win1",
+   "type": "box",
+   "name": "Window 2",
+   "color": "#16181b",
+   "mass": 10,
+   "pos": [
+    0.0,
+    16.53,
+    1.86
+   ],
+   "rot": [
+    0.0,
+    -90.0,
+    0.0
+   ],
+   "p": {
+    "sx": 0.08,
+    "sy": 1.05,
+    "sz": 0.72,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "win2",
+   "type": "box",
+   "name": "Window 3",
+   "color": "#16181b",
+   "mass": 10,
+   "pos": [
+    -1.6108,
+    16.53,
+    0.93
+   ],
+   "rot": [
+    180.0,
+    -30.0,
+    180.0
+   ],
+   "p": {
+    "sx": 0.08,
+    "sy": 1.05,
+    "sz": 0.72,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "win3",
+   "type": "box",
+   "name": "Window 4",
+   "color": "#16181b",
+   "mass": 10,
+   "pos": [
+    -1.6108,
+    16.53,
+    -0.93
+   ],
+   "rot": [
+    180.0,
+    30.0,
+    180.0
+   ],
+   "p": {
+    "sx": 0.08,
+    "sy": 1.05,
+    "sz": 0.72,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "win4",
+   "type": "box",
+   "name": "Window 5",
+   "color": "#16181b",
+   "mass": 10,
+   "pos": [
+    -0.0,
+    16.53,
+    -1.86
+   ],
+   "rot": [
+    0.0,
+    90.0,
+    0.0
+   ],
+   "p": {
+    "sx": 0.08,
+    "sy": 1.05,
+    "sz": 0.72,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  },
+  {
+   "id": "win5",
+   "type": "box",
+   "name": "Window 6",
+   "color": "#16181b",
+   "mass": 10,
+   "pos": [
+    1.6108,
+    16.53,
+    -0.93
+   ],
+   "rot": [
+    0.0,
+    30.0,
+    0.0
+   ],
+   "p": {
+    "sx": 0.08,
+    "sy": 1.05,
+    "sz": 0.72,
+    "cd": 0
+   },
+   "servo": null,
+   "invert": false,
+   "motor": null
+  }
+ ],
+ "controls": {
+  "controller": "rocket"
+ }
+}

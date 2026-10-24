@@ -2,6 +2,7 @@
 // Meshes for craft parts, CAD import, auto-rig and mesh cut (ports of Swift Craft/TriMesh.swift,
 // Craft/PartMeshFactory.swift and the primitive builders of Render/RenderCore.swift MeshBuilder).
 #include <cstdint>
+#include <string>
 #include <vector>
 #include "pw/craft/document.h"
 #include "pw/geo.h"
@@ -21,11 +22,20 @@ struct Mat4f {
     float det3() const;
 };
 
+/// Optional sub-mesh material for the renderer: entries [first, first + count) of `indices`.
+/// Empty colour = the part's own colour; negative metallic / roughness = the part's material.
+struct MeshGroup {
+    uint32_t first = 0, count = 0;
+    std::string color;
+    float metallic = -1, roughness = -1, emissive = 0;
+};
+
 /// Render/aero mesh: positions, normals, uvs (same length) and triangle indices (CCW = front).
 struct MeshData {
     std::vector<Vec3f> positions, normals;
     std::vector<Vec2f> uvs;
     std::vector<uint32_t> indices;
+    std::vector<MeshGroup> groups;   // optional per-sub-mesh materials (render only; empty = one material)
     void add(const Vec3f& p, const Vec3f& n, Vec2f uv = {}) { positions.push_back(p); normals.push_back(n); uvs.push_back(uv); }
     std::size_t vertexCount() const { return positions.size(); }
 };
@@ -46,6 +56,9 @@ MeshData rotated(MeshData m, float qx, float qy, float qz, float qw);
 
 /// Part geometry in the part-local frame (prototype makeGeo dimensions; p.visual == "cad" uses the CAD soup).
 MeshData partMesh(const CraftPart& part);
+/// Exhaust plume of a rocket engine at full throttle (empty for other parts), in a frame whose origin is the nozzle
+/// exit centre, extending along local -x. `exitX` receives the exit plane position on the part's x axis.
+MeshData plumeMesh(const CraftPart& part, float* exitX = nullptr);
 
 /// Indexed triangle mesh (positions + indices only).
 struct TriMesh {

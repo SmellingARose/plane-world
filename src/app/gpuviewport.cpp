@@ -46,6 +46,7 @@ struct ViewportNode : QSGSimpleTextureNode {
     pw::gpu::Texture* wrapped = nullptr;
     int revision = -1;
     std::vector<geo::Transform> poses;
+    std::vector<float> glow;   // rocket exhaust plumes (throttle per part)
     // FLY in the WORLD tab's world: terrain / water / vegetation / props replace the flat ground
     std::shared_ptr<WorldScene> scene;
     std::unique_ptr<pw::envrender::TerrainRenderable> terrainR;
@@ -107,6 +108,9 @@ void GpuViewport::setView(const QString& n) {
     else if (n == "right") { m_goal.yaw = 0; m_goal.pitch = 0.05; }
     else if (n == "left") { m_goal.yaw = kPi; m_goal.pitch = 0.05; }
     else if (n == "top") { m_goal.pitch = 1.45; }
+    else if (n == "low") { m_goal.pitch = -0.15; }   // lowest orbit (looking up at the craft, e.g. a rocket's engine)
+    else if (n == "zoom in") { m_goal.dist = std::max(0.3, m_goal.dist * 0.6); }
+    else if (n == "zoom out") { m_goal.dist = m_goal.dist / 0.6; }
     m_goal.yaw = m_cur.yaw + wrapPi(m_goal.yaw - m_cur.yaw);   // short way round
     update();
 }
@@ -387,8 +391,8 @@ QSGNode* GpuViewport::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
             if (m_lastRevision < 0) { const double r = app->craftRadius(); m_goal.dist = m_cur.dist = std::max(0.3, r * 2.8); }
             m_lastRevision = n->revision;
         }
-        app->partWorldPoses(n->poses);
-        n->craft->setPartPoses(n->poses);
+        app->partWorldPoses(n->poses, &n->glow);
+        n->craft->setPartPoses(n->poses, n->glow);
     }
 
     // ---- world (FLY over the WORLD tab's world); BUILD keeps the neutral flat ground
