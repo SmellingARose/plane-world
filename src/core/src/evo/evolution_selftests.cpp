@@ -475,6 +475,8 @@ void registerRunTests() {
         bool ok = expect(c, count("airspeed") == 1 && count("altitudeAGL") == 1 && count("verticalSpeed") == 1, "missing standard sensors added");
         ok &= expect(c, count("attitude") == 1 && out.part(std::string_view("my-att")) && out.part(std::string_view("my-tgt")), "existing sensors kept, attitude not duplicated");
         ok &= expect(c, presets::addStandardSensors(out).parts.size() == out.parts.size(), "idempotent");
+        double added = 0; for (auto& p : out.parts) if (p.id.rfind("sn-", 0) == 0) added += p.mass;
+        ok &= expect(c, added == 0, "gap-filled sensors are massless (the craft flies as designed)");
         // and the quick-start style experiment resolves its MLP inputs on such a craft
         ExperimentDocument e = presets::make("Neural controller", "Trainer");
         e.crafts = {CraftRef{}}; e.crafts[0].inlineDoc = d;

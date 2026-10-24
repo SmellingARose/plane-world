@@ -351,8 +351,12 @@ namespace presets {
 const std::vector<std::string>& names() { static const std::vector<std::string> n = {"Neural controller", "Craft design", "Co-evolve design + controller"}; return n; }
 
 craft::CraftDocument addStandardSensors(const craft::CraftDocument& craft) {
-    // Adds each standard sensor the craft lacks (matched by kind, or by name so a craft's own "air" is never shadowed).
-    // A craft that already has some sensors (e.g. att + target) still gets the rest, so preset inputs like "air" resolve.
+    // Adds each standard sensor the craft lacks (matched by kind, or by name so a craft's own "air" is never shadowed),
+    // so preset inputs like "air" resolve even on a craft that brings some sensors of its own (e.g. att + target).
+    // Sensors filled in next to the craft's own are massless instruments, so the craft flies exactly as designed; a
+    // craft with no sensors at all gets the full set at the default sensor mass (as always: reference histories).
+    bool hasAny = false;
+    for (auto& p : craft.parts) hasAny |= p.partType() == craft::PartType::Sensor;
     static const char* kStd[][3] = {{"sn-alt", "alt", "altitudeAGL"}, {"sn-att", "att", "attitude"}, {"sn-rate", "rate", "angularRate"},
                                     {"sn-air", "air", "airspeed"},    {"sn-vs", "vs", "verticalSpeed"}, {"sn-aero", "aero", "aero"}};
     craft::CraftDocument c = craft;
@@ -363,6 +367,7 @@ craft::CraftDocument addStandardSensors(const craft::CraftDocument& craft) {
         if (have || c.part(std::string_view(s[0]))) continue;
         auto p = craft::CraftPart::make(s[0], craft::PartType::Sensor, s[1]);
         p.setParam("kind", std::string(s[2]));
+        if (hasAny) p.mass = 0;
         c.parts.push_back(std::move(p));
     }
     return c;
