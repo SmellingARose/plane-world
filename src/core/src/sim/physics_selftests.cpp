@@ -1,6 +1,7 @@
 // Headless physics self-tests (`pwcli --selftest physics.`): ports of Sources/Physics/PhysicsSelfTests.swift,
 // FastGapsSelfTests.swift and SensorSelfTests.swift, with the same presets, the same expectations and, on macOS
 // arm64, the same bit-exact trajectory digests as the Swift app.
+#include <algorithm>
 #include <chrono>
 #include <cstdarg>
 #include <cstring>
