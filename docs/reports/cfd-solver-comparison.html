@@ -1,0 +1,826 @@
+<title>CFD Solver Comparison</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single engineering-note column; diagrams break out wider in their own scroll boxes. */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #18202b; --muted: #5a6575; --rule: #d9dee6;
+  --accent: #1f5fbf; --accent-soft: #e3ecfa; --warm: #b4541f; --warm-soft: #f8e9df; --ok: #2e7d4f; --ok-soft: #e2f2e8;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f141b; --panel: #161d27; --ink: #e6ebf2; --muted: #9aa6b6; --rule: #2a3442;
+  --accent: #6aa3ff; --accent-soft: #1b2b45; --warm: #f0955c; --warm-soft: #3a2518; --ok: #6fcf97; --ok-soft: #173022; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f141b; --panel: #161d27; --ink: #e6ebf2; --muted: #9aa6b6; --rule: #2a3442;
+  --accent: #6aa3ff; --accent-soft: #1b2b45; --warm: #f0955c; --warm-soft: #3a2518; --ok: #6fcf97; --ok-soft: #173022; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--body); }
+.wrap { max-width: 980px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 44px); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 24px; font-weight: 600; margin-top: 44px; }
+h3 { font-size: 17px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.head { display: flex; flex-direction: column; gap: 12px; }
+.verdict { display: grid; grid-template-columns: auto 1fr; gap: 14px 18px; align-items: start; background: var(--ok-soft);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); border-radius: 10px; padding: 18px 20px; margin-top: 26px; }
+.verdict .tag { font: 600 13px/1 var(--mono); color: var(--ok); border: 1.5px solid var(--ok); border-radius: 6px; padding: 7px 9px; white-space: nowrap; }
+.verdict p { min-width: 0; }
+.diagram { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; overflow-x: auto; margin-top: 16px; }
+.diagram svg { display: block; min-width: 860px; width: 100%; height: auto; }
+.diagram text { font-family: var(--body); fill: var(--ink); }
+.diagram .mono { font-family: var(--mono); }
+.diagram .sub { fill: var(--muted); font-size: 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card.pick { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.pill { align-self: flex-start; font: 500 11px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.pill.warm { background: var(--warm-soft); color: var(--warm); }
+ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+li { max-width: 66ch; }
+.tablebox { overflow-x: auto; margin-top: 16px; background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 500 12px/1.3 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+tr.total td { font-weight: 600; background: var(--accent-soft); }
+code { font: 13px var(--mono); background: var(--accent-soft); color: var(--ink); padding: 1px 5px; border-radius: 4px; }
+.note { color: var(--muted); font-size: 13px; }
+.risk { display: grid; grid-template-columns: 8px 1fr; gap: 0 14px; }
+.risk .bar { border-radius: 4px; background: var(--warm); }
+.risk.mid .bar { background: color-mix(in srgb, var(--warm) 55%, var(--rule)); }
+.risk .body { display: flex; flex-direction: column; gap: 4px; padding-block: 2px; min-width: 0; }
+.risks { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.phases { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px; }
+.phase { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.phase .k { font: 600 12px/1 var(--mono); color: var(--accent); }
+.sources { font-size: 13px; color: var(--muted); }
+.sources a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<style>
+.wrap { max-width: 1040px; }
+.eqbox { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 18px; margin-top: 16px; overflow-x: auto; display: flex; flex-direction: column; gap: 12px; }
+math { font-size: 1.12em; }
+.ladder table { min-width: 760px; }
+.ladder td { vertical-align: middle; }
+.mbar { width: 200px; height: 22px; display: block; }
+.dots { display: inline-flex; gap: 3px; vertical-align: middle; }
+.dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--rule); display: inline-block; }
+.dots i.on { background: var(--accent); }
+.t { display: block; font: 11px var(--mono); color: var(--muted); margin-top: 3px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--muted); margin-top: 10px; align-items: center; }
+.sw { display: inline-block; width: 14px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+details.eqd { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; margin-top: 10px; }
+details.eqd[open] { border-color: var(--accent); }
+details.eqd summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; }
+details.eqd summary::-webkit-details-marker { display: none; }
+details.eqd summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+.st { font: 600 16px/1.2 var(--display); }
+.chev { color: var(--accent); transition: transform .15s; font-size: 14px; }
+details[open] .chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
+.eqshow { overflow-x: auto; padding: 4px 16px 6px; }
+.parts { display: grid; gap: 0; padding: 4px 16px 14px; }
+.part { display: grid; grid-template-columns: 210px minmax(0,1fr); gap: 14px; padding: 9px 0; border-top: 1px solid var(--rule); font-size: 14px; }
+.part .k { font: 500 11px/1.5 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+@media (max-width: 640px) { .part { grid-template-columns: 1fr; gap: 4px; } }
+.hint { font-size: 13px; color: var(--muted); margin-top: 6px; }
+</style>
+<style>
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.toc a { font: 500 12px/1 var(--mono); color: var(--accent); text-decoration: none; padding: 7px 10px; border: 1px solid var(--rule); border-radius: 999px; background: var(--panel); }
+.toc a:hover { border-color: var(--accent); }
+table.heat { min-width: 880px; font-size: 13px; }
+table.heat td, table.heat th { padding: 9px 10px; }
+table.heat td.sn { font-weight: 600; white-space: nowrap; }
+td.hm { border-left: 2px solid var(--panel); }
+td.hm.g { background: var(--ok-soft); } td.hm.o { background: var(--accent-soft); } td.hm.b { background: var(--warm-soft); }
+td.hm.x { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); }
+td.hm .ic { margin-right: 6px; }
+td.hm.g .ic { color: var(--ok); } td.hm.o .ic { color: var(--accent); } td.hm.b .ic, td.hm.x .ic { color: var(--warm); }
+tr.pickrow td.sn { color: var(--accent); }
+tr.pickrow td.sn::after { content: " ★"; }
+.sw.g { background: var(--ok-soft); outline: 1px solid var(--ok); } .sw.o { background: var(--accent-soft); outline: 1px solid var(--accent); }
+.sw.b { background: var(--warm-soft); outline: 1px solid var(--warm); } .sw.x { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); outline: 1px solid var(--warm); }
+.diagram text { font-family: var(--body); fill: var(--ink); } .diagram .sub { fill: var(--muted); } .diagram .mono { font-family: var(--mono); }
+</style>
+<style>
+.wrap { max-width: 1180px; }
+.matrix table { min-width: 1080px; }
+.matrix th { font: 600 13px/1.2 var(--display); text-transform: none; letter-spacing: 0; color: var(--ink); }
+.matrix th .mr { display: block; font: 400 11px var(--mono); color: var(--muted); margin-top: 2px; }
+.matrix td { padding: 6px; vertical-align: middle; border-bottom: 1px solid var(--rule); }
+.matrix td.sn { font-weight: 600; white-space: nowrap; padding-right: 12px; }
+.matrix td.cell { position: relative; }
+.matrix canvas { width: 200px; height: 110px; display: block; border-radius: 6px; background: var(--panel); }
+.chip { position: absolute; left: 12px; bottom: 12px; font: 500 10px/1 var(--mono); padding: 4px 6px; border-radius: 999px; letter-spacing: .03em; }
+.chip.g { background: var(--ok-soft); color: var(--ok); } .chip.o { background: var(--accent-soft); color: var(--accent); }
+.chip.p, .chip.x { background: var(--warm-soft); color: var(--warm); } .chip.r { background: var(--panel); color: var(--muted); border: 1px solid var(--rule); }
+.hero { width: 100%; max-width: 100%; height: auto; aspect-ratio: 3 / 1; display: block; border-radius: 12px; border: 1px solid var(--rule); background: var(--panel); margin-top: 18px; }
+table.reg { min-width: 820px; } table.reg td.sn { font-weight: 600; }
+ul.src { columns: 2 300px; font-size: 13px; padding-left: 18px; } ul.src a { color: var(--accent); }
+#plegend { margin-top: 10px; font-size: 13px; color: var(--muted); }
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><pattern id="hh" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="var(--warm-soft)"/><path d="M0,0 V5" stroke="var(--warm)" stroke-width="1" opacity="0.55"/></pattern></defs></svg>
+
+<div class="wrap">
+  <header class="head">
+    <span class="eyebrow">Plane World · aero lookup tables</span>
+    <h1>CFD solvers compared</h1>
+    <p>Same physics, different amounts of turbulence calculated versus modelled, across every speed our crafts fly.</p>
+    <nav class="toc"><a href="#see">See it</a><a href="#regimes">Speed regimes</a><a href="#scorecard">Scorecard</a><a href="#charts">Accuracy &amp; cost</a><a href="#eddies">Eddies</a><a href="#maths">Maths</a><a href="#sources">Sources</a></nav>
+  </header>
+  <canvas class="hero" id="hero" width="1140" height="380" aria-label="Animated illustration: DDES view of supersonic flow past a capsule"></canvas>
+
+  <div class="verdict" style="margin-top:20px"><span class="tag">PICK</span><p><strong>URANS for most of the table, DDES for stall, transonic buffet and base flow.</strong> A compressible solver (SU2 or similar) above Mach 0.3.</p></div>
+
+  <h2 id="see">See the difference</h2>
+  <p class="note">Illustrations, not simulations: the same airfoil flow drawn the way each solver represents it. Hatched cells are combinations the solver can't handle.</p>
+  <div class="tablebox matrix"><table><thead><tr><th></th><th>Incompressible<span class="mr">M &lt; 0.3</span></th><th>Subsonic<span class="mr">0.3–0.8</span></th><th>Transonic<span class="mr">0.8–1.2</span></th><th>Supersonic<span class="mr">1.2–5</span></th><th>Hypersonic<span class="mr">M &gt; 5</span></th></tr></thead><tbody><tr><td class="sn">Potential flow</td><td class="cell"><canvas class="flowtile" data-solver="potential" data-regime="incompressible" data-body="airfoil" width="200" height="110" aria-label="Potential flow, incompressible flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="potential" data-regime="subsonic" data-body="airfoil" width="200" height="110" aria-label="Potential flow, subsonic flow"></canvas><span class="chip o">ok</span></td><td class="cell"><canvas class="flowtile" data-solver="potential" data-regime="transonic" data-body="airfoil" data-invalid="1" width="200" height="110" aria-label="Potential flow, transonic flow"></canvas><span class="chip x">invalid</span></td><td class="cell"><canvas class="flowtile" data-solver="potential" data-regime="supersonic" data-body="airfoil" width="200" height="110" aria-label="Potential flow, supersonic flow"></canvas><span class="chip p">poor</span></td><td class="cell"><canvas class="flowtile" data-solver="potential" data-regime="hypersonic" data-body="airfoil" data-invalid="1" width="200" height="110" aria-label="Potential flow, hypersonic flow"></canvas><span class="chip x">invalid</span></td></tr><tr><td class="sn">Steady RANS</td><td class="cell"><canvas class="flowtile" data-solver="rans" data-regime="incompressible" data-body="airfoil" width="200" height="110" aria-label="Steady RANS, incompressible flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="rans" data-regime="subsonic" data-body="airfoil" width="200" height="110" aria-label="Steady RANS, subsonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="rans" data-regime="transonic" data-body="airfoil" width="200" height="110" aria-label="Steady RANS, transonic flow"></canvas><span class="chip o">ok</span></td><td class="cell"><canvas class="flowtile" data-solver="rans" data-regime="supersonic" data-body="airfoil" width="200" height="110" aria-label="Steady RANS, supersonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="rans" data-regime="hypersonic" data-body="airfoil" width="200" height="110" aria-label="Steady RANS, hypersonic flow"></canvas><span class="chip o">ok</span></td></tr><tr><td class="sn">URANS ★</td><td class="cell"><canvas class="flowtile" data-solver="urans" data-regime="incompressible" data-body="airfoil" width="200" height="110" aria-label="URANS, incompressible flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="urans" data-regime="subsonic" data-body="airfoil" width="200" height="110" aria-label="URANS, subsonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="urans" data-regime="transonic" data-body="airfoil" width="200" height="110" aria-label="URANS, transonic flow"></canvas><span class="chip o">ok</span></td><td class="cell"><canvas class="flowtile" data-solver="urans" data-regime="supersonic" data-body="airfoil" width="200" height="110" aria-label="URANS, supersonic flow"></canvas><span class="chip o">ok</span></td><td class="cell"><canvas class="flowtile" data-solver="urans" data-regime="hypersonic" data-body="airfoil" width="200" height="110" aria-label="URANS, hypersonic flow"></canvas><span class="chip o">ok</span></td></tr><tr><td class="sn">DDES ★</td><td class="cell"><canvas class="flowtile" data-solver="ddes" data-regime="incompressible" data-body="airfoil" width="200" height="110" aria-label="DDES, incompressible flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="ddes" data-regime="subsonic" data-body="airfoil" width="200" height="110" aria-label="DDES, subsonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="ddes" data-regime="transonic" data-body="airfoil" width="200" height="110" aria-label="DDES, transonic flow"></canvas><span class="chip o">ok</span></td><td class="cell"><canvas class="flowtile" data-solver="ddes" data-regime="supersonic" data-body="airfoil" width="200" height="110" aria-label="DDES, supersonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="ddes" data-regime="hypersonic" data-body="airfoil" width="200" height="110" aria-label="DDES, hypersonic flow"></canvas><span class="chip r">cost-limited</span></td></tr><tr><td class="sn">Wall-modelled LES</td><td class="cell"><canvas class="flowtile" data-solver="wmles" data-regime="incompressible" data-body="airfoil" width="200" height="110" aria-label="Wall-modelled LES, incompressible flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="wmles" data-regime="subsonic" data-body="airfoil" width="200" height="110" aria-label="Wall-modelled LES, subsonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="wmles" data-regime="transonic" data-body="airfoil" width="200" height="110" aria-label="Wall-modelled LES, transonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="wmles" data-regime="supersonic" data-body="airfoil" width="200" height="110" aria-label="Wall-modelled LES, supersonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="wmles" data-regime="hypersonic" data-body="airfoil" width="200" height="110" aria-label="Wall-modelled LES, hypersonic flow"></canvas><span class="chip r">cost-limited</span></td></tr><tr><td class="sn">Wall-resolved LES</td><td class="cell"><canvas class="flowtile" data-solver="wrles" data-regime="incompressible" data-body="airfoil" width="200" height="110" aria-label="Wall-resolved LES, incompressible flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="wrles" data-regime="subsonic" data-body="airfoil" width="200" height="110" aria-label="Wall-resolved LES, subsonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="wrles" data-regime="transonic" data-body="airfoil" width="200" height="110" aria-label="Wall-resolved LES, transonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="wrles" data-regime="supersonic" data-body="airfoil" width="200" height="110" aria-label="Wall-resolved LES, supersonic flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="wrles" data-regime="hypersonic" data-body="airfoil" width="200" height="110" aria-label="Wall-resolved LES, hypersonic flow"></canvas><span class="chip r">cost-limited</span></td></tr><tr><td class="sn">DNS</td><td class="cell"><canvas class="flowtile" data-solver="dns" data-regime="incompressible" data-body="airfoil" width="200" height="110" aria-label="DNS, incompressible flow"></canvas><span class="chip r">cost-limited</span></td><td class="cell"><canvas class="flowtile" data-solver="dns" data-regime="subsonic" data-body="airfoil" width="200" height="110" aria-label="DNS, subsonic flow"></canvas><span class="chip r">cost-limited</span></td><td class="cell"><canvas class="flowtile" data-solver="dns" data-regime="transonic" data-body="airfoil" width="200" height="110" aria-label="DNS, transonic flow"></canvas><span class="chip r">cost-limited</span></td><td class="cell"><canvas class="flowtile" data-solver="dns" data-regime="supersonic" data-body="airfoil" width="200" height="110" aria-label="DNS, supersonic flow"></canvas><span class="chip r">cost-limited</span></td><td class="cell"><canvas class="flowtile" data-solver="dns" data-regime="hypersonic" data-body="airfoil" width="200" height="110" aria-label="DNS, hypersonic flow"></canvas><span class="chip r">cost-limited</span></td></tr><tr><td class="sn">Lattice Boltzmann</td><td class="cell"><canvas class="flowtile" data-solver="lbm" data-regime="incompressible" data-body="airfoil" width="200" height="110" aria-label="Lattice Boltzmann, incompressible flow"></canvas><span class="chip g">good</span></td><td class="cell"><canvas class="flowtile" data-solver="lbm" data-regime="subsonic" data-body="airfoil" width="200" height="110" aria-label="Lattice Boltzmann, subsonic flow"></canvas><span class="chip p">poor</span></td><td class="cell"><canvas class="flowtile" data-solver="lbm" data-regime="transonic" data-body="airfoil" data-invalid="1" width="200" height="110" aria-label="Lattice Boltzmann, transonic flow"></canvas><span class="chip x">invalid</span></td><td class="cell"><canvas class="flowtile" data-solver="lbm" data-regime="supersonic" data-body="airfoil" data-invalid="1" width="200" height="110" aria-label="Lattice Boltzmann, supersonic flow"></canvas><span class="chip x">invalid</span></td><td class="cell"><canvas class="flowtile" data-solver="lbm" data-regime="hypersonic" data-body="airfoil" data-invalid="1" width="200" height="110" aria-label="Lattice Boltzmann, hypersonic flow"></canvas><span class="chip x">invalid</span></td></tr></tbody></table></div>
+  <div id="plegend"></div>
+
+  <h2 id="regimes">Speed regimes</h2>
+  <div class="diagram"><svg viewBox="0 0 980 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mach axis with the five regimes and where each Plane World craft flies"><rect x="60.0" y="30" width="290.8" height="44" fill="var(--ok-soft)"/><text x="205.4" y="56" font-size="12" text-anchor="middle">incompressible</text><rect x="350.8" y="30" width="159.2" height="44" fill="var(--accent-soft)"/><text x="430.4" y="56" font-size="12" text-anchor="middle">subsonic</text><rect x="510.0" y="30" width="65.8" height="44" fill="var(--warm-soft)"/><text x="542.9" y="56" font-size="12" text-anchor="middle">transonic</text><rect x="575.8" y="30" width="231.6" height="44" fill="var(--accent-soft)"/><text x="691.7" y="56" font-size="12" text-anchor="middle">supersonic</text><rect x="807.5" y="30" width="112.5" height="44" fill="var(--warm-soft)"/><text x="863.7" y="56" font-size="12" text-anchor="middle">hypersonic</text><path d="M172.5,74 V80" stroke="var(--muted)"/><text x="172.5" y="94" font-size="11" text-anchor="middle" class="sub">M 0.1</text><path d="M350.8,74 V80" stroke="var(--muted)"/><text x="350.8" y="94" font-size="11" text-anchor="middle" class="sub">M 0.3</text><path d="M510.0,74 V80" stroke="var(--muted)"/><text x="510.0" y="94" font-size="11" text-anchor="middle" class="sub">M 0.8</text><path d="M575.8,74 V80" stroke="var(--muted)"/><text x="575.8" y="94" font-size="11" text-anchor="middle" class="sub">M 1.2</text><path d="M658.8,74 V80" stroke="var(--muted)"/><text x="658.8" y="94" font-size="11" text-anchor="middle" class="sub">M 2</text><path d="M807.5,74 V80" stroke="var(--muted)"/><text x="807.5" y="94" font-size="11" text-anchor="middle" class="sub">M 5</text><path d="M920.0,74 V80" stroke="var(--muted)"/><text x="920.0" y="94" font-size="11" text-anchor="middle" class="sub">M 10</text><circle cx="202.1" cy="112" r="4" fill="var(--accent)"/><text x="210.1" y="116" font-size="12">Trainer</text><path d="M89.6,127 H292.9" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/><text x="300.9" y="131" font-size="12">Racer quad</text><path d="M350.8,142 H510.0" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/><text x="518.0" y="146" font-size="12">Jet trainer</text><path d="M60.0,157 H760.4" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/><text x="768.4" y="161" font-size="12">New Shepard</text><path d="M60.0,172 H887.8" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/><text x="895.8" y="176" font-size="12">Sounding rocket*</text></svg></div>
+  <div class="tablebox"><table class="reg"><thead><tr><th>Regime</th><th class="num">Mach</th><th>What appears</th><th>Our crafts</th><th>State of the art</th></tr></thead><tbody><tr><td class="sn">Incompressible</td><td class="num">&lt; 0.3</td><td>density changes &lt; 5 %; nothing new</td><td>Trainer, racer quad</td><td>compressibility correction 1.048 at M 0.3 (computed)</td></tr><tr><td class="sn">Subsonic</td><td class="num">0.3–0.8</td><td>density changes; pressure waves run ahead; corrections work below the critical Mach</td><td>Jet trainer</td><td>Prandtl–Glauert / Kármán–Tsien fail past the critical Mach</td></tr><tr><td class="sn">Transonic</td><td class="num">0.8–1.2</td><td>supersonic pockets, shocks on the wing, drag rise, buffet</td><td>New Shepard passing through</td><td>cruise drag agrees ±5 counts between codes (was ±50); buffet prediction "inconclusive"</td></tr><tr><td class="sn">Supersonic</td><td class="num">1.2–5</td><td>oblique and bow shocks, expansion fans, wave drag, base flow</td><td>New Shepard (peak M 3.7)</td><td>RANS misses base pressure on the M 2.46 benchmark; DES does better</td></tr><tr><td class="sn">Hypersonic</td><td class="num">&gt; 5</td><td>thin shock layer, heating, gas chemistry, thin air at altitude</td><td>Sounding rocket*</td><td>NASA heating uncertainty ±15–60 %; shock interactions ±55 %</td></tr></tbody></table></div>
+  <p class="note" style="margin-top:8px">* estimate from its 400 km apogee, not a sourced figure.</p>
+
+  <h2 id="scorecard">Scorecard</h2>
+  <div class="tablebox"><table class="heat"><thead><tr><th>Solver</th><th>Normal flight</th><th>Stall</th><th>Friction drag</th><th>Time per case</th><th>Full Trainer table on your PC</th><th>Automatic (no meshing)</th></tr></thead><tbody><tr><td class="sn">Potential flow</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>lift ok, no drag</td><td class="hm b"><span class="ic" aria-hidden="true">○</span>no</td><td class="hm b"><span class="ic" aria-hidden="true">○</span>none</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>seconds</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>minutes</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>surface panels</td></tr><tr><td class="sn">Steady RANS</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>few %</td><td class="hm b"><span class="ic" aria-hidden="true">○</span>wrong</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>good*</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>~1 h CPU</td><td class="hm b"><span class="ic" aria-hidden="true">○</span>~3 weeks</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>mesh needed</td></tr><tr class="pickrow"><td class="sn">URANS</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>few %</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>fair</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>good*</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>3–10× RANS</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>~15 h GPU†</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>mesh or Cartesian†</td></tr><tr class="pickrow"><td class="sn">DDES</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>few %</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>≈ 5 %</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>good*</td><td class="hm b"><span class="ic" aria-hidden="true">○</span>~10× RANS</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>stall cases only</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>mesh needed</td></tr><tr><td class="sn">Wall-modelled LES</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>good</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>promising</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>wall model</td><td class="hm b"><span class="ic" aria-hidden="true">○</span>days</td><td class="hm b"><span class="ic" aria-hidden="true">○</span>no</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>Cartesian possible</td></tr><tr><td class="sn">Wall-resolved LES</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>excellent</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>excellent</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>excellent</td><td class="hm x"><span class="ic" aria-hidden="true">✕</span>weeks, supercomputer</td><td class="hm x"><span class="ic" aria-hidden="true">✕</span>no</td><td class="hm b"><span class="ic" aria-hidden="true">○</span>very fine mesh</td></tr><tr><td class="sn">DNS</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>exact</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>exact</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>exact</td><td class="hm x"><span class="ic" aria-hidden="true">✕</span>impossible</td><td class="hm x"><span class="ic" aria-hidden="true">✕</span>no</td><td class="hm b"><span class="ic" aria-hidden="true">○</span>impossible grid</td></tr><tr><td class="sn">Lattice Boltzmann (LES)</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>good if fine</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>good if fine</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>wall model</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>fast on GPU</td><td class="hm o"><span class="ic" aria-hidden="true">◐</span>~1–2 days GPU</td><td class="hm g"><span class="ic" aria-hidden="true">●</span>Cartesian</td></tr></tbody></table></div>
+  <div class="legend"><span><span class="sw g"></span>good</span><span><span class="sw o"></span>workable</span><span><span class="sw b"></span>weak</span><span><span class="sw x"></span>out of reach</span><span>* on a body-fitted mesh; weaker on our Cartesian grid · † our GPU solver on a Cartesian grid</span></div>
+
+  <h2 id="charts">Accuracy &amp; cost</h2>
+  <div class="diagram"><svg viewBox="0 0 980 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Typical error in normal flight and at stall per solver; DDES and wall-modelled LES are lowest at stall"><path d="M230,30 V270" stroke="var(--rule)"/><path d="M230,30 V270" stroke="var(--rule)" stroke-dasharray="2 4"/><text x="230" y="284" font-size="11" text-anchor="middle" class="sub">0 %</text><path d="M338,30 V270" stroke="var(--rule)" stroke-dasharray="2 4"/><text x="338" y="284" font-size="11" text-anchor="middle" class="sub">5 %</text><path d="M446,30 V270" stroke="var(--rule)" stroke-dasharray="2 4"/><text x="446" y="284" font-size="11" text-anchor="middle" class="sub">10 %</text><path d="M554,30 V270" stroke="var(--rule)" stroke-dasharray="2 4"/><text x="554" y="284" font-size="11" text-anchor="middle" class="sub">15 %</text><path d="M662,30 V270" stroke="var(--rule)" stroke-dasharray="2 4"/><text x="662" y="284" font-size="11" text-anchor="middle" class="sub">20 %</text><path d="M770,30 V270" stroke="var(--rule)" stroke-dasharray="2 4"/><text x="770" y="284" font-size="11" text-anchor="middle" class="sub">25 %</text><path d="M878,30 V270" stroke="var(--rule)" stroke-dasharray="2 4"/><text x="878" y="284" font-size="11" text-anchor="middle" class="sub">30 %</text><text x="220" y="52" font-size="13" text-anchor="end">Potential flow</text><text x="238" y="52" font-size="12" style="fill:var(--warm)">no drag, no stall: not comparable</text><text x="220" y="92" font-size="13" text-anchor="end">Steady RANS</text><rect x="230" y="76" width="65" height="12" rx="3" fill="var(--accent)"/><rect x="230" y="90" width="540" height="12" rx="3" fill="var(--warm)"/><text x="776" y="100" font-size="11" class="mono">~25 %</text><text x="220" y="132" font-size="13" text-anchor="end">URANS</text><rect x="230" y="116" width="65" height="12" rx="3" fill="var(--accent)"/><rect x="230" y="130" width="389" height="12" rx="3" fill="var(--warm)"/><text x="625" y="140" font-size="11" class="mono">~18 %</text><text x="220" y="172" font-size="13" text-anchor="end">DDES</text><rect x="230" y="156" width="65" height="12" rx="3" fill="var(--accent)"/><rect x="230" y="170" width="108" height="12" rx="3" fill="var(--warm)"/><text x="344" y="180" font-size="11" class="mono">~5 %</text><text x="220" y="212" font-size="13" text-anchor="end">Wall-modelled LES</text><rect x="230" y="196" width="43" height="12" rx="3" fill="var(--accent)"/><rect x="230" y="210" width="86" height="12" rx="3" fill="var(--warm)"/><text x="322" y="220" font-size="11" class="mono">~4 %</text><text x="220" y="252" font-size="13" text-anchor="end">Lattice Boltzmann (LES)</text><rect x="230" y="236" width="108" height="12" rx="3" fill="var(--accent)"/><rect x="230" y="250" width="173" height="12" rx="3" fill="var(--warm)"/><text x="409" y="260" font-size="11" class="mono">~8 %</text><rect x="230" y="300" width="14" height="10" rx="2" fill="var(--accent)"/><text x="250" y="309" font-size="12">normal flight (attached)</text><rect x="430" y="300" width="14" height="10" rx="2" fill="var(--warm)"/><text x="450" y="309" font-size="12">at stall (max lift)</text></svg></div>
+  <div class="diagram"><svg viewBox="0 0 980 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Accuracy in separated flow against cost per case, log scale; RANS, URANS, DDES and lattice Boltzmann fall in the practical region, LES and DNS beyond it"><rect x="80" y="50" width="341.7" height="280" fill="var(--ok-soft)"/><text x="90" y="70" font-size="12" class="mono" style="fill:var(--ok)">practical for a table (≲ 1 day / case)</text><path d="M80,50 V330 H900" stroke="var(--rule)" fill="none"/><path d="M80.0,330 V336" stroke="var(--muted)"/><text x="80.0" y="352" font-size="11" text-anchor="middle" class="sub">1 s</text><path d="M201.5,330 V336" stroke="var(--muted)"/><text x="201.5" y="352" font-size="11" text-anchor="middle" class="sub">1 min</text><path d="M323.0,330 V336" stroke="var(--muted)"/><text x="323.0" y="352" font-size="11" text-anchor="middle" class="sub">1 h</text><path d="M417.3,330 V336" stroke="var(--muted)"/><text x="417.3" y="352" font-size="11" text-anchor="middle" class="sub">1 day</text><path d="M592.4,330 V336" stroke="var(--muted)"/><text x="592.4" y="352" font-size="11" text-anchor="middle" class="sub">1 year</text><path d="M900.0,330 V336" stroke="var(--muted)"/><text x="900.0" y="352" font-size="11" text-anchor="middle" class="sub">10⁵ yr</text><text x="490" y="374" font-size="12" text-anchor="middle" class="sub">cost per case on one machine (log scale, order of magnitude)</text><text x="72" y="334.0" font-size="11" text-anchor="end" class="sub">none</text><text x="72" y="199.0" font-size="11" text-anchor="end" class="sub">fair</text><text x="72" y="64.0" font-size="11" text-anchor="end" class="sub">exact</text><text x="20" y="40" font-size="12" class="sub">accuracy at stall / separated flow</text><circle cx="112.6" cy="319.2" r="7" fill="var(--muted)"/><text x="122.6" y="323.2" font-size="13" text-anchor="start">Potential flow</text><circle cx="323.0" cy="276.0" r="7" fill="var(--accent)"/><text x="333.0" y="280.0" font-size="13" text-anchor="start">Steady RANS</text><circle cx="370.8" cy="243.6" r="7" fill="var(--accent)"/><text x="380.8" y="247.6" font-size="13" text-anchor="start">URANS</text><circle cx="394.5" cy="135.6" r="7" fill="var(--accent)"/><text x="404.5" y="139.6" font-size="13" text-anchor="start">DDES</text><circle cx="338.2" cy="178.8" r="7" fill="var(--accent)"/><text x="348.2" y="182.8" font-size="13" text-anchor="start">LBM (LES)</text><circle cx="462.8" cy="108.6" r="7" fill="var(--muted)"/><text x="472.8" y="112.6" font-size="13" text-anchor="start">Wall-modelled LES</text><circle cx="626.7" cy="70.8" r="7" fill="var(--muted)"/><text x="636.7" y="74.8" font-size="13" text-anchor="start">Wall-resolved LES</text><circle cx="900.0" cy="60.0" r="7" fill="var(--muted)"/><text x="890.0" y="64.0" font-size="13" text-anchor="end">DNS</text></svg></div>
+  <p class="note" style="margin-top:8px">Indicative, from workshop and published comparisons; real values depend on craft and grid.</p>
+
+  <h2 id="eddies">Eddies</h2>
+  <p>Swirls of air of every size. Big ones break into smaller ones until viscosity turns the tiniest into heat. Calculating them all needs cells smaller than the smallest, which is why most solvers model the small ones.</p>
+  <div class="diagram"><svg viewBox="0 0 980 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Energy cascade: a wing-sized eddy breaks into smaller eddies down to the Kolmogorov scale where viscosity turns them into heat"><defs><marker id="ae" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs><path d="M180.0,110.0 A70.0,70.0 0 1 1 110.0,40.0" stroke="var(--accent)" stroke-width="5.0" fill="none" marker-end="url(#ae)"/><circle cx="110" cy="110" r="7.8" fill="var(--accent)"/><path d="M332.0,80.0 A32.0,32.0 0 1 1 300.0,48.0" stroke="var(--accent)" stroke-width="2.3" fill="none" marker-end="url(#ae)"/><circle cx="300" cy="80" r="3.6" fill="var(--accent)"/><path d="M352.0,150.0 A32.0,32.0 0 1 1 320.0,118.0" stroke="var(--accent)" stroke-width="2.3" fill="none" marker-end="url(#ae)"/><circle cx="320" cy="150" r="3.6" fill="var(--accent)"/><path d="M475.0,70.0 A15.0,15.0 0 1 1 460.0,55.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="460" cy="70" r="1.7" fill="var(--accent)"/><path d="M495.0,120.0 A15.0,15.0 0 1 1 480.0,105.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="480" cy="120" r="1.7" fill="var(--accent)"/><path d="M465.0,165.0 A15.0,15.0 0 1 1 450.0,150.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="450" cy="165" r="1.7" fill="var(--accent)"/><path d="M515.0,170.0 A15.0,15.0 0 1 1 500.0,155.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="500" cy="170" r="1.7" fill="var(--accent)"/><path d="M607.0,60.0 A7.0,7.0 0 1 1 600.0,53.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="600" cy="60" r="1.5" fill="var(--accent)"/><path d="M629.0,70.0 A7.0,7.0 0 1 1 622.0,63.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="622" cy="70" r="1.5" fill="var(--accent)"/><path d="M651.0,60.0 A7.0,7.0 0 1 1 644.0,53.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="644" cy="60" r="1.5" fill="var(--accent)"/><path d="M673.0,70.0 A7.0,7.0 0 1 1 666.0,63.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="666" cy="70" r="1.5" fill="var(--accent)"/><path d="M695.0,60.0 A7.0,7.0 0 1 1 688.0,53.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="688" cy="60" r="1.5" fill="var(--accent)"/><path d="M607.0,115.0 A7.0,7.0 0 1 1 600.0,108.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="600" cy="115" r="1.5" fill="var(--accent)"/><path d="M629.0,105.0 A7.0,7.0 0 1 1 622.0,98.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="622" cy="105" r="1.5" fill="var(--accent)"/><path d="M651.0,115.0 A7.0,7.0 0 1 1 644.0,108.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="644" cy="115" r="1.5" fill="var(--accent)"/><path d="M673.0,105.0 A7.0,7.0 0 1 1 666.0,98.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="666" cy="105" r="1.5" fill="var(--accent)"/><path d="M695.0,115.0 A7.0,7.0 0 1 1 688.0,108.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="688" cy="115" r="1.5" fill="var(--accent)"/><path d="M607.0,150.0 A7.0,7.0 0 1 1 600.0,143.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="600" cy="150" r="1.5" fill="var(--accent)"/><path d="M629.0,160.0 A7.0,7.0 0 1 1 622.0,153.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="622" cy="160" r="1.5" fill="var(--accent)"/><path d="M651.0,150.0 A7.0,7.0 0 1 1 644.0,143.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="644" cy="150" r="1.5" fill="var(--accent)"/><path d="M673.0,160.0 A7.0,7.0 0 1 1 666.0,153.0" stroke="var(--accent)" stroke-width="1.2" fill="none" marker-end="url(#ae)"/><circle cx="666" cy="160" r="1.5" fill="var(--accent)"/><circle cx="781.4" cy="126.2" r="1.6" fill="var(--warm)"/><circle cx="793.3" cy="134.5" r="1.6" fill="var(--warm)"/><circle cx="816.3" cy="59.2" r="1.6" fill="var(--warm)"/><circle cx="761.2" cy="167.2" r="1.6" fill="var(--warm)"/><circle cx="783.3" cy="82.8" r="1.6" fill="var(--warm)"/><circle cx="849.6" cy="115.8" r="1.6" fill="var(--warm)"/><circle cx="835.3" cy="116.7" r="1.6" fill="var(--warm)"/><circle cx="817.5" cy="71.1" r="1.6" fill="var(--warm)"/><circle cx="817.1" cy="171.5" r="1.6" fill="var(--warm)"/><circle cx="807.1" cy="153.8" r="1.6" fill="var(--warm)"/><circle cx="820.4" cy="59.0" r="1.6" fill="var(--warm)"/><circle cx="828.2" cy="132.8" r="1.6" fill="var(--warm)"/><circle cx="787.1" cy="54.3" r="1.6" fill="var(--warm)"/><circle cx="837.9" cy="116.2" r="1.6" fill="var(--warm)"/><circle cx="824.7" cy="173.0" r="1.6" fill="var(--warm)"/><circle cx="824.3" cy="179.0" r="1.6" fill="var(--warm)"/><circle cx="795.5" cy="162.1" r="1.6" fill="var(--warm)"/><circle cx="800.0" cy="181.0" r="1.6" fill="var(--warm)"/><circle cx="839.1" cy="63.6" r="1.6" fill="var(--warm)"/><circle cx="772.2" cy="80.4" r="1.6" fill="var(--warm)"/><circle cx="846.9" cy="111.1" r="1.6" fill="var(--warm)"/><circle cx="816.4" cy="92.1" r="1.6" fill="var(--warm)"/><circle cx="805.7" cy="104.0" r="1.6" fill="var(--warm)"/><circle cx="791.6" cy="131.9" r="1.6" fill="var(--warm)"/><circle cx="812.6" cy="176.6" r="1.6" fill="var(--warm)"/><circle cx="821.4" cy="180.1" r="1.6" fill="var(--warm)"/><circle cx="837.1" cy="188.7" r="1.6" fill="var(--warm)"/><circle cx="820.4" cy="72.8" r="1.6" fill="var(--warm)"/><circle cx="837.5" cy="185.0" r="1.6" fill="var(--warm)"/><circle cx="841.4" cy="129.7" r="1.6" fill="var(--warm)"/><circle cx="824.2" cy="79.6" r="1.6" fill="var(--warm)"/><circle cx="834.8" cy="130.3" r="1.6" fill="var(--warm)"/><circle cx="785.6" cy="58.9" r="1.6" fill="var(--warm)"/><circle cx="836.9" cy="188.6" r="1.6" fill="var(--warm)"/><circle cx="768.0" cy="162.1" r="1.6" fill="var(--warm)"/><circle cx="796.9" cy="71.1" r="1.6" fill="var(--warm)"/><circle cx="786.5" cy="157.6" r="1.6" fill="var(--warm)"/><circle cx="838.5" cy="56.2" r="1.6" fill="var(--warm)"/><circle cx="815.3" cy="56.3" r="1.6" fill="var(--warm)"/><circle cx="824.7" cy="96.3" r="1.6" fill="var(--warm)"/><text x="900" y="115" font-size="13" style="fill:var(--warm)">heat</text><path d="M200,212 H880" stroke="var(--muted)" marker-end="url(#ae)"/><text x="110" y="206" font-size="11" text-anchor="middle" class="sub">~1 m (wing)</text><text x="310" y="206" font-size="11" text-anchor="middle" class="sub">~10 cm</text><text x="475" y="206" font-size="11" text-anchor="middle" class="sub">~1 cm</text><text x="645" y="206" font-size="11" text-anchor="middle" class="sub">~1 mm</text><text x="800" y="206" font-size="11" text-anchor="middle" class="sub">~0.02 mm</text><text x="540" y="228" font-size="11" text-anchor="middle" class="sub">energy passes down to ever smaller eddies until viscosity turns it into heat</text></svg></div>
+
+  <h2 id="maths">The maths</h2>
+  <details class="eqd"><summary><span class="st">Navier–Stokes: the exact physics</span><span class="chev" aria-hidden="true">▸</span></summary>
+<div class="eqshow"><math display="block"><mfrac><mrow><mo>∂</mo><mi mathvariant="bold">u</mi></mrow><mrow><mo>∂</mo><mi>t</mi></mrow></mfrac><mo>+</mo><mo>(</mo><mi mathvariant="bold">u</mi><mo>·</mo><mo>∇</mo><mo>)</mo><mi mathvariant="bold">u</mi><mo>=</mo><mo>−</mo><mfrac><mn>1</mn><mi>ρ</mi></mfrac><mo>∇</mo><mi>p</mi><mo>+</mo><mi>ν</mi><msup><mo>∇</mo><mn>2</mn></msup><mi mathvariant="bold">u</mi><mo>,</mo><mspace width="1em"/><mo>∇</mo><mo>·</mo><mi mathvariant="bold">u</mi><mo>=</mo><mn>0</mn></math></div><div class="parts"><div class="part"><span class="k">What it says</span><div>For every tiny parcel of air: its acceleration (left side) equals the push from pressure differences plus the drag of neighbouring air through viscosity. The second equation says air is not created or destroyed.</div></div><div class="part"><span class="k">Where it comes from</span><div>Newton's second law (F = ma) and conservation of mass applied to a small box of fluid, plus Stokes' 1845 rule that a fluid's internal friction is proportional to how fast it is being sheared.</div></div><div class="part"><span class="k">How it is solved</span><div>No general pen-and-paper solution exists (proving one exists is a Millennium Prize problem). Every method below solves it, or a simplified version of it, numerically on a grid of cells.</div></div><div class="part"><span class="k">Assumptions (what gets dropped)</span><div>Air is a continuum (true above about a micrometre). Friction is proportional to shear rate (true for air and water). This incompressible form also assumes constant density, valid below about Mach 0.3; the full compressible version adds density and an energy equation.</div></div><div class="part"><span class="k">Versus the exact physics</span><div>This is the reference. Everything below is measured against it.</div></div></div></details>
+  <details class="eqd"><summary><span class="st">Splitting the flow: calculated + modelled</span><span class="chev" aria-hidden="true">▸</span></summary>
+<div class="eqshow"><math display="block"><mi mathvariant="bold">u</mi><mo>=</mo><munder><munder><msub><mi mathvariant="bold">u</mi><mtext>calc</mtext></msub><mo>⏟</mo></munder><mtext>on the grid</mtext></munder><mo>+</mo><munder><munder><msub><mi mathvariant="bold">u</mi><mtext>model</mtext></msub><mo>⏟</mo></munder><mtext>smaller than a cell</mtext></munder><mspace width="1.5em"/><msub><mi>τ</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>=</mo><mo>−</mo><mi>ρ</mi><mo>⟨</mo><msubsup><mi>u</mi><mi>i</mi><mo>′</mo></msubsup><msubsup><mi>u</mi><mi>j</mi><mo>′</mo></msubsup><mo>⟩</mo><mo>≈</mo><mn>2</mn><mi>ρ</mi><msub><mi>ν</mi><mtext>model</mtext></msub><msub><mi>S</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></math></div><div class="parts"><div class="part"><span class="k">What it says</span><div>Split the velocity into the part a solver calculates on its grid and the part it cannot see. The unseen part still pushes the seen part around; that push is τ (the turbulent stress), and it is approximated as extra viscosity times the strain rate S.</div></div><div class="part"><span class="k">Where it comes from</span><div>Osborne Reynolds (1895) split flow into mean and fluctuation. Putting u = ū + u′ into the (u·∇)u term and averaging leaves a new unknown ⟨u′u′⟩: more unknowns than equations, called the closure problem. Boussinesq (1877) proposed treating it like viscosity.</div></div><div class="part"><span class="k">How it is solved</span><div>Each solver supplies its own formula for ν<sub>model</sub>; that formula is the whole difference between them.</div></div><div class="part"><span class="k">Assumptions (what gets dropped)</span><div>Boussinesq: turbulence mixes momentum the same in every direction and lines up with the mean shear. Reasonable in thin attached boundary layers; poor in swirling, strongly curved or separated flow.</div></div><div class="part"><span class="k">Versus the exact physics</span><div>Exact if nothing is modelled (DNS). Every model adds error proportional to how much of the turbulence it hands to the formula.</div></div></div></details>
+  <p class="note">S is the strain rate, how fast the flow is being stretched or sheared: S<sub>ij</sub> = ½(∂u<sub>i</sub>/∂x<sub>j</sub> + ∂u<sub>j</sub>/∂x<sub>i</sub>). Overbar = averaged, tilde = filtered (smoothed over one cell).</p>
+  <details class="eqd"><summary><span class="st">Potential flow</span><span class="chev" aria-hidden="true">▸</span></summary>
+<div class="eqshow"><math display="block"><msup><mo>∇</mo><mn>2</mn></msup><mi>ϕ</mi><mo>=</mo><mn>0</mn></math></div><div class="parts"><div class="part"><span class="k">What it says</span><div>Air velocity is the slope of a single smooth field φ, and that field satisfies Laplace's equation. Pressure then follows from Bernoulli: faster air means lower pressure, which is where lift comes from.</div></div><div class="part"><span class="k">Where it comes from</span><div>Navier–Stokes with viscosity set to zero (inviscid) and no spinning of fluid parcels anywhere (irrotational). Both drop out the hard terms and leave a linear equation.</div></div><div class="part"><span class="k">How it is solved</span><div>Cover the surface with panels carrying sources and vortices, solve one linear system (seconds), and add the Kutta condition: flow must leave the trailing edge smoothly, which fixes how much circulation, and therefore lift, the wing has.</div></div><div class="part"><span class="k">Assumptions (what gets dropped)</span><div>No viscosity, no eddies, no boundary layer. Vorticity exists only in thin wake sheets.</div></div><div class="part"><span class="k">Versus the exact physics</span><div>No friction drag at all and no stall: an infinite wing would feel zero drag (d'Alembert's paradox). Lift and induced drag are good while flow stays attached.</div></div></div></details><details class="eqd"><summary><span class="st">Steady RANS</span><span class="chev" aria-hidden="true">▸</span></summary>
+<div class="eqshow"><math display="block"><mo>(</mo><mover><mi mathvariant="bold">u</mi><mo>‾</mo></mover><mo>·</mo><mo>∇</mo><mo>)</mo><mover><mi mathvariant="bold">u</mi><mo>‾</mo></mover><mo>=</mo><mo>−</mo><mo>∇</mo><mover><mi>p</mi><mo>‾</mo></mover><mo>/</mo><mi>ρ</mi><mo>+</mo><mo>∇</mo><mo>·</mo><mo>[</mo><mo>(</mo><mi>ν</mi><mo>+</mo><msub><mi>ν</mi><mi>t</mi></msub><mo>)</mo><mn>2</mn><mover><mi mathvariant="bold">S</mi><mo>‾</mo></mover><mo>]</mo></math></div><div class="parts"><div class="part"><span class="k">What it says</span><div>The time-averaged flow is in balance: the averaged convection of momentum equals pressure plus viscous plus turbulent (ν<sub>t</sub>) stress. Nothing changes in time.</div></div><div class="part"><span class="k">Where it comes from</span><div>Average Navier–Stokes over time (Reynolds), close the extra term with Boussinesq, then compute ν<sub>t</sub> from one or two more transport equations. Spalart–Allmaras (1992) carries one quantity; k-ω SST (Menter 1994) carries turbulent kinetic energy k and its dissipation rate ω, using k-ω near walls and k-ε away from them, with a limiter (the max(...) in its ν<sub>t</sub>) that stops it over-predicting shear stress before separation.</div></div><div class="part"><span class="k">How it is solved</span><div>Finite volumes on a mesh; march in pseudo-time with an implicit solver and multigrid until the residuals stop changing. That converged field is the answer.</div></div><div class="part"><span class="k">Assumptions (what gets dropped)</span><div>The flow has a steady average. Boussinesq holds. Model constants were tuned on flat plates, pipes and mixing layers, so they fit those best.</div></div><div class="part"><span class="k">Versus the exact physics</span><div>Throws away every fluctuation and replaces it with a calibrated guess. Attached flow: a few percent. Where flow separates, the separation point depends on the calibration, so stall angle and maximum lift are often wrong.</div></div></div></details><details class="eqd"><summary><span class="st">URANS</span><span class="chev" aria-hidden="true">▸</span></summary>
+<div class="eqshow"><math display="block"><mfrac><mrow><mo>∂</mo><mover><mi mathvariant="bold">u</mi><mo>‾</mo></mover></mrow><mrow><mo>∂</mo><mi>t</mi></mrow></mfrac><mo>+</mo><mtext>RANS</mtext></math></div><div class="parts"><div class="part"><span class="k">What it says</span><div>Same as RANS but the averaged flow may change slowly in time, so large regular unsteadiness (vortex shedding, wake flapping) can appear.</div></div><div class="part"><span class="k">Where it comes from</span><div>Average over many repeats of the same experiment (ensemble) instead of over time, keeping ∂ū/∂t.</div></div><div class="part"><span class="k">How it is solved</span><div>Dual time stepping: each real time step is converged like a small RANS problem; run until the forces settle into a pattern, then average them.</div></div><div class="part"><span class="k">Assumptions (what gets dropped)</span><div>A spectral gap: the unsteadiness you keep is much slower than the turbulence you model. Often untrue in separated flow.</div></div><div class="part"><span class="k">Versus the exact physics</span><div>Captures shedding RANS misses, but the turbulence is still a formula, and its high model viscosity damps resolved eddies.</div></div></div></details><details class="eqd"><summary><span class="st">DDES</span><span class="chev" aria-hidden="true">▸</span></summary>
+<div class="eqshow"><math display="block"><mi>l</mi><mo>=</mo><msub><mi>l</mi><mtext>RANS</mtext></msub><mo>−</mo><msub><mi>f</mi><mi>d</mi></msub><mo>max</mo><mo>(</mo><mn>0</mn><mo>,</mo><msub><mi>l</mi><mtext>RANS</mtext></msub><mo>−</mo><mi>C</mi><mi>Δ</mi><mo>)</mo></math></div><div class="parts"><div class="part"><span class="k">What it says</span><div>One model with a switch. It uses a length scale l: the RANS value inside attached boundary layers, but the grid size CΔ where the grid can see eddies. With CΔ the model becomes a standard LES sub-grid model.</div></div><div class="part"><span class="k">Where it comes from</span><div>Spalart's Detached-Eddy Simulation (1997); the 'delayed' version (2006) adds the shield f<sub>d</sub> ≈ 0 inside boundary layers so a fine grid cannot accidentally switch to LES there and cause fake separation.</div></div><div class="part"><span class="k">How it is solved</span><div>Time-accurate, with low-dissipation numerical schemes in the LES regions, small time steps (CFL about 1) and long runs to average.</div></div><div class="part"><span class="k">Assumptions (what gets dropped)</span><div>RANS is good enough for the attached boundary layer. The separated region's grid is fine enough to resolve its large eddies. In the 'grey area' where the model hands over, resolved eddies take time to appear.</div></div><div class="part"><span class="k">Versus the exact physics</span><div>Attached parts carry RANS error; separated parts are close to LES. That is why it gets stall much better (about 5 % on maximum lift in one 2024 study) at about 10× the cost.</div></div></div></details><details class="eqd"><summary><span class="st">Wall-modelled LES</span><span class="chev" aria-hidden="true">▸</span></summary>
+<div class="eqshow"><math display="block"><msub><mi>ν</mi><mtext>sgs</mtext></msub><mo>=</mo><msup><mrow><mo>(</mo><msub><mi>C</mi><mi>s</mi></msub><mi>Δ</mi><mo>)</mo></mrow><mn>2</mn></msup><mo>|</mo><mover><mi>S</mi><mo>~</mo></mover><mo>|</mo><mtext>, wall: log law</mtext></math></div><div class="parts"><div class="part"><span class="k">What it says</span><div>Smooth the flow over one cell width Δ (filtering) and solve for that smoothed flow exactly. Only eddies smaller than a cell are modelled, with viscosity (C<sub>s</sub>Δ)²|S̃|. At the wall, the log law supplies the skin friction instead of resolving the thin layer touching the surface.</div></div><div class="part"><span class="k">Where it comes from</span><div>Smagorinsky (1963, originally for weather models) plus Kolmogorov's 1941 theory: the smallest eddies look the same in any flow, so one generic model fits them. The log law (κ ≈ 0.41) comes from Prandtl and von Kármán's analysis of boundary layers.</div></div><div class="part"><span class="k">How it is solved</span><div>Explicit or implicit time stepping with central (low-dissipation) schemes, small steps, many passes of the flow over the body, then averaging.</div></div><div class="part"><span class="k">Assumptions (what gets dropped)</span><div>Sub-cell eddies are universal and isotropic. The boundary layer next to the wall is in equilibrium so the log law holds, which weakens near separation and strong pressure gradients.</div></div><div class="part"><span class="k">Versus the exact physics</span><div>Only the smallest eddies and the near-wall layer are modelled, so it is close to the truth almost everywhere. Remaining error sits at the wall, where stall starts.</div></div></div></details><details class="eqd"><summary><span class="st">Wall-resolved LES</span><span class="chev" aria-hidden="true">▸</span></summary>
+<div class="eqshow"><math display="block"><msub><mi>ν</mi><mtext>sgs</mtext></msub><mtext>, </mtext><msub><mi>Δ</mi><mtext>wall</mtext></msub><mo>:</mo><msup><mi>y</mi><mo>+</mo></msup><mo>≈</mo><mn>1</mn></math></div><div class="parts"><div class="part"><span class="k">What it says</span><div>The same filtered equations, but the grid is fine enough at the wall to resolve the viscous layer itself, so no wall model is needed.</div></div><div class="part"><span class="k">Where it comes from</span><div>LES theory as above, with near-wall spacing in viscous units: first cell at y⁺ ≈ 1, about 50 along the flow and 15 across it.</div></div><div class="part"><span class="k">How it is solved</span><div>As wall-modelled LES, with far more cells and smaller time steps.</div></div><div class="part"><span class="k">Assumptions (what gets dropped)</span><div>Only Kolmogorov's universality of the smallest eddies.</div></div><div class="part"><span class="k">Versus the exact physics</span><div>Very close to the truth; cost grows about as Re<sup>2.7</sup>, out of reach for a full aircraft.</div></div></div></details><details class="eqd"><summary><span class="st">DNS</span><span class="chev" aria-hidden="true">▸</span></summary>
+<div class="eqshow"><math display="block"><mfrac><mrow><mo>∂</mo><mi mathvariant="bold">u</mi></mrow><mrow><mo>∂</mo><mi>t</mi></mrow></mfrac><mo>+</mo><mo>(</mo><mi mathvariant="bold">u</mi><mo>·</mo><mo>∇</mo><mo>)</mo><mi mathvariant="bold">u</mi><mo>=</mo><mo>−</mo><mo>∇</mo><mi>p</mi><mo>/</mo><mi>ρ</mi><mo>+</mo><mi>ν</mi><msup><mo>∇</mo><mn>2</mn></msup><mi mathvariant="bold">u</mi></math></div><div class="parts"><div class="part"><span class="k">What it says</span><div>The Navier–Stokes equations exactly as written. Nothing is modelled.</div></div><div class="part"><span class="k">Where it comes from</span><div>Navier–Stokes itself.</div></div><div class="part"><span class="k">How it is solved</span><div>High-order schemes on grids reaching the Kolmogorov scale η = (ν³/ε)<sup>1/4</sup>, about 0.02 mm on the Trainer's wing, with tiny time steps.</div></div><div class="part"><span class="k">Assumptions (what gets dropped)</span><div>Only continuum and Newtonian friction, plus numerical error.</div></div><div class="part"><span class="k">Versus the exact physics</span><div>This is the truth, at a cost growing about as Re<sup>2.9</sup>: roughly 10¹³ cells for the Trainer. Used only for physics research on small cases.</div></div></div></details><details class="eqd"><summary><span class="st">Lattice Boltzmann (LES)</span><span class="chev" aria-hidden="true">▸</span></summary>
+<div class="eqshow"><math display="block"><msub><mi>f</mi><mi>i</mi></msub><mo>(</mo><mi mathvariant="bold">x</mi><mo>+</mo><msub><mi mathvariant="bold">c</mi><mi>i</mi></msub><mi>Δ</mi><mi>t</mi><mo>,</mo><mi>t</mi><mo>+</mo><mi>Δ</mi><mi>t</mi><mo>)</mo><mo>=</mo><msub><mi>f</mi><mi>i</mi></msub><mo>−</mo><mfrac><mrow><msub><mi>f</mi><mi>i</mi></msub><mo>−</mo><msubsup><mi>f</mi><mi>i</mi><mtext>eq</mtext></msubsup></mrow><mi>τ</mi></mfrac></math></div><div class="parts"><div class="part"><span class="k">What it says</span><div>Air is represented by populations f<sub>i</sub> of particles moving along fixed lattice directions. Each step they stream to the neighbour cell, then collide, relaxing toward equilibrium at rate 1/τ.</div></div><div class="part"><span class="k">Where it comes from</span><div>The Boltzmann equation of kinetic gas theory, discretised in velocity. A Chapman–Enskog expansion shows it reproduces Navier–Stokes with viscosity ν = c<sub>s</sub>²(τ − ½)Δt.</div></div><div class="part"><span class="k">How it is solved</span><div>Stream (shift arrays) and collide (local maths): no pressure equation to solve, so it runs very fast on GPUs. Used as LES with a sub-grid model and wall model at practical resolutions.</div></div><div class="part"><span class="k">Assumptions (what gets dropped)</span><div>Low Mach number (errors grow as Mach²). A single relaxation time, or a multi-relaxation variant for stability. Turbulence handled by whatever LES model is attached.</div></div><div class="part"><span class="k">Versus the exact physics</span><div>Same physics content as the LES it implements, plus compressibility error at higher speeds. Our removed real-time solver was this, on grids far too coarse.</div></div></div></details>
+
+  
+
+  
+
+  <h2 id="sources">Sources</h2>
+  <ul class="src"><li><a href="https://ntrs.nasa.gov/citations/20190027400">Drag Prediction Workshops (Tinoco 2019)</a></li><li><a href="https://ntrs.nasa.gov/api/citations/20240005798/downloads/Buffet%20v4.pdf">Buffet, DPW-7 (Pomeroy 2024)</a></li><li><a href="https://cfd.spbstu.ru/agarbaruk/doc/2006_Simon-Deck-Guillen_Reynolds-averaged-Navier-Stokeslarge-eddy-simulations-of-supersonic-base-flow.pdf">Supersonic base flow (Simon, Deck &amp; Guillen 2006)</a></li><li><a href="https://ntrs.nasa.gov/api/citations/20110014963/downloads/20110014963.pdf">Hypersonic uncertainty (Bose et al. 2011)</a></li><li><a href="https://hiliftpw.larc.nasa.gov/Workshop5/Publications/ICAS-2024-1217-rumsey-hilift_finalpaper.pdf">High Lift Prediction Workshop 5</a></li><li><a href="https://www.arxiv.org/abs/2406.09840">DDES near maximum lift (arXiv 2406.09840)</a></li><li><a href="https://ntrs.nasa.gov/api/citations/20240015729/downloads/LAVA_WMLES_Final.pdf">NASA LAVA wall-modelled LES</a></li><li><a href="https://arxiv.org/pdf/2010.15307">DNS / LES cost scaling (Yang &amp; Griffin)</a></li><li><a href="https://ntrs.nasa.gov/api/citations/20200002382/downloads/20200002382.pdf">SLS aero database</a></li><li><a href="https://arxiv.org/pdf/2107.01370">Lattice Boltzmann Mach limits (arXiv 2107.01370)</a></li><li><a href="https://spaceref.com/space-commerce/another-successful-blue-origin-flight/">New Shepard Mach (SpaceRef)</a></li></ul>
+</div>
+<script>
+/* PWTiles: procedural, illustrative flow tiles for the CFD-solver explainer.
+   NOT a solver. Particles are advected through a cheap analytic field:
+   potential flow around the body (cylinder / Joukowski airfoil / SDF-hugging for wedge & capsule),
+   compressible features from real formulas (theta-beta-M oblique shocks, Prandtl-Meyer fans,
+   Billig bow-shock shape, Mach angle), plus a wake = mean deficit + moving vortices + curl-noise
+   octaves. Each solver keeps eddies down to its own cut-off; the rest is drawn as warm haze
+   ("modelled turbulence"). API: PWTiles.mountAll(root), PWTiles.hero(canvas, opts),
+   PWTiles.info(canvas), PWTiles.legend(el), PWTiles.refresh(). */
+(function () {
+'use strict';
+var Mt = Math, PI = Mt.PI, sin = Mt.sin, cos = Mt.cos, sqrt = Mt.sqrt, atan = Mt.atan, atan2 = Mt.atan2,
+  exp = Mt.exp, abs = Mt.abs, mn = Mt.min, mx = Mt.max, flo = Mt.floor, tan = Mt.tan, G = 1.4, D2R = PI / 180;
+function cl(x, a, b) { return x < a ? a : x > b ? b : x; }
+function ss(a, b, x) { x = cl((x - a) / (b - a), 0, 1); return x * x * (3 - 2 * x); }
+function rng(s) { s >>>= 0; return function () { s = (s + 0x6D2B79F5) >>> 0; var t = s; t = Mt.imul(t ^ t >>> 15, t | 1); t ^= t + Mt.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function hash(str) { for (var h = 2166136261, i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Mt.imul(h, 16777619); } return h >>> 0; }
+function hr(n, s) { var v = sin(n * 12.9898 + s * 78.233) * 43758.5453; return v - flo(v); }
+
+/* ---------- gas dynamics (gamma = 1.4) ---------- */
+function mu(M) { return M > 1 ? Mt.asin(1 / M) : PI / 2; }
+function thb(M, b) { var s = sin(b); return atan(2 / tan(b) * (M * M * s * s - 1) / (M * M * (G + cos(2 * b)) + 2)); }
+function beta(M, th) { // weak oblique-shock angle, -1 if detached
+  if (M <= 1) return -1;
+  var lo = mu(M), bm = lo, tm = -1, b, t, i;
+  for (b = lo; b < PI / 2; b += .004) { t = thb(M, b); if (t > tm) { tm = t; bm = b; } }
+  if (th > tm) return -1;
+  var hi = bm; for (i = 0; i < 40; i++) { b = (lo + hi) / 2; if (thb(M, b) < th) lo = b; else hi = b; }
+  return (lo + hi) / 2;
+}
+function m2(M, b, th) { var n = M * sin(b); n *= n; return sqrt((1 + .2 * n) / (G * n - .2)) / sin(b - th); }
+function nu(M) { if (M <= 1) return 0; var a = M * M - 1; return sqrt(6) * atan(sqrt(a / 6)) - atan(sqrt(a)); }
+function nuI(v) { var lo = 1, hi = 50, i, m; for (i = 0; i < 36; i++) { m = (lo + hi) / 2; if (nu(m) < v) lo = m; else hi = m; } return lo; }
+function vr(M, Mi) { return M / Mi * sqrt((1 + .2 * Mi * Mi) / (1 + .2 * M * M)); }
+
+/* ---------- geometry ---------- */
+function sdf(P, x, y) {
+  var n = P.length / 2, best = 1e9, bx = 0, by = 0, ins = false, i, j;
+  for (i = 0, j = n - 1; i < n; j = i++) {
+    var ax = P[2 * j], ay = P[2 * j + 1], cx = P[2 * i], cy = P[2 * i + 1], ex = cx - ax, ey = cy - ay;
+    var t = cl(((x - ax) * ex + (y - ay) * ey) / (ex * ex + ey * ey || 1), 0, 1), qx = ax + ex * t - x, qy = ay + ey * t - y, d2 = qx * qx + qy * qy;
+    if (d2 < best) { best = d2; bx = qx; by = qy; }
+    if ((ay > y) !== (cy > y) && x < ex * (y - ay) / (cy - ay) + ax) ins = !ins;
+  }
+  var d = sqrt(best) || 1e-6, nx = -bx / d, ny = -by / d;
+  return ins ? [-d, -nx, -ny] : [d, nx, ny];
+}
+function surfY(P, x, s) {
+  var n = P.length / 2, b = null, i, j;
+  for (i = 0, j = n - 1; i < n; j = i++) {
+    var ax = P[2 * j], ay = P[2 * j + 1], bx = P[2 * i], by = P[2 * i + 1];
+    if ((ax <= x) !== (bx <= x)) { var y = ay + (by - ay) * (x - ax) / (bx - ax); if (b === null || (s > 0 ? y > b : y < b)) b = y; }
+  }
+  return b === null ? 0 : b;
+}
+function jouk(a) { // Joukowski airfoil, chord 1, nose-up by a, Kutta circulation
+  var cx = -.09, cy = .04, R = sqrt((1 - cx) * (1 - cx) + cy * cy), Gm = 4 * PI * R * sin(a + atan2(cy, 1 - cx)),
+    ca = cos(a), sa = sin(a), zs = [], i, xmin = 1e9, xmax = -1e9, P = [];
+  for (i = 0; i < 80; i++) {
+    var f = 2 * PI * i / 80, zx = cx + R * cos(f), zy = cy + R * sin(f), q = zx * zx + zy * zy, X = zx + zx / q, Y = zy - zy / q;
+    zs.push(X, Y); if (X < xmin) xmin = X; if (X > xmax) xmax = X;
+  }
+  var s = 1 / (xmax - xmin), zc = (xmin + xmax) / 2;
+  for (i = 0; i < 160; i += 2) { var bx = (zs[i] - zc) * s, by = zs[i + 1] * s; P.push(bx * ca + by * sa, -bx * sa + by * ca); }
+  function vel(x, y) {
+    var zx = (x * ca - y * sa) / s + zc, zy = (x * sa + y * ca) / s;
+    var ax = zx * zx - zy * zy - 4, ay = 2 * zx * zy, m = sqrt(sqrt(ax * ax + ay * ay)), h = atan2(ay, ax) / 2, wx = m * cos(h), wy = m * sin(h);
+    var p1x = (zx + wx) / 2, p1y = (zy + wy) / 2, p2x = (zx - wx) / 2, p2y = (zy - wy) / 2, px, py;
+    if ((p1x - cx) * (p1x - cx) + (p1y - cy) * (p1y - cy) >= (p2x - cx) * (p2x - cx) + (p2y - cy) * (p2y - cy)) { px = p1x; py = p1y; } else { px = p2x; py = p2y; }
+    var qx = px - cx, qy = py - cy, q2 = qx * qx + qy * qy; if (q2 < R * R) return null;
+    var i4 = 1 / (q2 * q2), rx = (qx * qx - qy * qy) * i4, ry = -2 * qx * qy * i4, k = Gm / (2 * PI * q2);
+    var Wx = ca - R * R * (ca * rx - sa * ry) + k * qy, Wy = -sa - R * R * (ca * ry + sa * rx) + k * qx;
+    var p2 = px * px + py * py, j4 = 1 / (p2 * p2), Dx = 1 - (px * px - py * py) * j4, Dy = 2 * px * py * j4, dd = mx(Dx * Dx + Dy * Dy, 1e-6);
+    var ub = (Wx * Dx + Wy * Dy) / dd, vb = -(Wy * Dx - Wx * Dy) / dd;
+    return [ub * ca + vb * sa, -ub * sa + vb * ca];
+  }
+  return { P: P, vel: vel };
+}
+// one side of a sharp body in supersonic flow (mirrored so the side is "upper"): simple-wave theory
+function side(Yf, x0, x1, M) {
+  var N = 60, X = [], Y = [], T = [], Mm = [], i, x, h = 1e-4;
+  for (i = 0; i <= N; i++) { x = x0 + (x1 - x0) * i / N; X[i] = x; Y[i] = Yf(x); var a = mx(x - h, x0), b = mn(x + h, x1); T[i] = atan((Yf(b) - Yf(a)) / (b - a)); }
+  var t0 = T[0], bt = -1, M1;
+  if (t0 > 0) { bt = beta(M, t0); if (bt < 0) return null; M1 = m2(M, bt, t0); } else M1 = nuI(nu(M) - t0);
+  var n1 = nu(M1); for (i = 0; i <= N; i++) Mm[i] = nuI(n1 + t0 - T[i]);
+  var tE = T[N];
+  return { X: X, Y: Y, T: T, M: Mm, N: N, x0: x0, x1: x1, b: bt, M1: M1, t0: t0, bE: tE < -1e-3 ? beta(Mm[N], -tE) : -1, Mi: M };
+}
+function sAt(S, A, x) { var f = cl((x - S.x0) / (S.x1 - S.x0) * S.N, 0, S.N), i = flo(f); if (i >= S.N) return A[S.N]; f -= i; return A[i] * (1 - f) + A[i + 1] * f; }
+function chA(S, x) { return sAt(S, S.T, x) + mu(sAt(S, S.M, x)); }
+function sState(S, x, Y) { // -> [flow angle, Mach]
+  var x0 = S.x0, x1 = S.x1, y0 = S.Y[0], y1 = S.Y[S.N];
+  function g(xs) { return (Y - sAt(S, S.Y, xs)) - (x - xs) * tan(chA(S, xs)); }
+  if (g(x0) >= 0) {
+    if (S.b > 0) return (Y - y0) < (x - x0) * tan(S.b) ? [S.t0, S.M1] : [0, S.Mi];
+    var p = atan2(Y - y0, x - x0), p1 = mu(S.Mi), p2 = chA(S, x0); if (p >= p1) return [0, S.Mi];
+    var th = S.t0 * cl((p1 - p) / (p1 - p2), 0, 1); return [th, nuI(nu(S.Mi) - th)];
+  }
+  if (g(x1) <= 0) { if (S.bE > 0 && (Y - y1) < (x - x1) * tan(S.T[S.N] + S.bE)) return [0, S.Mi]; return [S.T[S.N], S.M[S.N]]; }
+  var lo = x0, hi = x1, m = x0; for (var i = 0; i < 22; i++) { m = (lo + hi) / 2; if (g(m) > 0) hi = m; else lo = m; }
+  return [sAt(S, S.T, m), sAt(S, S.M, m)];
+}
+function blunt(M, xn, R, sph) { // Billig correlations
+  var D, Rc; if (sph) { D = .143 * exp(3.24 / (M * M)); Rc = 1.143 * exp(.54 / Mt.pow(M - 1, 1.2)); } else { D = .386 * exp(4.67 / (M * M)); Rc = 1.386 * exp(1.8 / Mt.pow(M - 1, .75)); }
+  var b = mu(M); D = mn(D * R, .7);
+  return { xv: xn - D, D: D, Rc: Rc * R, c2: 1 / (tan(b) * tan(b)), t2: tan(b) * tan(b), M: M, xn: xn };
+}
+function bX(B, y) { return B.xv + B.Rc * B.c2 * (sqrt(1 + y * y * B.t2 / (B.Rc * B.Rc)) - 1); }
+function bS(B, y) { return B.Rc * B.c2 * (y * B.t2 / (B.Rc * B.Rc)) / sqrt(1 + y * y * B.t2 / (B.Rc * B.Rc)); }
+
+var DEFM = { incompressible: .2, subsonic: .6, transonic: .88, supersonic: 2, hypersonic: 7 };
+function regOf(M) { return M < .3 ? 'incompressible' : M < .8 ? 'subsonic' : M < 1.2 ? 'transonic' : M < 5 ? 'supersonic' : 'hypersonic'; }
+var BODIES = { airfoil: 1, cylinder: 1, wedge: 1, capsule: 1 };
+var WT = tan(10 * D2R), WH = .7 * WT, CR = .25, CS = .8;
+
+function geom(body, reg, M) {
+  var g = { body: body, reg: reg, M: M, L: [], pk: [] }, sup = reg === 'supersonic' || reg === 'hypersonic', tr = reg === 'transonic',
+    a = (sup ? 3 : tr ? 2 : 12) * D2R, P = [], i, t;
+  g.sup = sup; g.tr = tr; g.split = function () { return 0; };
+  if (body === 'airfoil') {
+    if (sup) {
+      var th = .08, ta = tan(a), hU = function (x) { return 2 * th * (.25 - x * x); };
+      for (i = 0; i <= 40; i++) { t = -.5 + i / 40; P.push(t, hU(t) - ta * t); }
+      for (i = 39; i > 0; i--) { t = -.5 + i / 40; P.push(t, -hU(t) - ta * t); }
+      g.split = function (x) { return -ta * x; };
+      g.sides = [side(function (x) { return hU(x) - ta * x; }, -.5, .5, M), side(function (x) { return hU(x) + ta * x; }, -.5, .5, M)];
+      g.kind = 'sharp';
+    } else { var J = jouk(a), tb = tan(a); P = J.P; g.vel = J.vel; g.split = function (x) { return -tb * x; }; }
+  } else if (body === 'cylinder') {
+    for (i = 0; i < 64; i++) { t = 2 * PI * i / 64; P.push(CR * cos(t), CR * sin(t)); }
+    g.vel = function (x, y) { var r2 = x * x + y * y, R2 = CR * CR; if (r2 < R2) return null; var q = R2 / (r2 * r2); return [1 - q * (x * x - y * y), -2 * q * x * y]; };
+    if (sup) { g.kind = 'blunt'; g.B = blunt(M, -CR, CR, false); }
+  } else if (body === 'wedge') {
+    P = [-.5, 0, .2, WH, .5, WH, .5, -WH, .2, -WH];
+    if (sup) {
+      var wy = function (x) { var p = WT * (x + .5), q = WH, k = .002; return (p + q - sqrt((p - q) * (p - q) + k * k)) / 2; };
+      g.sides = [side(wy, -.5, .5, M), side(wy, -.5, .5, M)]; g.kind = 'sharp';
+    }
+  } else { // capsule: heat shield upstream, conical back shell
+    var Rn = .42, xc = -.25 + Rn, ph = Mt.asin(.35 / Rn);
+    for (i = 0; i <= 16; i++) { t = -ph + 2 * ph * i / 16; P.push(xc - Rn * cos(t), Rn * sin(t)); }
+    P.push(-.03, .345, 0, .33, .3, .12, .3, -.12, 0, -.33, -.03, -.345);
+    for (i = 0; i < P.length; i++) P[i] *= CS;
+    if (sup) { g.kind = 'blunt'; g.B = blunt(M, -.25 * CS, Rn * CS, true); }
+  }
+  if (g.kind === 'sharp' && (!g.sides[0] || !g.sides[1])) { g.kind = 'blunt'; g.B = blunt(M, -.5, .12, true); } // detached
+  g.P = P;
+  var fx = 1e9, bx = -1e9, fy = 0, by = 0;
+  for (i = 0; i < P.length; i += 2) { if (P[i] < fx) { fx = P[i]; fy = P[i + 1]; } if (P[i] > bx) { bx = P[i]; by = P[i + 1]; } }
+  g.front = fx; g.back = bx; g.nose = [fx, fy]; g.te = [bx, by];
+  g.sy = [[], []]; g.sx0 = fx; g.sx1 = bx;
+  for (i = 0; i <= 96; i++) { t = fx + (bx - fx) * i / 96; g.sy[0][i] = surfY(P, t, 1); g.sy[1][i] = surfY(P, t, -1); }
+  if (tr) {
+    var PK = { airfoil: [[1, -.42, .15, .3], [-1, -.3, -.02, .1]], cylinder: [[1, -.22, .08, .22], [-1, -.22, .08, .22]], wedge: [[1, .12, .36, .14], [-1, .12, .36, .14]], capsule: [[1, -.112, .024, .15], [-1, -.112, .024, .15]] }[body];
+    for (i = 0; i < PK.length; i++) g.pk.push({ s: PK[i][0], xa: PK[i][1], xs: PK[i][2], h: PK[i][3] });
+  }
+  sepGeom(g); lines(g);
+  return g;
+}
+function sy(g, x, s) { var f = cl((x - g.sx0) / (g.sx1 - g.sx0) * 96, 0, 96), i = mn(flo(f), 95), A = g.sy[s > 0 ? 0 : 1]; f -= i; return A[i] * (1 - f) + A[i + 1] * f; }
+function shape(t) { return Mt.pow(sin(cl(t, 0, 1) * PI / 2), .55); }
+function sepGeom(g) {
+  var b = g.body, sup = g.sup, tr = g.tr, w = { sT: .06, sB: .06, q: 0, hmin: .06, Dd: .9 };
+  if (b === 'cylinder') { var an = (sup ? 110 : tr ? 95 : 80) * D2R; w.a = [-CR * cos(an), CR * sin(an)]; w.b = [w.a[0], -w.a[1]]; if (sup) { w.sT = w.sB = -.32; w.q = .17; w.hmin = .07; w.Dd = .75; } else { w.sT = w.sB = .07; w.Dd = .95; w.hmin = .1; } }
+  else if (b === 'airfoil') {
+    if (sup) { w.a = [g.te[0], g.te[1] + .012]; w.b = [g.te[0], g.te[1] - .012]; w.sT = w.sB = .03; w.hmin = .02; w.Dd = .5; }
+    else if (tr) { w.a = [g.pk[0].xs, sy(g, g.pk[0].xs, 1)]; w.b = g.te; w.sT = .06; w.sB = 0; w.Dd = .7; w.hmin = .03; }
+    else { w.a = [-.05, sy(g, -.05, 1)]; w.b = g.te; w.sT = .11; w.sB = 0; w.Dd = .85; w.hmin = .05; }
+  } else if (b === 'wedge') { w.a = [.5, WH]; w.b = [.5, -WH]; if (sup) { w.sT = w.sB = -.2; w.q = .14; w.hmin = .04; w.Dd = .7; } }
+  else { w.a = [-.05, .28]; w.b = [-.05, -.28]; w.Dd = .95; if (sup) { w.sT = w.sB = -.38; w.q = .2; w.hmin = .07; w.Dd = .75; } else { w.sT = w.sB = .04; } }
+  if (tr && b !== 'airfoil') { w.a = [g.pk[0].xs, sy(g, g.pk[0].xs, 1)]; w.b = [g.pk[1].xs, sy(g, g.pk[1].xs, -1)]; }
+  w.Hb = mx(.06, w.a[1] - w.b[1]); w.x0 = mn(w.a[0], w.b[0]); w.sym = abs(w.a[1] + w.b[1]) < .05;
+  w.Lw = sup ? .9 : 1.4;
+  g.w = w;
+}
+function wk(g, x, o) { // wake centre + half width at x
+  var w = g.w, da = x - w.a[0], db = x - w.b[0], top = w.a[1] + w.sT * da + w.q * mx(da, 0) * mx(da, 0), bot;
+  if (db < 0 && w.b[0] > w.a[0]) bot = w.a[1] + (w.b[1] - w.a[1]) * da / (w.b[0] - w.a[0]);
+  else bot = w.b[1] - w.sB * db - w.q * mx(db, 0) * mx(db, 0);
+  o.c = (top + bot) / 2; o.h = mx((top - bot) / 2, w.hmin); return o;
+}
+function seg(g, k, x, y, ang, L) { g.L.push({ k: k, p: [x, y, x + L * cos(ang), y + L * sin(ang)], a: ang }); }
+function lines(g) {
+  var M = g.M, i, k, s;
+  if (g.kind === 'sharp') {
+    for (k = 0; k < 2; k++) {
+      var S = g.sides[k]; s = k ? -1 : 1; var y0 = s * S.Y[0];
+      if (S.b > 0) seg(g, 's', S.x0, y0, s * S.b, 8);
+      else for (i = 0; i < 4; i++) seg(g, 'w', S.x0, y0, s * (mu(M) + (chA(S, S.x0) - mu(M)) * i / 3), 8);
+      if (S.bE > 0) seg(g, 's', S.x1, s * S.Y[S.N], s * (S.T[S.N] + S.bE), 8);
+      if (g.body === 'wedge') { var a1 = chA(S, .17), a2 = chA(S, .23); for (i = 0; i < 5; i++) seg(g, 'w', .2, s * WH, s * (a1 + (a2 - a1) * i / 4), 8); }
+      else for (i = 1; i <= 4; i++) { var xs = S.x0 + (S.x1 - S.x0) * i / 5; seg(g, 'w', xs, s * sAt(S, S.Y, xs), s * chA(S, xs), 8); }
+    }
+  } else if (g.kind === 'blunt') {
+    var B = g.B, p = []; for (var y = -1.6; y <= 1.6001; y += .025) p.push(bX(B, abs(y)), y);
+    g.L.push({ k: 's', p: p, a: mu(M) });
+    if (g.body === 'capsule') for (k = 0; k < 2; k++) { s = k ? -1 : 1; for (i = 0; i < 4; i++) seg(g, 'w', -.05, s * .28, s * (75 * D2R + (mu(M) + 8 * D2R - 75 * D2R) * i / 3), 8); }
+  }
+  if (g.sup && g.body !== 'airfoil') { // recompression (trailing) shocks at the wake neck
+    var w = g.w, nx = w.a[0] + (w.q > 0 ? -w.sT / (2 * w.q) : .6), ra = mu(M * .8) + 4 * D2R;
+    seg(g, 'r', nx, w.hmin, ra, 8); seg(g, 'r', nx, -w.hmin, -ra, 8);
+  }
+}
+
+/* ---------- base field (steady, solver-independent) on a grid; cached ---------- */
+var cache = {};
+function baseField(g, D, key) {
+  if (cache[key]) return cache[key];
+  var n = D.gw * D.gh, U = new Float32Array(n), V = new Float32Array(n), Dd = new Float32Array(n), HT = new Float32Array(n),
+    M = g.M, tw = {}, pg = g.sup ? 1 : mn(1.6, 1 / sqrt(1 - mn(M, .9) * mn(M, .9))), hyp = g.reg === 'hypersonic', i, j, k = 0, x, y, u, v;
+  for (j = 0; j < D.gh; j++) {
+    y = D.H / 2 - (j + .5) * D.dy;
+    for (i = 0; i < D.gw; i++, k++) {
+      x = D.x0 + (i + .5) * D.dx;
+      var r = sdf(g.P, x, y), d = r[0], nx = r[1], ny = r[2]; Dd[k] = d;
+      if (d <= 0) continue;
+      if (g.kind === 'sharp') {
+        var lo = y < g.split(x) ? 1 : 0, S = g.sides[lo], st = sState(S, x, lo ? -y : y), sp = vr(st[1], M), an = (lo ? -1 : 1) * st[0];
+        u = sp * cos(an); v = sp * sin(an);
+        if (hyp && (st[0] !== 0 || st[1] !== M) && x < g.back + .15) HT[k] = .75 * exp(-(x - g.front) / .3 - d / .07);
+      } else if (g.kind === 'blunt') {
+        var B = g.B, ay = abs(y), xs = bX(B, ay);
+        if (x < xs) { u = 1; v = 0; } else {
+          var dx = bS(B, ay), L = sqrt(1 + dx * dx), Nx = 1 / L, Ny = -dx * (y < 0 ? -1 : 1) / L, Mn = M * Nx,
+            rr = Mn > 1 ? ((G - 1) * Mn * Mn + 2) / ((G + 1) * Mn * Mn) : 1;
+          u = 1 - Nx * Nx + rr * Nx * Nx; v = -Nx * Ny + rr * Nx * Ny;
+          var w = exp(-d / mx(.06, B.D * .7)), dt = u * nx + v * ny; if (dt < 0) { u -= w * dt * nx; v -= w * dt * ny; }
+          var dxs = x - g.w.a[0];
+          if (dxs > -.02) { // flow turns around the shoulder towards the wake neck (expansion)
+            wk(g, x, tw); var sd = y >= 0 ? 1 : -1, wa = g.w, sl = sd > 0 ? wa.sT + 2 * wa.q * mx(dxs, 0) : -(wa.sB + 2 * wa.q * mx(dxs, 0)),
+              f2 = ss(-.02, .15, dxs) * exp(-mx(0, sd * (y - tw.c) - tw.h) / .35), a0 = atan2(v, u), sp0 = sqrt(u * u + v * v), an2 = a0 + (atan(sl) - a0) * f2;
+            u = sp0 * cos(an2); v = sp0 * sin(an2);
+          }
+          var s0 = sqrt(u * u + v * v) || 1e-6, s1 = s0 + (.9 - s0) * ss(B.xn, g.back + .4, x), f = .85 * ss(g.w.a[0] - .05, g.back + .6, x);
+          u = u / s0 * s1 * (1 - f) + f * .95; v = v / s0 * s1 * (1 - f);
+          if (hyp) HT[k] = Nx * Nx * exp(-mx(0, x - B.xv) / .45) * (1 - ss(.0, .5, x - xs) * .5);
+        }
+      } else {
+        var vv = g.vel ? g.vel(x, y) : null;
+        if (vv) { u = vv[0]; v = vv[1]; }
+        else { var ww = exp(-d / .22), dd = nx; u = 1 - ww * dd * nx; v = -ww * dd * ny; var bo = 1 + .45 * ww * (1 - nx * nx); u *= bo; v *= bo; }
+        u = 1 + (u - 1) * pg; v *= pg;
+        for (var p = 0; p < g.pk.length; p++) { // transonic pocket speed-up, slow-down behind the shock
+          var K = g.pk[p], h = K.s * (y - sy(g, x, K.s));
+          if (h > 0) {
+            var t = (x - K.xa) / (K.xs - K.xa), f1 = 1;
+            if (t > 0 && t < 1 && h < K.h * shape(t)) f1 = 1.3;
+            else if (t >= 1 && h < K.h * 1.15) f1 = 1 - .28 * (1 - ss(0, .35, x - K.xs));
+            u *= f1; v *= f1;
+          }
+        }
+      }
+      var sp2 = sqrt(u * u + v * v); if (sp2 > 2.4) { u *= 2.4 / sp2; v *= 2.4 / sp2; }
+      U[k] = u; V[k] = v;
+    }
+  }
+  return (cache[key] = { U: U, V: V, D: Dd, HT: HT });
+}
+
+/* ---------- solvers ---------- */
+// kv: shed-vortex strength, rcm: core size mult, o1: last resolved wake octave (-1 none), b0..b1: resolved
+// boundary-layer octaves, hz: wake haze (modelled share), hb: BL haze (1 whole BL, .5 thin wall layer)
+var SOL = {
+  potential: { pot: 1, kv: 0, o1: -1, hz: 0, hb: 0, tau: .75, np: .9 },
+  rans: { kv: 0, o1: -1, hz: 1, hb: 1, tw: 1, tau: .6 },
+  urans: { kv: .5, rcm: 2, o1: -1, hz: .8, hb: 1, sway: 1, tau: .5 },
+  ddes: { kv: 1, o1: 0, hz: .5, hb: 1, tau: .42 },
+  wmles: { kv: 1, o1: 2, b0: 2, b1: 3, hz: .14, hb: .5, tau: .38 },
+  wrles: { kv: 1, o1: 3, b0: 2, b1: 4, hz: .04, hb: 0, tau: .36 },
+  dns: { kv: 1.15, o1: 4, b0: 2, b1: 4, hz: 0, hb: 0, chaos: 1, tau: .34, np: 1.3 },
+  lbm: { kv: 1, o1: 2, b0: 2, b1: 3, hz: .14, hb: .5, lat: 1, tau: .38 }
+};
+
+/* ---------- colours ---------- */
+var C = {}, pc = null;
+function rgb(c) {
+  if (!pc) { var e = document.createElement('canvas'); e.width = e.height = 1; pc = e.getContext('2d', { willReadFrequently: true }); }
+  pc.clearRect(0, 0, 1, 1); pc.fillStyle = '#888'; pc.fillStyle = c; pc.fillRect(0, 0, 1, 1); var d = pc.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2]];
+}
+function readColors() {
+  var cs = getComputedStyle(document.documentElement), o = JSON.stringify(C);
+  function v(n, f) { return (cs.getPropertyValue(n) || '').trim() || f; }
+  var dark = matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+  C = { bg: v('--bg', dark ? '#0f141b' : '#f6f7f9'), panel: v('--panel', dark ? '#161d27' : '#fff'), ink: v('--ink', dark ? '#e6ebf2' : '#18202b'),
+    muted: v('--muted', '#5a6575'), rule: v('--rule', '#d9dee6'), accent: v('--accent', dark ? '#6aa3ff' : '#1f5fbf'), warm: v('--warm', dark ? '#f0955c' : '#b4541f'), ok: v('--ok', '#2e7d4f') };
+  var p = rgb(C.panel); C.dark = (.2126 * p[0] + .7152 * p[1] + .0722 * p[2]) < 128; C.warmRGB = rgb(C.warm);
+  return JSON.stringify(C) !== o;
+}
+
+/* ---------- tiles ---------- */
+var tiles = [], raf = 0, last = 0, io = null, ro = null, reduced = false, SPEED = .9;
+var mqR = window.matchMedia ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+reduced = !!(mqR && mqR.matches);
+
+function cfgOf(cv, o) {
+  var ds = cv.dataset; o = o || {};
+  var solver = String(o.solver || ds.solver || 'rans').toLowerCase(); if (!SOL[solver]) solver = 'rans';
+  var M = parseFloat(o.mach != null ? o.mach : ds.mach), reg = String(o.regime || ds.regime || '').toLowerCase();
+  if (!DEFM[reg]) reg = isFinite(M) ? regOf(M) : 'subsonic';
+  if (!isFinite(M)) M = DEFM[reg];
+  if (reg === 'supersonic' || reg === 'hypersonic') M = mx(M, 1.15);
+  var body = String(o.body || ds.body || 'airfoil').toLowerCase(); if (!BODIES[body]) body = 'airfoil';
+  var inv = o.invalid != null ? !!o.invalid : (ds.invalid === '1' || ds.invalid === 'true');
+  return { solver: solver, reg: reg, M: M, body: body, inv: inv, seed: o.seed || ds.seed || '' };
+}
+
+function build(T) {
+  var cv = T.cv, f = T.f, o = T.o, c = SOL[f.solver];
+  var aw = +cv.getAttribute('width') || 200, ah = +cv.getAttribute('height') || 110, r = cv.getBoundingClientRect();
+  if (!T.sized) {
+    if (!cv.style.width && (!r.width || abs(r.width - aw) < 1)) cv.style.width = aw + 'px';
+    if (!cv.style.height && (!r.height || abs(r.height - ah) < 1)) cv.style.height = ah + 'px';
+    T.sized = 1; r = cv.getBoundingClientRect();
+  }
+  var cw = r.width || aw, ch = r.height || ah, dpr = mn(2, window.devicePixelRatio || 1);
+  T.cw = cw; T.ch = ch; T.dpr = dpr;
+  cv.width = Mt.round(cw * dpr); cv.height = Mt.round(ch * dpr);
+  var H = (T.hero ? 1.6 : 1.3) / (o.zoom || 1), W = H * cw / ch, x0 = -mn(.95, .36 * W);
+  var D = { x0: x0, W: W, H: H, gw: mn(360, Mt.round(cw / 1.6)), gh: mn(200, Mt.round(ch / 1.6)) };
+  D.dx = W / D.gw; D.dy = H / D.gh; T.D = D; T.K = cw / W * dpr; T.x1 = x0 + W; T.yt = H / 2;
+  var gkey = f.body + '|' + f.reg + '|' + f.M.toFixed(3), g = geom.cache[gkey] || (geom.cache[gkey] = geom(f.body, f.reg, f.M));
+  T.g = g; T.c = c;
+  var base = baseField(g, D, gkey + '|' + D.gw + 'x' + D.gh + '|' + W.toFixed(3) + '|' + H.toFixed(3));
+  var n = D.gw * D.gh, U = new Float32Array(base.U), V = new Float32Array(base.V), MW = new Float32Array(n), MB = new Float32Array(n),
+    HZ = new Float32Array(n), HW = new Float32Array(n), w = g.w, tmp = {}, i, j, k = 0, x, y;
+  T.U = U; T.V = V; T.Dg = base.D; T.MW = MW; T.MB = MB;
+  var tw = [];
+  if (c.tw) {
+    var rc = .22 * w.Hb, gm = .5 * 4 * PI * rc;
+    if (w.sym) { wk(g, g.back + .35 * w.Hb, tmp); tw.push([g.back + .35 * w.Hb, tmp.c + .22 * w.Hb, -gm, rc], [g.back + .35 * w.Hb, tmp.c - .22 * w.Hb, gm, rc]); }
+    else { var bx = w.a[0] + .6 * (w.b[0] - w.a[0]); tw.push([bx, sy(g, bx, 1) + .45 * w.Hb, -gm * .8, rc * 1.2]); }
+  }
+  for (j = 0; j < D.gh; j++) {
+    y = D.H / 2 - (j + .5) * D.dy;
+    for (i = 0; i < D.gw; i++, k++) {
+      x = D.x0 + (i + .5) * D.dx; var d = base.D[k]; if (d <= 0 || c.pot) continue;
+      wk(g, x, tmp); var e = .05 + .04 * mx(0, x - w.x0), top = tmp.c + tmp.h, bot = tmp.c - tmp.h;
+      var m = ss(bot - e, bot + e, y) * (1 - ss(top - e, top + e, y)) * ss(w.x0 - .03, w.x0 + .12, x);
+      if (m > .002) {
+        var et = (y - tmp.c) / tmp.h, uw = 1 - w.Dd * exp(-(x - w.x0) / w.Lw) * mx(0, 1 - et * et);
+        U[k] = U[k] * (1 - m) + uw * m; V[k] *= 1 - m; MW[k] = m;
+      }
+      for (var q = 0; q < tw.length; q++) {
+        var t = tw[q], ddx = x - t[0], ddy = y - t[1], r2 = ddx * ddx + ddy * ddy, ff = t[2] / (2 * PI * (r2 + t[3] * t[3])) * exp(-r2 / (9 * t[3] * t[3]));
+        U[k] -= ff * ddy; V[k] += ff * ddx;
+      }
+      var up = y >= g.split(x),
+        xs = up ? w.a[0] : w.b[0], dl = .012 + .045 * ss(g.front, xs, x);
+      if (x <= xs + .02 && d < dl * 1.3) MB[k] = 1 - ss(.6 * dl, 1.3 * dl, d);
+      var I = .6 + .4 * exp(-(x - w.x0) / 1.5);
+      HZ[k] = c.hz * m * I * (c.sway ? 0 : 1) + (c.hb >= 1 ? MB[k] * .8 : c.hb > 0 ? MB[k] * (1 - ss(.008, .02, d)) : 0);
+      if (c.sway) HW[k] = c.hz * m * I;
+    }
+  }
+  // per-tile dynamics
+  var rnd = rng(hash(f.body + f.reg + f.M + f.seed + (T.hero ? 'h' : '')));
+  T.uc = g.sup ? .85 : .72; T.Ts = cl(w.Hb / .24, .6, 3); T.kmax = Mt.ceil((T.x1 - w.x0) / (T.uc * T.Ts / 2)) + 3;
+  T.rc0 = .17 * w.Hb; T.G0 = .95 * 4 * PI * T.rc0; T.kv = new Float32Array(T.kmax * 4); T.nk = 0; T.sd = rnd() * 100;
+  var k0 = 2 * PI / (.8 * mx(w.Hb, .3)); T.oct = [];
+  for (i = 0; i < 6; i++) { var an = rnd() * PI; T.oct.push({ k: k0 * Mt.pow(1.8, i), a: .7 * Mt.pow(1.8, -i / 3), ca: cos(an), sa: sin(an), px: rnd() * 9, py: rnd() * 9, w: (.25 + rnd() * .3) * Mt.pow(1.8, i * .66), m: 1 }); }
+  // particles
+  var N = mn(2600, Mt.round(cw * ch / 85 * (c.np || 1) * (T.hero ? .8 : 1)));
+  T.N = N; T.px = new Float32Array(N); T.py = new Float32Array(N); T.age = new Float32Array(N); T.life = new Float32Array(N); T.dye = new Uint8Array(N);
+  T.rnd = rnd; T.dyeF = c.pot ? 0 : .2 * mn(1, sqrt(24000 / (cw * ch)));
+  var P = g.P, ds = [], cnt = P.length / 2;
+  for (i = 0; i < cnt; i++) {
+    var ax = P[2 * i], ay = P[2 * i + 1], pv = (i + cnt - 1) % cnt, nx2 = (i + 1) % cnt, tx = P[2 * nx2] - P[2 * pv], ty = P[2 * nx2 + 1] - P[2 * pv + 1], tl = sqrt(tx * tx + ty * ty) || 1, nnx = ty / tl, nny = -tx / tl;
+    if (sdf(P, ax + nnx * .02, ay + nny * .02)[0] < 0) { nnx = -nnx; nny = -nny; }
+    var lim = ay >= g.split(ax) ? w.a[0] : w.b[0], wt = ax > lim + .01 ? 0 : ax > lim - (g.kind === 'blunt' ? .07 : .2) ? 4 : ax > lim - .45 && g.kind !== 'blunt' ? 1 : 0;
+    for (j = 0; j < wt; j++) ds.push(ax, ay, nnx, nny);
+  }
+  T.ds = ds;
+  for (i = 0; i < N; i++) { spawn(T, i); T.age[i] = rnd() * T.life[i]; }
+  T.t = rnd() * 10; T.tau = c.tau;
+  // canvases
+  T.ctx = cv.getContext('2d');
+  T.bg = mk(cv.width, cv.height); T.HZ = HZ; T.HW = HW; T.HT = base.HT;
+  T.hz = c.sway ? mk(D.gw, D.gh) : null;
+  T.bodyP = path(T, [P], true);
+  var Ls = { s: [], w: [], r: [] }, ang = [];
+  for (i = 0; i < g.L.length; i++) { Ls[g.L[i].k].push(g.L[i].p); ang.push({ kind: g.L[i].k, deg: +(g.L[i].a / D2R).toFixed(2) }); }
+  T.shS = path(T, Ls.s); T.shW = path(T, Ls.w); T.shR = path(T, Ls.r);
+  var S0 = g.sides && g.sides[0];
+  T.info = { solver: f.solver, regime: f.reg, mach: f.M, body: f.body, invalid: f.inv, particles: N, muDeg: +(mu(f.M) / D2R).toFixed(2),
+    leShockDeg: S0 && S0.b > 0 ? +(S0.b / D2R).toFixed(2) : null, standoff: g.B ? +g.B.D.toFixed(3) : null, lines: ang };
+  paintBg(T); warm(T, 40);
+}
+geom.cache = {};
+function mk(w, h) { var e = document.createElement('canvas'); e.width = w; e.height = h; return e; }
+function path(T, polys, close) {
+  var p = new Path2D(), K = T.K;
+  for (var a = 0; a < polys.length; a++) { var q = polys[a]; for (var i = 0; i < q.length; i += 2) { var X = (q[i] - T.D.x0) * K, Y = (T.yt - q[i + 1]) * K; if (i) p.lineTo(X, Y); else p.moveTo(X, Y); } if (close) p.closePath(); }
+  return p;
+}
+function spawn(T, i) {
+  var r = T.rnd, D = T.D, x, y;
+  if (r() < T.dyeF && T.ds.length) {
+    if (T.g.kind === 'blunt' || r() < .45) { var tp = r() < .5, sp = tp ? T.g.w.a : T.g.w.b; x = sp[0] + .005 + r() * .05; y = sp[1] + (tp ? 1 : -1) * (r() - .55) * .045; } // shear-layer seed
+    else { var k = flo(r() * T.ds.length / 4) * 4, o = .012 + r() * .04; x = T.ds[k] + T.ds[k + 2] * o; y = T.ds[k + 1] + T.ds[k + 3] * o; }
+    T.dye[i] = 1; T.life[i] = 1.3 + r() * 2;
+  } else {
+    var wz = !T.c.pot && r() < .25, w = T.g.w, tm = T.tmp || (T.tmp = {});
+    for (var n = 0; n < 6; n++) {
+      if (wz) { x = w.x0 + r() * (T.x1 - w.x0); wk(T.g, x, tm); y = tm.c + (r() * 2 - 1) * tm.h; } else { x = D.x0 + r() * D.W; y = (r() - .5) * D.H; }
+      if (look(T, x, y) > .01) break;
+    }
+    T.dye[i] = 0; T.life[i] = 1.5 + r() * 2.5;
+  }
+  T.px[i] = x; T.py[i] = y; T.age[i] = 0;
+}
+function look(T, x, y) { var D = T.D, i = cl(flo((x - D.x0) / D.dx), 0, D.gw - 1), j = cl(flo((T.yt - y) / D.dy), 0, D.gh - 1); return T.Dg[j * D.gw + i]; }
+
+function paintBg(T) {
+  var cv = T.cv, b = T.bg, bc = b.getContext('2d'), D = T.D, g = T.g, c = T.c, n = D.gw * D.gh, k;
+  bc.globalAlpha = 1; bc.fillStyle = C.panel; bc.fillRect(0, 0, b.width, b.height);
+  var lo = mk(D.gw, D.gh), lc = lo.getContext('2d'), im = lc.createImageData(D.gw, D.gh), d = im.data, wr = C.warmRGB, ha = C.dark ? .42 : .34;
+  for (k = 0; k < n; k++) {
+    var h = T.HZ[k], ht = T.HT[k], o = k * 4;
+    if (ht > .02) { var t = cl(ht, 0, 1), cr = 255, cg = 120 + 120 * t, cb = 40 + 150 * t * t; d[o] = cr; d[o + 1] = cg; d[o + 2] = cb; d[o + 3] = 255 * cl(.12 + .7 * t, 0, .85); }
+    else if (h > .005) { d[o] = wr[0]; d[o + 1] = wr[1]; d[o + 2] = wr[2]; d[o + 3] = 255 * mn(1, h) * ha; }
+  }
+  lc.putImageData(im, 0, 0);
+  bc.imageSmoothingEnabled = true; bc.imageSmoothingQuality = 'high'; bc.drawImage(lo, 0, 0, b.width, b.height);
+  if (T.hz) { T.hzc = T.hz.getContext('2d'); T.hzi = T.hzc.createImageData(D.gw, D.gh); T.hza = ha; }
+  if (c.lat) { // lattice hint
+    var st = 5 * T.dpr; bc.fillStyle = C.muted; bc.globalAlpha = .28;
+    for (var y = st / 2; y < b.height; y += st) for (var x = st / 2; x < b.width; x += st) bc.fillRect(x, y, T.dpr, T.dpr);
+    bc.globalAlpha = 1;
+  }
+  // static overlays under the particles: supersonic pocket (mean position), weak waves, recompression shocks
+  for (k = 0; k < g.pk.length; k++) {
+    var P = g.pk[k], sg = P.s; bc.beginPath();
+    for (var jj = 0; jj <= 12; jj++) { var xx = P.xa + (P.xs - P.xa) * jj / 12, yy = sy(g, xx, sg) + (jj ? sg * P.h * shape(jj / 12) : 0); if (jj) bc.lineTo((xx - D.x0) * T.K, (T.yt - yy) * T.K); else bc.moveTo((xx - D.x0) * T.K, (T.yt - yy) * T.K); }
+    bc.lineTo((P.xs - D.x0) * T.K, (T.yt - sy(g, P.xs, sg)) * T.K); bc.closePath(); bc.fillStyle = C.accent; bc.globalAlpha = C.dark ? .24 : .17; bc.fill();
+  }
+  var p = T.dpr; bc.strokeStyle = C.ink; bc.lineCap = 'round';
+  bc.lineWidth = .8 * p; bc.globalAlpha = .34; bc.stroke(T.shW);
+  bc.lineWidth = 1.1 * p; bc.globalAlpha = .55; bc.stroke(T.shR); bc.globalAlpha = 1;
+  if (T.f.inv) { // dimmed + diagonal hatch
+    var s7 = 7 * p; bc.fillStyle = C.panel; bc.globalAlpha = .5; bc.fillRect(0, 0, b.width, b.height);
+    bc.globalAlpha = .5; bc.strokeStyle = C.muted; bc.lineWidth = p; bc.beginPath();
+    for (var z = -b.height; z < b.width; z += s7) { bc.moveTo(z, b.height); bc.lineTo(z + b.height, 0); }
+    bc.stroke(); bc.globalAlpha = 1;
+  }
+  T.bodyC = mixc(C.ink, C.panel, T.f.inv ? .4 : .84); T.shC = T.f.inv ? mixc(C.ink, C.panel, .45) : C.ink;
+  T.glow = null;
+  if (g.reg === 'hypersonic') {
+    var K = T.K, gx = (g.nose[0] - D.x0) * K, gy = (T.yt - g.nose[1]) * K, R = (g.kind === 'blunt' ? .2 : .1) * K, gr = T.ctx.createRadialGradient(gx, gy, 0, gx, gy, R);
+    gr.addColorStop(0, 'rgba(255,250,225,.95)'); gr.addColorStop(.25, 'rgba(255,205,110,.85)'); gr.addColorStop(.6, 'rgba(' + wr.join(',') + ',.4)'); gr.addColorStop(1, 'rgba(' + wr.join(',') + ',0)');
+    T.glow = [gr, gx, gy, R];
+  }
+}
+function mixc(a, b, t) { var x = rgb(a), y = rgb(b); return 'rgb(' + [0, 1, 2].map(function (i) { return Mt.round(x[i] * t + y[i] * (1 - t)); }).join(',') + ')'; }
+function warm(T, n) { var c = T.ctx; c.globalAlpha = 1; c.drawImage(T.bg, 0, 0); for (var i = 0; i < n; i++) step(T, 1 / 60); }
+
+function buff(T) { // transonic shock motion
+  var c = T.c, t = T.t; if (c.pot || c.tw) return 0;
+  if (c.sway) return .035 * sin(2 * PI * t / 2.6);
+  return .045 * sin(2 * PI * t / 2.3) + .02 * sin(2 * PI * t * .77 + 1) + .012 * sin(9.3 * t + T.sd);
+}
+
+function step(T, dt) {
+  var sdt = dt * SPEED, D = T.D, c = T.c, g = T.g, w = g.w, tc = T.ctx;
+  T.t += sdt; var t = T.t;
+  // fade the previous frame toward the background (trails without a second canvas). Faded in steps of
+  // >= 14% so 8-bit rounding cannot leave ghost residue (a 3% blend stalls ~16 levels short of the target).
+  T.fac = (T.fac || 0) + dt; var fa = 1 - exp(-T.fac / T.tau); if (fa >= .14) T.fac = 0; else fa = 0;
+  under(T, fa, dt);
+  // shed vortices for this frame
+  var nk = 0, kv = T.kv, tmp = {};
+  if (c.kv) {
+    var Th = T.Ts / 2, id0 = flo(t / Th), rcm = c.rcm || 1;
+    for (var jv = 0; jv < T.kmax; jv++) {
+      var id = id0 - jv, age = t - id * Th, top = (id & 1) === 0, sp = top ? w.a : w.b, vx = sp[0] + .12 * w.Hb + T.uc * age;
+      if (vx > T.x1 + .6) break;
+      wk(g, vx, tmp); var r1 = hr(id, T.sd), r2 = hr(id + 7.1, T.sd);
+      var vy = tmp.c + (top ? 1 : -1) * .3 * tmp.h + (c.chaos ? (r1 - .5) * .35 * tmp.h : 0), rc = T.rc0 * rcm * (1 + .25 * age);
+      kv[nk * 4] = vx; kv[nk * 4 + 1] = vy; kv[nk * 4 + 2] = (top ? -1 : 1) * T.G0 * c.kv * ss(0, .6 * Th, age) * (c.chaos ? .7 + .6 * r2 : 1); kv[nk * 4 + 3] = rc * rc; nk++;
+    }
+  }
+  var oct = T.oct, o1 = c.o1, b0 = c.b0 || 0, b1 = c.b1 || -1, on = mx(o1, b1);
+  for (var o = 0; o <= on; o++) oct[o].m = c.chaos ? 1.15 + .35 * sin(t * (1.3 + .7 * o) + o * 2.1 + T.sd) : 1;
+  var swA = c.sway ? .16 * w.Hb : 0, om = 2 * PI / T.Ts, kw = om / T.uc;
+  var PX = T.px, PY = T.py, AG = T.age, LF = T.life, DY = T.dye, U = T.U, V = T.V, MW = T.MW, MB = T.MB, Dg = T.Dg,
+    gw = D.gw, gh = D.gh, x0 = D.x0, yt = T.yt, idx = 1 / D.dx, idy = 1 / D.dy, K = T.K, uc = T.uc, x1 = T.x1, lat = c.lat ? 2 * T.dpr : 0;
+  var pI = new Path2D(), pD = new Path2D();
+  for (var p = 0; p < T.N; p++) {
+    var x = PX[p], y = PY[p];
+    var fx = (x - x0) * idx - .5, fy = (yt - y) * idy - .5; fx = fx < 0 ? 0 : fx > gw - 1.001 ? gw - 1.001 : fx; fy = fy < 0 ? 0 : fy > gh - 1.001 ? gh - 1.001 : fy;
+    var i = fx | 0, j = fy | 0, ax = fx - i, ay = fy - j, k = j * gw + i;
+    var u = (U[k] * (1 - ax) + U[k + 1] * ax) * (1 - ay) + (U[k + gw] * (1 - ax) + U[k + gw + 1] * ax) * ay,
+      v = (V[k] * (1 - ax) + V[k + 1] * ax) * (1 - ay) + (V[k + gw] * (1 - ax) + V[k + gw + 1] * ax) * ay;
+    for (var q = 0; q < nk; q++) {
+      var dx = x - kv[q * 4], dy = y - kv[q * 4 + 1], r2v = dx * dx + dy * dy, rc2 = kv[q * 4 + 3];
+      if (r2v < 16 * rc2) { var tp = 1 - r2v / (16 * rc2), f = kv[q * 4 + 2] / (2 * PI * (r2v + rc2)) * tp * tp; u -= f * dy; v += f * dx; }
+    }
+    var m = MW[k], b = MB[k];
+    if (m > .02 && o1 >= 0) { var I = m * (.6 + .4 * exp(-(x - w.x0) / 1.5)); turb(T, x, y, t, 0, o1, I * (c.chaos ? 1.2 : 1), uc); u += T.tu; v += T.tv; }
+    if (b > .03 && b1 >= b0) { var wl = c.hb ? ss(.008, .022, Dg[k]) : 1; turb(T, x, y, t, b0, b1, b * .55 * wl, .6); u += T.tu; v += T.tv; }
+    if (swA && m > .02) v += swA * om * cos(om * t - kw * (x - w.x0)) * m * ss(w.x0, w.x0 + .5, x);
+    var nx = x + u * sdt, ny = y + v * sdt; AG[p] += sdt;
+    if (nx > x1 + .05 || nx < x0 - .1 || ny > yt + .05 || ny < -yt - .05 || AG[p] > LF[p] || look(T, nx, ny) <= 0) { spawn(T, p); continue; }
+    PX[p] = nx; PY[p] = ny;
+    var X0 = (x - x0) * K, Y0 = (yt - y) * K, X1 = (nx - x0) * K, Y1 = (yt - ny) * K;
+    if (lat) { X0 = Mt.round(X0 / lat) * lat; Y0 = Mt.round(Y0 / lat) * lat; X1 = Mt.round(X1 / lat) * lat; Y1 = Mt.round(Y1 / lat) * lat; if (X0 === X1 && Y0 === Y1) continue; }
+    var pp = DY[p] ? pD : pI; pp.moveTo(X0, Y0); pp.lineTo(X1, Y1);
+  }
+  var dim = T.f.inv ? .4 : 1;
+  tc.lineWidth = (T.hero ? 1.25 : 1) * T.dpr; tc.lineCap = 'butt';
+  tc.globalAlpha = (C.dark ? .46 : .4) * dim; tc.strokeStyle = C.ink; tc.stroke(pI);
+  tc.globalAlpha = .7 * dim; tc.strokeStyle = C.accent; tc.stroke(pD); tc.globalAlpha = 1;
+  over(T, dt);
+}
+function turb(T, x, y, t, o0, o1, amp, c) { // curl-noise octaves, advected with the wake
+  var u = 0, v = 0, X = x - c * t;
+  for (var o = o0; o <= o1; o++) {
+    var O = T.oct[o], xr = X * O.ca + y * O.sa + O.px + O.w * t * .05, yr = -X * O.sa + y * O.ca + O.py - O.w * t * .035,
+      kx = O.k * xr, ky = O.k * yr, a = O.a * O.m, ur = a * sin(kx) * cos(ky), vr = -a * cos(kx) * sin(ky);
+    u += ur * O.ca - vr * O.sa; v += ur * O.sa + vr * O.ca;
+  }
+  T.tu = u * amp; T.tv = v * amp;
+}
+
+function under(T, fa, dt) {
+  var c = T.ctx, cv = T.cv, g = T.g, K = T.K, x0 = T.D.x0, yt = T.yt, p = T.dpr, t = T.t, i;
+  if (fa) { c.globalAlpha = fa; c.drawImage(T.bg, 0, 0); }
+  if (T.hz && fa) { // URANS: smooth haze that sways with the single resolved shedding mode
+    var D = T.D, gw = D.gw, gh = D.gh, w = g.w, om = 2 * PI / T.Ts, kw = om / T.uc, HW = T.HW, d = T.hzi.data, wr = C.warmRGB, ha = T.hza * 255;
+    for (i = 0; i < gw; i++) {
+      var xm = x0 + (i + .5) * D.dx, off = .16 * w.Hb * sin(om * t - kw * (xm - w.x0)) * ss(w.x0, w.x0 + .5, xm) / D.dy;
+      for (var j = 0; j < gh; j++) { var sj = j + off, j0 = flo(sj), fj = sj - j0, a = 0; if (j0 >= 0 && j0 < gh - 1) a = HW[j0 * gw + i] * (1 - fj) + HW[j0 * gw + gw + i] * fj; var o = (j * gw + i) * 4; d[o] = wr[0]; d[o + 1] = wr[1]; d[o + 2] = wr[2]; d[o + 3] = a > 1 ? ha : a * ha; }
+    }
+    T.hzc.putImageData(T.hzi, 0, 0); c.imageSmoothingEnabled = true; c.drawImage(T.hz, 0, 0, cv.width, cv.height);
+  }
+  if (!g.sup && g.M >= .3) { // pressure waves running ahead of the body
+    var cs = 1 / g.M, Tr = .9, rm = 2.4; c.strokeStyle = C.ink; c.lineWidth = .8 * p;
+    for (i = 0; i < 5; i++) { var ag = (t % Tr) + i * Tr, r = ag * cs; if (r > rm) continue; c.globalAlpha = mn(1, 3 * dt) * .3 * (1 - r / rm) * ss(0, .15, r) * (T.f.inv ? .4 : 1); c.beginPath(); c.arc((g.nose[0] + ag - x0) * K, (yt - g.nose[1]) * K, r * K, 0, 2 * PI); c.stroke(); }
+  }
+  c.globalAlpha = 1;
+}
+function over(T, dt) { // crisp overlays, redrawn opaque each frame
+  var c = T.ctx, cv = T.cv, g = T.g, K = T.K, x0 = T.D.x0, yt = T.yt, p = T.dpr, t = T.t, i, j;
+  c.globalAlpha = 1; c.fillStyle = T.bodyC; c.fill(T.bodyP);
+  if (T.glow) { c.globalAlpha = mn(1, 12 * dt) * (T.f.inv ? .4 : 1); c.fillStyle = T.glow[0]; c.beginPath(); c.arc(T.glow[1], T.glow[2], T.glow[3], 0, 2 * PI); c.fill(); c.globalAlpha = 1; }
+  c.strokeStyle = T.shC; c.lineCap = 'round'; c.lineWidth = (T.hero ? 2 : 1.5) * p; c.stroke(T.shS);
+  if (g.tr) { // normal shock closing the supersonic pocket (wiggles = buffet)
+    var bf = buff(T), wig = T.c.pot || T.c.tw || T.c.sway ? 0 : 1;
+    for (i = 0; i < g.pk.length; i++) {
+      var P = g.pk[i], xs = P.xs + bf * (P.s > 0 ? 1 : .6), fy = sy(g, xs, P.s); c.beginPath();
+      for (j = 0; j <= 6; j++) { var f = j / 6, xx = xs + .02 * f + wig * .012 * sin(f * 9 + t * 11) * f, yy = fy + P.s * P.h * f; if (j) c.lineTo((xx - x0) * K, (yt - yy) * K); else c.moveTo((xx - x0) * K, (yt - yy) * K); }
+      c.stroke();
+    }
+  }
+  if (T.f.inv) { // small cross badge
+    var cx = cv.width - 11 * p, cy = 11 * p, a = 4.5 * p;
+    c.fillStyle = C.panel; c.beginPath(); c.arc(cx, cy, 8 * p, 0, 2 * PI); c.fill();
+    c.strokeStyle = C.warm; c.lineWidth = 2 * p; c.beginPath(); c.moveTo(cx - a, cy - a); c.lineTo(cx + a, cy + a); c.moveTo(cx + a, cy - a); c.lineTo(cx - a, cy + a); c.stroke();
+  }
+}
+
+/* ---------- loop, visibility, theme ---------- */
+function loop(now) {
+  raf = 0; if (document.hidden || reduced) return;
+  var dt = cl((now - last) / 1000, 0, 1 / 20); last = now; var any = false;
+  for (var i = 0; i < tiles.length; i++) { var T = tiles[i]; if (!T.vis || !T.ok) continue; step(T, dt); any = true; }
+  if (any) raf = requestAnimationFrame(loop);
+}
+function kick() {
+  if (raf || reduced || document.hidden) return;
+  for (var i = 0; i < tiles.length; i++) if (tiles[i].vis) { last = performance.now(); raf = requestAnimationFrame(loop); return; }
+}
+function still(T) { warm(T, 150); }
+function retheme(force) {
+  if (!readColors() && !force) return;
+  for (var i = 0; i < tiles.length; i++) { var T = tiles[i]; if (!T.ok) continue; paintBg(T); warm(T, reduced ? 150 : 25); }
+}
+var inited = false;
+function init() {
+  if (inited) return; inited = true; readColors();
+  if (window.IntersectionObserver) io = new IntersectionObserver(function (es) { es.forEach(function (e) { var T = e.target.__pwt; if (T) T.vis = e.isIntersecting; }); kick(); }, { rootMargin: '80px' });
+  if (window.ResizeObserver) ro = new ResizeObserver(function (es) { es.forEach(function (e) { var T = e.target.__pwt; if (!T || !T.ok) return; var r = e.contentRect; if (abs(r.width - T.cw) > 2 || abs(r.height - T.ch) > 2) { build(T); if (reduced) still(T); } }); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) kick(); });
+  var mq = matchMedia('(prefers-color-scheme: dark)'), on = function (m, f) { if (m.addEventListener) m.addEventListener('change', f); else if (m.addListener) m.addListener(f); };
+  on(mq, function () { retheme(); });
+  if (mqR) on(mqR, function () { reduced = mqR.matches; if (reduced) tiles.forEach(function (T) { if (T.ok) still(T); }); else kick(); });
+  var pend = 0; new MutationObserver(function () { if (!pend) pend = setTimeout(function () { pend = 0; retheme(); }, 30); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
+}
+function mount(cv, o, hero) {
+  init();
+  if (cv.__pwt) { cv.__pwt.o = o || cv.__pwt.o; cv.__pwt.f = cfgOf(cv, o); build(cv.__pwt); if (reduced) still(cv.__pwt); return cv.__pwt; }
+  var T = { cv: cv, o: o || {}, hero: !!hero, vis: !io };
+  T.f = cfgOf(cv, o); cv.__pwt = T;
+  try { build(T); T.ok = true; } catch (e) { if (window.console) console.error('PWTiles:', e); return T; }
+  tiles.push(T); if (reduced) still(T);
+  if (io) io.observe(cv); if (ro) ro.observe(cv);
+  kick(); return T;
+}
+
+window.PWTiles = {
+  mountAll: function (root) {
+    var els = (root || document).querySelectorAll('canvas.flowtile'), out = [];
+    for (var i = 0; i < els.length; i++) out.push(mount(els[i]));
+    return out;
+  },
+  hero: function (cv, opts) { return mount(cv, opts || {}, true); },
+  info: function (cv) { return cv && cv.__pwt ? cv.__pwt.info : null; },
+  refresh: function () { retheme(true); },
+  legend: function (el) {
+    var sw = function (s, t) { return '<span style="display:inline-flex;align-items:center;gap:6px;margin-right:16px;white-space:nowrap"><span style="display:inline-block;width:18px;height:10px;' + s + '"></span>' + t + '</span>'; };
+    el.innerHTML = sw('border-top:1.5px solid var(--ink);margin-top:5px;height:0;opacity:.6', 'flow (particle trails)') +
+      sw('border-top:1.5px solid var(--accent);margin-top:5px;height:0', 'dye from the boundary layer') +
+      sw('background:var(--warm);opacity:.4;border-radius:3px', 'modelled turbulence') +
+      sw('border-top:2px solid var(--ink);margin-top:5px;height:0', 'shock') +
+      sw('background:var(--accent);opacity:.25;border-radius:3px', 'supersonic pocket') +
+      sw('background:repeating-linear-gradient(135deg,var(--muted) 0 1px,transparent 1px 5px);opacity:.6', 'invalid combination');
+    return el;
+  },
+  _bench: function (n) { // ms per simulated frame for all mounted tiles (raster may be deferred)
+    n = n || 30; var t0 = performance.now(), i, k;
+    for (k = 0; k < n; k++) for (i = 0; i < tiles.length; i++) if (tiles[i].ok) step(tiles[i], 1 / 60);
+    return (performance.now() - t0) / n;
+  },
+  _version: 1
+};
+})();
+
+</script>
+<script>
+(function(){
+  try { PWTiles.mountAll(document); } catch(e) { console.error(e); }
+  try { PWTiles.hero(document.getElementById('hero'), {solver:'ddes', regime:'supersonic', body:'capsule', mach:2.5}); } catch(e) { console.error(e); }
+  try { if (PWTiles.legend) PWTiles.legend(document.getElementById('plegend')); } catch(e) {}
+})();
+</script>

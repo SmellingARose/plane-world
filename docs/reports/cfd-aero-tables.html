@@ -1,0 +1,322 @@
+<title>CFD Aero Tables</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single engineering-note column; diagrams break out wider in their own scroll boxes. */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #18202b; --muted: #5a6575; --rule: #d9dee6;
+  --accent: #1f5fbf; --accent-soft: #e3ecfa; --warm: #b4541f; --warm-soft: #f8e9df; --ok: #2e7d4f; --ok-soft: #e2f2e8;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f141b; --panel: #161d27; --ink: #e6ebf2; --muted: #9aa6b6; --rule: #2a3442;
+  --accent: #6aa3ff; --accent-soft: #1b2b45; --warm: #f0955c; --warm-soft: #3a2518; --ok: #6fcf97; --ok-soft: #173022; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f141b; --panel: #161d27; --ink: #e6ebf2; --muted: #9aa6b6; --rule: #2a3442;
+  --accent: #6aa3ff; --accent-soft: #1b2b45; --warm: #f0955c; --warm-soft: #3a2518; --ok: #6fcf97; --ok-soft: #173022; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--body); }
+.wrap { max-width: 980px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 44px); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 24px; font-weight: 600; margin-top: 44px; }
+h3 { font-size: 17px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.head { display: flex; flex-direction: column; gap: 12px; }
+.verdict { display: grid; grid-template-columns: auto 1fr; gap: 14px 18px; align-items: start; background: var(--ok-soft);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); border-radius: 10px; padding: 18px 20px; margin-top: 26px; }
+.verdict .tag { font: 600 13px/1 var(--mono); color: var(--ok); border: 1.5px solid var(--ok); border-radius: 6px; padding: 7px 9px; white-space: nowrap; }
+.verdict p { min-width: 0; }
+.diagram { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; overflow-x: auto; margin-top: 16px; }
+.diagram svg { display: block; min-width: 860px; width: 100%; height: auto; }
+.diagram text { font-family: var(--body); fill: var(--ink); }
+.diagram .mono { font-family: var(--mono); }
+.diagram .sub { fill: var(--muted); font-size: 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card.pick { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.pill { align-self: flex-start; font: 500 11px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.pill.warm { background: var(--warm-soft); color: var(--warm); }
+ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+li { max-width: 66ch; }
+.tablebox { overflow-x: auto; margin-top: 16px; background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 500 12px/1.3 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+tr.total td { font-weight: 600; background: var(--accent-soft); }
+code { font: 13px var(--mono); background: var(--accent-soft); color: var(--ink); padding: 1px 5px; border-radius: 4px; }
+.note { color: var(--muted); font-size: 13px; }
+.risk { display: grid; grid-template-columns: 8px 1fr; gap: 0 14px; }
+.risk .bar { border-radius: 4px; background: var(--warm); }
+.risk.mid .bar { background: color-mix(in srgb, var(--warm) 55%, var(--rule)); }
+.risk .body { display: flex; flex-direction: column; gap: 4px; padding-block: 2px; min-width: 0; }
+.risks { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.phases { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px; }
+.phase { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.phase .k { font: 600 12px/1 var(--mono); color: var(--accent); }
+.sources { font-size: 13px; color: var(--muted); }
+.sources a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <span class="eyebrow">Plane World · feasibility study · Oct 2026</span>
+    <h1>Bake URANS CFD into lookup tables for the fast physics</h1>
+    <p>The idea: run the Navier–Stokes URANS solver offline on a craft over a sweep of flight conditions, with props spinning and engines firing as toggles, store the forces in tables, and let the fast model read them at 1000 Hz. This page covers how the aerospace industry does the same thing, what it would take here, and what it would cost on your RX 6700 XT.</p>
+  </header>
+
+  <div class="verdict">
+    <span class="tag">FEASIBLE</span>
+    <p><strong>Yes, and it is the standard way flight simulators get CFD-quality aerodynamics.</strong> The removed URANS solver (k-ω SST, last in commit <code>af21473</code>) comes back as an offline <code>pwcli --aero-db</code> generator rather than a live mode, so it can use grids 10–50× finer than the real-time version ever could. A Trainer database is roughly a night of GPU time. Three things decide whether it is worth it: the solver needs local refinement, it is incompressible (no Mach effects or real rocket plumes), and a table belongs to one geometry, so a BUILD edit makes it stale.</p>
+  </div>
+
+  <h2>How it fits together</h2>
+  <p>Offline the expensive part runs once per craft; at flight time the sim only interpolates.</p>
+  <div class="diagram" role="img" aria-label="Pipeline: craft geometry goes into an offline URANS sweep, which writes aero tables, which the runtime reads to give forces to FLY and EVOLVE">
+    <svg viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+      </defs>
+      <!-- zones -->
+      <rect x="12" y="14" width="620" height="332" rx="10" fill="var(--warm-soft)" opacity="0.55"/>
+      <text x="28" y="38" class="mono" font-size="12" fill="var(--warm)" style="fill:var(--warm)">OFFLINE · once per craft · GPU hours</text>
+      <rect x="648" y="14" width="320" height="332" rx="10" fill="var(--accent-soft)" opacity="0.7"/>
+      <text x="664" y="38" class="mono" font-size="12" style="fill:var(--accent)">RUNTIME · every physics step · ~µs</text>
+
+      <!-- craft -->
+      <rect x="30" y="60" width="160" height="96" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+      <text x="44" y="86" font-size="15" font-weight="600">Craft geometry</text>
+      <text x="44" y="108" class="sub">parts → signed-distance</text>
+      <text x="44" y="126" class="sub">grids (already exist)</text>
+      <text x="44" y="144" class="sub">+ prop / engine specs</text>
+
+      <!-- sweep plan -->
+      <rect x="30" y="188" width="160" height="132" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+      <text x="44" y="214" font-size="15" font-weight="600">Sweep plan</text>
+      <text x="44" y="236" class="sub">speed × α × β</text>
+      <text x="44" y="254" class="sub">× throttle (props, plume)</text>
+      <text x="44" y="272" class="sub">× control deflection</text>
+      <text x="44" y="290" class="sub">+ ground height, rates</text>
+      <text x="44" y="308" class="sub">adaptive: refine near stall</text>
+
+      <!-- solver -->
+      <rect x="236" y="60" width="200" height="260" rx="8" fill="var(--panel)" stroke="var(--warm)" stroke-width="1.5"/>
+      <text x="252" y="86" font-size="15" font-weight="600">URANS solver (GPU)</text>
+      <text x="252" y="108" class="sub">restored NS-FV, k-ω SST</text>
+      <text x="252" y="132" font-size="13">per case:</text>
+      <text x="252" y="152" class="sub">· actuator disk at the</text>
+      <text x="252" y="168" class="sub">  prop's thrust & swirl</text>
+      <text x="252" y="188" class="sub">· engine exhaust as a</text>
+      <text x="252" y="204" class="sub">  momentum source</text>
+      <text x="252" y="224" class="sub">· run to settled flow,</text>
+      <text x="252" y="240" class="sub">  average the last part</text>
+      <text x="252" y="262" class="sub">· forced oscillation runs</text>
+      <text x="252" y="278" class="sub">  for damping (p, q, r)</text>
+      <text x="252" y="304" class="mono" font-size="11" style="fill:var(--warm)">needs: local refinement</text>
+
+      <!-- tables -->
+      <rect x="482" y="60" width="134" height="260" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+      <text x="496" y="86" font-size="15" font-weight="600">Aero pack</text>
+      <text x="496" y="106" class="sub">.json per craft</text>
+      <text x="496" y="132" class="mono" font-size="12">base(V,α,β)</text>
+      <text x="496" y="152" class="mono" font-size="12">Δctrl(δ,α)</text>
+      <text x="496" y="172" class="mono" font-size="12">Δpower(Ct,α)</text>
+      <text x="496" y="192" class="mono" font-size="12">Δground(h,α)</text>
+      <text x="496" y="212" class="mono" font-size="12">damping(α)</text>
+      <text x="496" y="240" class="sub">6 coefficients</text>
+      <text x="496" y="256" class="sub">CX CY CZ Cl Cm Cn</text>
+      <text x="496" y="284" class="sub">+ geometry hash</text>
+      <text x="496" y="300" class="sub">(stale on edit)</text>
+
+      <!-- runtime -->
+      <rect x="666" y="60" width="284" height="120" rx="8" fill="var(--panel)" stroke="var(--accent)" stroke-width="1.5"/>
+      <text x="682" y="86" font-size="15" font-weight="600">Table aero model</text>
+      <text x="682" y="108" class="sub">state → V, α, β, throttle, δ, h, p q r</text>
+      <text x="682" y="128" class="sub">multilinear interpolation</text>
+      <text x="682" y="148" class="sub">force = q·S·C (+ damping terms)</text>
+      <text x="682" y="168" class="sub">props / engine thrust unchanged</text>
+
+      <rect x="666" y="198" width="284" height="56" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+      <text x="682" y="222" font-size="14" font-weight="600">Fallback: fast strip model</text>
+      <text x="682" y="242" class="sub">when the pack is stale or out of range</text>
+
+      <rect x="666" y="272" width="134" height="52" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+      <text x="682" y="303" font-size="14" font-weight="600">FLY</text>
+      <rect x="816" y="272" width="134" height="52" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+      <text x="832" y="296" font-size="14" font-weight="600">EVOLVE</text>
+      <text x="832" y="314" class="sub">fixed craft only</text>
+
+      <!-- arrows -->
+      <path d="M190,108 H230" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+      <path d="M190,254 H230" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+      <path d="M436,190 H476" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+      <path d="M616,120 H660" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+      <path d="M808,180 V192" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+      <path d="M733,254 V266" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+      <path d="M883,254 V266" stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+    </svg>
+  </div>
+
+  <h2>What the table is indexed by</h2>
+  <p>A full grid over every variable explodes (millions of cases). The industry answer is a <em>component build-up</em>: one base table plus small increment tables that are added together. Each row below is its own small table.</p>
+  <div class="diagram" role="img" aria-label="Build-up of the aero coefficients: base table plus control, power, ground and damping increments, each with its own axes and point counts">
+    <svg viewBox="0 0 980 300" xmlns="http://www.w3.org/2000/svg">
+      <text x="24" y="34" class="mono" font-size="13">C(state) =</text>
+      <!-- blocks -->
+      <g>
+        <rect x="24" y="52" width="250" height="220" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="40" y="78" font-size="15" font-weight="600">Base · power off</text>
+        <text x="40" y="100" class="mono" font-size="12">speed  4  (15–60 m/s)</text>
+        <text x="40" y="120" class="mono" font-size="12">α     13  (−10…+20°)</text>
+        <text x="40" y="140" class="mono" font-size="12">β      3  (0, 5, 10° ×sym)</text>
+        <!-- mini grid -->
+        <g transform="translate(40,158)">
+          <rect width="200" height="80" fill="var(--panel)" stroke="var(--rule)"/>
+          <g stroke="var(--rule)">
+            <path d="M15.4,0 V80 M30.8,0 V80 M46.2,0 V80 M61.5,0 V80 M76.9,0 V80 M92.3,0 V80 M107.7,0 V80 M123,0 V80 M138.5,0 V80 M153.8,0 V80 M169.2,0 V80 M184.6,0 V80"/>
+            <path d="M0,20 H200 M0,40 H200 M0,60 H200"/>
+          </g>
+          <path d="M0,62 C40,55 90,30 130,18 C150,14 165,22 200,40" stroke="var(--accent)" stroke-width="2" fill="none"/>
+          <circle cx="130" cy="18" r="3.5" fill="var(--warm)"/>
+          <text x="134" y="14" class="mono" font-size="10" style="fill:var(--warm)">stall: refine</text>
+        </g>
+        <text x="40" y="262" class="mono" font-size="12" font-weight="600">156 cases</text>
+      </g>
+      <text x="284" y="168" font-size="24" fill="var(--muted)" style="fill:var(--muted)">+</text>
+      <g>
+        <rect x="306" y="52" width="150" height="220" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+        <text x="320" y="78" font-size="15" font-weight="600">Δ controls</text>
+        <text x="320" y="100" class="mono" font-size="12">3 surfaces</text>
+        <text x="320" y="120" class="mono" font-size="12">δ  4 (±10, ±20°)</text>
+        <text x="320" y="140" class="mono" font-size="12">α  7</text>
+        <text x="320" y="160" class="mono" font-size="12">speed 2</text>
+        <text x="320" y="190" class="sub">increments barely</text>
+        <text x="320" y="206" class="sub">depend on speed at</text>
+        <text x="320" y="222" class="sub">low Mach</text>
+        <text x="320" y="262" class="mono" font-size="12" font-weight="600">168 cases</text>
+      </g>
+      <text x="466" y="168" font-size="24" style="fill:var(--muted)">+</text>
+      <g>
+        <rect x="488" y="52" width="150" height="220" rx="8" fill="var(--warm-soft)" stroke="var(--warm)"/>
+        <text x="502" y="78" font-size="15" font-weight="600">Δ power</text>
+        <text x="502" y="100" class="mono" font-size="12">throttle 2 (½, full)</text>
+        <text x="502" y="120" class="mono" font-size="12">α  13</text>
+        <text x="502" y="140" class="mono" font-size="12">speed 4</text>
+        <text x="502" y="170" class="sub">prop wash on wing</text>
+        <text x="502" y="186" class="sub">and tail; plume base</text>
+        <text x="502" y="202" class="sub">drag (toggle each)</text>
+        <text x="502" y="262" class="mono" font-size="12" font-weight="600">104 cases</text>
+      </g>
+      <text x="648" y="168" font-size="24" style="fill:var(--muted)">+</text>
+      <g>
+        <rect x="670" y="52" width="130" height="220" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+        <text x="684" y="78" font-size="15" font-weight="600">Δ ground</text>
+        <text x="684" y="100" class="mono" font-size="12">h  4 (≤1 span)</text>
+        <text x="684" y="120" class="mono" font-size="12">α  7</text>
+        <text x="684" y="150" class="sub">take-off and</text>
+        <text x="684" y="166" class="sub">landing only</text>
+        <text x="684" y="262" class="mono" font-size="12" font-weight="600">28 cases</text>
+      </g>
+      <text x="810" y="168" font-size="24" style="fill:var(--muted)">+</text>
+      <g>
+        <rect x="832" y="52" width="130" height="220" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+        <text x="846" y="78" font-size="15" font-weight="600">Damping</text>
+        <text x="846" y="100" class="mono" font-size="12">p, q, r  3</text>
+        <text x="846" y="120" class="mono" font-size="12">α  4</text>
+        <text x="846" y="140" class="mono" font-size="12">speed 2</text>
+        <text x="846" y="170" class="sub">forced pitch / roll</text>
+        <text x="846" y="186" class="sub">/ yaw oscillation</text>
+        <text x="846" y="202" class="sub">(each ≈ 3 steady</text>
+        <text x="846" y="218" class="sub">cases of time)</text>
+        <text x="846" y="262" class="mono" font-size="12" font-weight="600">24 runs ≈ 72</text>
+      </g>
+    </svg>
+  </div>
+  <p class="note">Point counts are for the Trainer and are a starting design, not a requirement. Adaptive sampling (add points where the interpolation error is largest, e.g. near stall) has cut CFD case counts by about two thirds in published work.</p>
+
+  <h2>Cost on your RX 6700 XT</h2>
+  <p>Measured on your PC before the solver was removed: 5.8 ms per URANS step on 0.87 M cells (sphere case), so about 6.7 ns per cell per step. The estimate below assumes that scales linearly (multigrid is close to O(N)) and about 3,000 steps for a case to settle.</p>
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Grid</th><th class="num">Cells / chord</th><th class="num">ms / step</th><th class="num">min / case</th><th class="num">Trainer pack (≈528 cases)</th><th class="num">with adaptive sampling</th></tr></thead>
+      <tbody>
+        <tr><td>Real-time draft (removed)</td><td class="num">~2</td><td class="num">1.4</td><td class="num">—</td><td class="num">not trustworthy</td><td class="num">—</td></tr>
+        <tr><td>Offline 5 M cells, refined near the craft</td><td class="num">~24</td><td class="num">≈ 34</td><td class="num">≈ 1.7</td><td class="num">≈ 15 h</td><td class="num">≈ 5–7 h</td></tr>
+        <tr class="total"><td>Offline 20 M cells, refined</td><td class="num">~40</td><td class="num">≈ 134</td><td class="num">≈ 6.7</td><td class="num">≈ 59 h</td><td class="num">≈ 20–25 h</td></tr>
+        <tr><td>Uniform grid, no refinement, 32 cells/chord</td><td class="num">32</td><td class="num">≈ 440</td><td class="num">≈ 22</td><td class="num">≈ 8 days</td><td class="num">≈ 3 days</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note" style="margin-top:10px">20 M cells needs about 2 GB of GPU memory, well inside 12 GB. The uniform-grid row is why local refinement (or a stretched mesh) is a must-have: the Trainer's box at 32 cells/chord is ~65 M uniform cells. Estimates, not measurements; the first job of phase 1 is to time real cases.</p>
+
+  <h2>Two ways to use the tables</h2>
+  <div class="grid2">
+    <div class="card">
+      <span class="pill">Option A</span>
+      <h3>Whole-craft table</h3>
+      <p>The table gives the whole craft's six coefficients; the fast strip model is off for that craft.</p>
+      <ul>
+        <li>Captures every interference effect the CFD saw: downwash on the tail, fuselage blocking, prop wash, plume.</li>
+        <li>Fastest at runtime.</li>
+        <li>Belongs to exactly one geometry. Any BUILD edit, and every EVOLVE design variant, needs a new sweep.</li>
+      </ul>
+    </div>
+    <div class="card pick">
+      <span class="pill">Recommended · A + B</span>
+      <h3>Per-part corrections on the fast model</h3>
+      <p>CFD runs produce correction factors for each wing group and body (lift slope, stall angle, drag, local downwash) rather than whole-craft forces.</p>
+      <ul>
+        <li>The fast model keeps working for edited crafts and EVOLVE designs, with corrections that degrade gracefully.</li>
+        <li>Presets (Trainer, New Shepard, racer quad) also ship a full Option-A pack for best accuracy.</li>
+        <li>Lets you compare fast vs table vs corrected live, so the gain is measurable.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Toggles you asked for</h2>
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Effect</th><th>How the sweep includes it</th><th>Table axis</th></tr></thead>
+      <tbody>
+        <tr><td>Props spinning</td><td>Actuator disk with the prop model's thrust and swirl at that speed and throttle (the URANS solver already had this)</td><td>throttle or thrust coefficient</td></tr>
+        <tr><td>Engine / rocket burning</td><td>Exhaust as a momentum and mass source at the nozzle; captures base-drag change and suction on the aft body, not shock structure</td><td>throttle, plume on / off increment</td></tr>
+        <tr><td>Control surfaces</td><td>Surfaces re-posed in the geometry per case</td><td>deflection per surface</td></tr>
+        <tr><td>Ground effect</td><td>Moving ground plane at height h</td><td>height / span</td></tr>
+        <tr><td>Rotation (damping)</td><td>Forced oscillation, fitted to derivatives</td><td>p, q, r at a few α</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>What could go wrong</h2>
+  <div class="risks">
+    <div class="risk"><div class="bar"></div><div class="body"><h3>The solver is incompressible</h3><p>Fine for the Trainer, drones and boats (well under Mach 0.3). Wrong for New Shepard ascent, jets near Mach 0.8 and any real rocket plume. Options: a Prandtl–Glauert style correction up to about Mach 0.6, or generate those packs with a compressible external solver such as SU2 (LGPL, runs on Windows) or OpenFOAM in WSL.</p></div></div>
+    <div class="risk"><div class="bar"></div><div class="body"><h3>Accuracy has to be earned first</h3><p>At its last check the URANS solver gave a lift slope of 2.16 /rad against 2.60, cube drag 0.87 against 1.05, and a prop disk 31 % fast. A table only repeats the solver's errors faster, so phase 1 has to show convergence (results stop changing as the grid is refined) on known cases before any pack is trusted.</p></div></div>
+    <div class="risk mid"><div class="bar"></div><div class="body"><h3>Tables are quasi-steady</h3><p>They describe settled flow. Dynamic stall, hysteresis and wake lag in fast manoeuvres are missing unless added as lag filters on top, which is what most flight simulators do.</p></div></div>
+    <div class="risk mid"><div class="bar"></div><div class="body"><h3>Packs go stale</h3><p>Every craft edit changes the answer. The pack stores a geometry hash; the sim falls back to the fast model and BUILD shows "aero pack out of date, re-run".</p></div></div>
+  </div>
+
+  <h2>Plan</h2>
+  <div class="phases">
+    <div class="phase"><span class="k">PHASE 1 · ~1 week</span><h3>Restore + validate</h3><p>Bring back the URANS solver from git as <code>pwcli --aero-db</code> only (no live mode), add local refinement, time real cases on the PC, check grid convergence on sphere, wing and flat plate.</p></div>
+    <div class="phase"><span class="k">PHASE 2 · ~1 week</span><h3>Trainer pack</h3><p>Base + controls + power tables for the Trainer, Option-A table aero model in CraftSim, side-by-side with the fast model in FLY.</p></div>
+    <div class="phase"><span class="k">PHASE 3 · ~1 week</span><h3>Per-part corrections</h3><p>Option B for edited crafts and EVOLVE, damping and ground tables, stale-pack handling in BUILD.</p></div>
+    <div class="phase"><span class="k">PHASE 4 · later</span><h3>High speed</h3><p>Compressible packs for New Shepard and jets via SU2 or OpenFOAM, plume increments.</p></div>
+  </div>
+
+  <h2>Sources</h2>
+  <div class="sources stack">
+    <p>Industry practice and structure of CFD aero databases: <a href="https://eprints.soton.ac.uk/351927/1/AIAA-2011-925.pdf">Da Ronch et al., AIAA 2011-925</a>; <a href="https://livrepository.liverpool.ac.uk/5513/">Da Ronch, CFD for stability and control databases</a>; <a href="https://arxiv.org/pdf/2203.13390">multi-fidelity aerodynamics databases (arXiv 2203.13390)</a>.</p>
+    <p>Power effects as increments on a power-off database: <a href="https://bristol.academia.edu/SimoneSimeone">power-off RANS database + blade-element momentum</a>; <a href="https://m-selig.web.engr.illinois.edu/pubs/Selig-2010-AIAA-2010-7638-PropAeroSim.pdf">Selig, real-time prop slipstream modelling (AIAA 2010-7638)</a>; <a href="https://www.icas.org/icas_archive/ICAS2018/data/papers/ICAS2018_0130_paper.pdf">plume-on / plume-off launcher CFD database (ICAS 2018)</a>.</p>
+    <p>Dynamic (damping) derivatives from CFD: <a href="https://ntrs.nasa.gov/api/citations/20040090473/downloads/20040090473.pdf">NASA NTRS 20040090473</a>; <a href="https://docs.flexcompute.com/projects/flow360/en/latest/python/advanced_simulations/aerodynamics/dynamic_derivatives/index.html">Flow360 dynamic derivatives</a>; <a href="https://reference-global.com/article/10.2478/tar-2025-0021">Sznajder 2025 comparison</a>.</p>
+    <p>Adaptive sampling and surrogates: <a href="https://ntrs.nasa.gov/api/citations/20180000581/downloads/20180000581.pdf">NASA greedy kriging (≈67 % fewer models)</a>; <a href="https://eprints.soton.ac.uk/351509">kriging for flight-dynamics tables</a>; <a href="https://mssanz.org.au/modsim2025/files/A06.whitehouse.pdf">error-driven sampling near stall (MODSIM 2025)</a>.</p>
+    <p>Solver numbers: Plane World selftests on the RX 6700 XT, commit <code>af21473</code> (URANS removed in <code>5ee6b14</code>).</p>
+  </div>
+</div>

@@ -1,0 +1,276 @@
+<title>Aero Table Accuracy</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single engineering-note column; diagrams break out wider in their own scroll boxes. */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #18202b; --muted: #5a6575; --rule: #d9dee6;
+  --accent: #1f5fbf; --accent-soft: #e3ecfa; --warm: #b4541f; --warm-soft: #f8e9df; --ok: #2e7d4f; --ok-soft: #e2f2e8;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f141b; --panel: #161d27; --ink: #e6ebf2; --muted: #9aa6b6; --rule: #2a3442;
+  --accent: #6aa3ff; --accent-soft: #1b2b45; --warm: #f0955c; --warm-soft: #3a2518; --ok: #6fcf97; --ok-soft: #173022; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f141b; --panel: #161d27; --ink: #e6ebf2; --muted: #9aa6b6; --rule: #2a3442;
+  --accent: #6aa3ff; --accent-soft: #1b2b45; --warm: #f0955c; --warm-soft: #3a2518; --ok: #6fcf97; --ok-soft: #173022; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--body); }
+.wrap { max-width: 980px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 44px); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 24px; font-weight: 600; margin-top: 44px; }
+h3 { font-size: 17px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.head { display: flex; flex-direction: column; gap: 12px; }
+.verdict { display: grid; grid-template-columns: auto 1fr; gap: 14px 18px; align-items: start; background: var(--ok-soft);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); border-radius: 10px; padding: 18px 20px; margin-top: 26px; }
+.verdict .tag { font: 600 13px/1 var(--mono); color: var(--ok); border: 1.5px solid var(--ok); border-radius: 6px; padding: 7px 9px; white-space: nowrap; }
+.verdict p { min-width: 0; }
+.diagram { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; overflow-x: auto; margin-top: 16px; }
+.diagram svg { display: block; min-width: 860px; width: 100%; height: auto; }
+.diagram text { font-family: var(--body); fill: var(--ink); }
+.diagram .mono { font-family: var(--mono); }
+.diagram .sub { fill: var(--muted); font-size: 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card.pick { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.pill { align-self: flex-start; font: 500 11px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.pill.warm { background: var(--warm-soft); color: var(--warm); }
+ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+li { max-width: 66ch; }
+.tablebox { overflow-x: auto; margin-top: 16px; background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 500 12px/1.3 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+tr.total td { font-weight: 600; background: var(--accent-soft); }
+code { font: 13px var(--mono); background: var(--accent-soft); color: var(--ink); padding: 1px 5px; border-radius: 4px; }
+.note { color: var(--muted); font-size: 13px; }
+.risk { display: grid; grid-template-columns: 8px 1fr; gap: 0 14px; }
+.risk .bar { border-radius: 4px; background: var(--warm); }
+.risk.mid .bar { background: color-mix(in srgb, var(--warm) 55%, var(--rule)); }
+.risk .body { display: flex; flex-direction: column; gap: 4px; padding-block: 2px; min-width: 0; }
+.risks { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+.phases { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 16px; }
+.phase { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.phase .k { font: 600 12px/1 var(--mono); color: var(--accent); }
+.sources { font-size: 13px; color: var(--muted); }
+.sources a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+<style>
+.wrap { max-width: 860px; }
+ol.qs { margin: 16px 0 0; padding-left: 0; list-style: none; counter-reset: q; display: flex; flex-direction: column; gap: 10px; }
+ol.qs li { counter-increment: q; background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px 14px 52px; position: relative; max-width: none; }
+ol.qs li::before { content: counter(q); position: absolute; left: 16px; top: 13px; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font: 600 13px/24px var(--mono); text-align: center; }
+ol.qs .q { font-weight: 600; }
+ol.qs .opts { color: var(--muted); font-size: 14px; margin-top: 4px; }
+td.hl { color: var(--accent); font-weight: 600; }
+td.bad { color: var(--warm); }
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <span class="eyebrow">Plane World · option A · whole-craft CFD tables</span>
+    <h1>Aero table accuracy</h1>
+    <p>You pick one accuracy, such as ±5 %. Half of it goes to table spacing: points are added only where interpolation misses by more than that, mostly near stall. The other half goes to the CFD grid, sized from a measured grid-convergence error. Each pack stores its error map, so FLY can show how accurate the aerodynamics are at any moment.</p>
+  </header>
+
+  <h2>The process</h2>
+  <div class="diagram" role="img" aria-label="Seven steps from craft to flight: geometry, grid, case plan, solve, check, pack, fly">
+    <svg viewBox="0 0 980 190" xmlns="http://www.w3.org/2000/svg">
+      <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
+      <g font-size="13">
+        <rect x="14" y="30" width="120" height="120" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+        <text x="26" y="54" class="mono" font-size="11" style="fill:var(--accent)">1</text><text x="26" y="74" font-weight="600">Geometry</text><text x="26" y="96" class="sub">craft parts,</text><text x="26" y="112" class="sub">surfaces, props,</text><text x="26" y="128" class="sub">engines</text>
+        <rect x="152" y="30" width="120" height="120" rx="8" fill="var(--panel)" stroke="var(--warm)" stroke-width="1.5"/>
+        <text x="164" y="54" class="mono" font-size="11" style="fill:var(--warm)">2 · CHOICE</text><text x="164" y="74" font-weight="600">Grid</text><text x="164" y="96" class="sub">how air around</text><text x="164" y="112" class="sub">the craft is cut</text><text x="164" y="128" class="sub">into cells</text>
+        <rect x="290" y="30" width="120" height="120" rx="8" fill="var(--panel)" stroke="var(--warm)" stroke-width="1.5"/>
+        <text x="302" y="54" class="mono" font-size="11" style="fill:var(--warm)">3 · CHOICE</text><text x="302" y="74" font-weight="600">Case plan</text><text x="302" y="96" class="sub">which flight</text><text x="302" y="112" class="sub">conditions to</text><text x="302" y="128" class="sub">simulate</text>
+        <rect x="428" y="30" width="120" height="120" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+        <text x="440" y="54" class="mono" font-size="11" style="fill:var(--accent)">4</text><text x="440" y="74" font-weight="600">Solve</text><text x="440" y="96" class="sub">URANS per case,</text><text x="440" y="112" class="sub">average forces</text><text x="440" y="128" class="sub">once settled</text>
+        <rect x="566" y="30" width="120" height="120" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+        <text x="578" y="54" class="mono" font-size="11" style="fill:var(--accent)">5</text><text x="578" y="74" font-weight="600">Check</text><text x="578" y="96" class="sub">error vs target;</text><text x="578" y="112" class="sub">too big → more</text><text x="578" y="128" class="sub">cases or cells</text>
+        <rect x="704" y="30" width="120" height="120" rx="8" fill="var(--panel)" stroke="var(--rule)"/>
+        <text x="716" y="54" class="mono" font-size="11" style="fill:var(--accent)">6</text><text x="716" y="74" font-weight="600">Pack</text><text x="716" y="96" class="sub">tables + error</text><text x="716" y="112" class="sub">map + envelope</text><text x="716" y="128" class="sub">+ geometry hash</text>
+        <rect x="842" y="30" width="124" height="120" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+        <text x="854" y="54" class="mono" font-size="11" style="fill:var(--accent)">7</text><text x="854" y="74" font-weight="600">Fly</text><text x="854" y="96" class="sub">lookup each step,</text><text x="854" y="112" class="sub">&lt; 1 µs; fast model</text><text x="854" y="128" class="sub">outside envelope</text>
+      </g>
+      <g stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#a3)">
+        <path d="M134,90 H148"/><path d="M272,90 H286"/><path d="M410,90 H424"/><path d="M548,90 H562"/><path d="M686,90 H700"/><path d="M824,90 H838"/>
+      </g>
+      <path d="M626,150 V172 H350 V154" stroke="var(--warm)" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#a3)"/>
+      <text x="400" y="186" class="sub">loop until the error map meets the setting</text>
+    </svg>
+  </div>
+  <p class="note" style="margin-top:10px">Steps 2 and 3 are the decisions; everything else is automatic. Each has several workable options, compared below.</p>
+
+  <h2>CFD methods in plain words</h2>
+  <div class="card stack">
+    <p><strong>The core problem.</strong> Air flowing over a wing breaks into swirls (turbulence) of every size, from swirls as big as the wing down to ones smaller than a grain of sand. The tiny ones matter most right against the plane's skin: that thin layer is where friction drag comes from, and where the flow peels off the wing when it stalls.</p>
+    <p>Every CFD method chops the air into small cells and calculates what happens in each one. Swirls smaller than a cell can't be seen, so they have to be <em>estimated</em> with a formula. The methods differ in how small the cells are, which decides how much they calculate and how much they estimate.</p>
+  </div>
+  <div class="diagram" role="img" aria-label="For each CFD method, the range of swirl sizes it calculates versus estimates, from the fast model which simulates none, through RANS which estimates all, to DNS which calculates every swirl">
+    <svg viewBox="0 0 980 418" xmlns="http://www.w3.org/2000/svg">
+    <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--warm-soft)"/><path d="M0,0 V6" stroke="var(--warm)" stroke-width="1.2" opacity="0.6"/></pattern></defs>
+    <text x="260" y="34" class="sub" font-size="12">big swirls (wing-sized)</text>
+    <text x="900" y="34" class="sub" font-size="12" text-anchor="end">tiny swirls (sand-grain-sized)</text>
+    <path d="M260,44 H900" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#a4)"/>
+    <text x="16" y="78" font-size="14" font-weight="600">Fast model</text>
+    <text x="16" y="94" class="sub" font-size="11">no air simulated: textbook formulas</text>
+    <rect x="260.0" y="68" width="640.0" height="22" rx="4" fill="url(#hatch)" stroke="var(--warm)" stroke-width="0.8"/>
+    <text x="270" y="83" font-size="11" class="mono" style="fill:var(--warm)">no flow simulation</text>
+    <text x="16" y="122" font-size="14" font-weight="600">Panel method</text>
+    <text x="16" y="138" class="sub" font-size="11">smooth air, no swirls at all</text>
+    <rect x="260.0" y="112" width="640.0" height="22" rx="4" fill="url(#hatch)" stroke="var(--warm)" stroke-width="0.8"/>
+    <text x="270" y="127" font-size="11" class="mono" style="fill:var(--warm)">no flow simulation</text>
+    <text x="16" y="166" font-size="14" font-weight="600">RANS / URANS</text>
+    <text x="16" y="182" class="sub" font-size="11">average flow; every swirl estimated</text>
+    <rect x="260" y="156" width="76.8" height="22" rx="4" fill="var(--accent)"/>
+    <rect x="336.8" y="156" width="563.2" height="22" rx="4" fill="url(#hatch)" stroke="var(--warm)" stroke-width="0.8"/>
+    <text x="16" y="210" font-size="14" font-weight="600">DDES (hybrid)</text>
+    <text x="16" y="226" class="sub" font-size="11">big swirls where flow separates</text>
+    <rect x="260" y="200" width="288.0" height="22" rx="4" fill="var(--accent)"/>
+    <rect x="548.0" y="200" width="352.0" height="22" rx="4" fill="url(#hatch)" stroke="var(--warm)" stroke-width="0.8"/>
+    <text x="16" y="254" font-size="14" font-weight="600">Wall-modelled LES</text>
+    <text x="16" y="270" class="sub" font-size="11">almost all swirls; skin layer estimated</text>
+    <rect x="260" y="244" width="512.0" height="22" rx="4" fill="var(--accent)"/>
+    <rect x="772.0" y="244" width="128.0" height="22" rx="4" fill="url(#hatch)" stroke="var(--warm)" stroke-width="0.8"/>
+    <text x="16" y="298" font-size="14" font-weight="600">Wall-resolved LES</text>
+    <text x="16" y="314" class="sub" font-size="11">all but the tiniest swirls</text>
+    <rect x="260" y="288" width="601.6" height="22" rx="4" fill="var(--accent)"/>
+    <rect x="861.6" y="288" width="38.4" height="22" rx="4" fill="url(#hatch)" stroke="var(--warm)" stroke-width="0.8"/>
+    <text x="16" y="342" font-size="14" font-weight="600">DNS</text>
+    <text x="16" y="358" class="sub" font-size="11">every swirl, nothing estimated</text>
+    <rect x="260" y="332" width="640.0" height="22" rx="4" fill="var(--accent)"/>
+    <rect x="260" y="388" width="16" height="12" rx="3" fill="var(--accent)"/><text x="282" y="399" font-size="12">calculated</text>
+    <rect x="380" y="388" width="16" height="12" rx="3" fill="url(#hatch)" stroke="var(--warm)" stroke-width="0.8"/><text x="402" y="399" font-size="12">estimated by a formula</text>
+    <text x="900" y="399" font-size="12" class="sub" text-anchor="end">further right = slower and more accurate</text>
+    </svg>
+  </div>
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Method</th><th>In plain words</th><th>How good</th><th>Cost</th></tr></thead>
+      <tbody>
+        <tr><td>Fast model (Plane World today)</td><td>Doesn't simulate air. Uses textbook formulas per wing and body.</td><td>Right general behaviour; misses parts affecting each other (wing wake on the tail)</td><td>free, live</td></tr>
+        <tr><td>Panel method</td><td>Treats air as perfectly smooth, with no friction or swirls.</td><td>Good lift, weak drag, no stall</td><td>seconds</td></tr>
+        <tr><td class="hl">RANS (what SU2 mostly does)</td><td>Calculates the average flow and estimates all turbulence, like a forecast that predicts the average wind, not each gust.</td><td class="hl">Within a few percent in normal flight. Wrong at stall, where the swirls are the whole story.</td><td>minutes to an hour per case</td></tr>
+        <tr><td>URANS</td><td>RANS that also steps through time, so it sees slow changes such as a flapping wake.</td><td>A bit better on unsteady flow; still averages small swirls</td><td>a few × RANS</td></tr>
+        <tr><td>DDES (hybrid)</td><td>Estimates only the thin layer on the skin; calculates the big swirls where the flow has separated.</td><td>Gets stall right in tests, about 5 % error</td><td>≈ 10× RANS</td></tr>
+        <tr><td>Wall-modelled LES</td><td>Calculates almost every swirl; estimates only the layer touching the skin.</td><td>Very good, still maturing</td><td>10–100× RANS</td></tr>
+        <tr><td>Wall-resolved LES</td><td>Calculates every swirl but the tiniest.</td><td>Excellent</td><td class="bad">too expensive for a real plane</td></tr>
+        <tr><td>DNS</td><td>Calculates every single swirl; nothing estimated.</td><td>Perfect physics</td><td class="bad">impossible for a real plane</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid2">
+    <div class="card"><span class="pill">Body-fitted grid (SU2)</span><p>Cells are shaped to wrap snugly around the plane, like a wetsuit, so the thin skin layer is captured well. Making the wetsuit is the hard part: it can fail on odd shapes and has to be redone when a flap moves.</p></div>
+    <div class="card"><span class="pill warm">Cartesian grid (our GPU solver)</span><p>Plain cubes, like Minecraft, with the plane dropped in. It never fails and parts can move freely, but the cubes are blocky at the skin, so that layer is estimated. That caps accuracy around ±3–5 %.</p></div>
+  </div>
+  <p class="note" style="margin-top:10px">How the grid is built is a separate choice from which method runs on it: RANS can run on either grid, for example.</p>
+
+  <h2>The ideal way, for precision engineering</h2>
+  <p>No single solver is "the answer". Industry databases (airliners, NASA's SLS) are built as a stack: body-fitted RANS for the attached-flow envelope, scale-resolving simulation where flow separates, and wind-tunnel and flight data to validate it, with every number carrying a measured uncertainty. The table shows why each layer exists.</p>
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Method</th><th>Attached flow (cruise, climb)</th><th>Separated flow (stall, post-stall, base)</th><th>Cost per case</th><th>Automatable for any craft</th><th>Role in the ideal stack</th></tr></thead>
+      <tbody>
+        <tr><td>Fast analytic (ours today)</td><td>trends; misses interference</td><td class="bad">empirical guesses</td><td>µs, live</td><td class="hl">yes</td><td>real-time fallback</td></tr>
+        <tr><td>Panel / vortex lattice + boundary layer</td><td>good lift and moments, weak drag</td><td class="bad">no</td><td>seconds</td><td>yes</td><td>early design sweeps</td></tr>
+        <tr><td>Cartesian immersed-boundary URANS (our GPU solver)</td><td>±3–5 % on lift and moments; poor skin friction</td><td>usable trends</td><td>minutes (GPU)</td><td class="hl">yes, no meshing</td><td>quick packs, Draft / Standard</td></tr>
+        <tr><td class="hl">Body-fitted RANS, grid-converged (SU2, OpenFOAM, FUN3D)</td><td class="hl">industry workhorse: few % on forces, drag converged to ~5 counts within a grid family</td><td class="bad">wrong physics near C<sub>L,max</sub> (High Lift Workshops)</td><td>~0.5–2 h (CPU), estimate</td><td>mostly; needs a clean watertight surface</td><td class="hl">the bulk of the envelope</td></tr>
+        <tr><td>Hybrid RANS–LES (DDES)</td><td>same as RANS</td><td class="hl">C<sub>L,max</sub> within ~5 % in a 2024 study</td><td>≈ 10× RANS</td><td>mostly</td><td>stall and separated points</td></tr>
+        <tr><td>Wall-modelled LES</td><td>good</td><td>most promising near C<sub>L,max</sub>, not yet consistent</td><td>≈ 10–100× RANS; grows ≈ Re<sup>1.1</sup></td><td>research-grade</td><td>hardest points, if budget allows</td></tr>
+        <tr><td>Wall-resolved LES</td><td>excellent</td><td>excellent</td><td>grows ≈ Re<sup>2.7</sup>: impractical at flight Re (~4 M for the Trainer)</td><td>no</td><td>research only</td></tr>
+        <tr><td>DNS</td><td>exact physics</td><td>exact physics</td><td>grows ≈ Re<sup>2.9</sup>: impossible at flight Re</td><td>no</td><td>none</td></tr>
+        <tr><td>Wind tunnel</td><td>reference data</td><td>reference data</td><td>days to weeks per model</td><td>no (physical model)</td><td>validation</td></tr>
+        <tr><td>Flight test</td><td>ground truth</td><td>ground truth</td><td>highest</td><td>no</td><td>final check</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid2">
+    <div class="card"><span class="pill">So why not always SU2?</span><ul>
+      <li><strong>Cost.</strong> A body-fitted RANS case runs on the CPU for roughly an hour, versus minutes on your GPU; a 500–1,000 case pack becomes weeks.</li>
+      <li><strong>Meshing.</strong> Plane World crafts are overlapping primitive parts. Body-fitted meshing needs them merged into one watertight surface first, and it can fail on thin or touching parts. The immersed-boundary grid never fails.</li>
+      <li><strong>Moving parts.</strong> Each control deflection needs a deformed or new mesh; the Cartesian grid just re-stamps the part.</li>
+      <li><strong>It still isn't "ideal" at stall.</strong> RANS, in SU2 or anywhere, gets separated flow wrong; that needs DDES or LES on top.</li>
+    </ul></div>
+    <div class="card pick"><span class="pill">If precision is the goal</span><ul>
+      <li>Body-fitted, grid-converged RANS (k-ω SST) for the attached envelope, with a grid-convergence error on every point.</li>
+      <li>DDES at the separated points: stall, post-stall, rocket base flow.</li>
+      <li>Our GPU solver only for drafts and to plan where the expensive cases go.</li>
+      <li>Any wind-tunnel or flight data you have, to validate and correct the pack.</li>
+      <li>Accept the cost: a precision pack is days to weeks of compute, not a night.</li>
+    </ul></div>
+  </div>
+
+  <h2>What SU2 is</h2>
+  <div class="card stack">
+    <p><strong>SU2</strong> is a free, open-source CFD program started in 2012 at Stanford's Aerospace Design Lab and now developed by an international community. It solves compressible and incompressible RANS with standard turbulence models (Spalart–Allmaras, k-ω SST) on <em>body-fitted</em> meshes, whose cells follow the craft's surface. That lets it resolve the thin boundary layer properly, which is where our solver is weakest. It also does mesh deformation and adjoint shape optimisation.</p>
+    <p>How it would fit: Plane World writes the craft surface and a settings file, an external mesher (e.g. Gmsh) builds the mesh, SU2 runs on the CPU (MPI, all 28 threads), and we read its force files back. Licence is LGPL 2.1, and since we only run it as a separate program it does not affect Plane World's licence. Native builds target Linux and macOS; on your Windows PC it would most likely run under WSL2 (to be confirmed).</p>
+  </div>
+
+  <h2>Grid options</h2>
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Option</th><th>How it works</th><th>Automatic?</th><th>Boundary layer</th><th>Moving surfaces, props</th><th>Fits</th></tr></thead>
+      <tbody>
+        <tr><td>Uniform Cartesian, immersed boundary</td><td>cube cells; craft stamped in; wall function</td><td class="hl">fully</td><td class="bad">modelled, floor ≈ ±3–5 %</td><td>re-stamp per case, free</td><td>Draft</td></tr>
+        <tr><td class="hl">Cartesian + local refinement</td><td>nested boxes, cells halve near the craft</td><td class="hl">fully</td><td>modelled, same floor, far cheaper</td><td>re-stamp per case, free</td><td class="hl">Draft–Fine</td></tr>
+        <tr><td>Cartesian cut-cell</td><td>cells sliced exactly at the surface</td><td>fully</td><td>sharper walls; RANS still hard</td><td>re-cut per case</td><td>Fine</td></tr>
+        <tr><td>Body-fitted prisms + tets (SU2)</td><td>thin cell layers hug the skin, tets outside</td><td>mostly; fails on messy or non-watertight parts</td><td class="hl">resolved, ±1–2 %</td><td>mesh deformation or re-mesh per deflection</td><td>Reference</td></tr>
+        <tr><td>Overset</td><td>overlapping meshes per part</td><td class="bad">hard to automate</td><td>resolved</td><td>excellent</td><td>not planned</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Case options</h2>
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Choice</th><th>Options</th><th>Trade-off</th></tr></thead>
+      <tbody>
+        <tr><td>What to sample</td><td>full grid over all axes · <span class="hl">base table + increments</span> · surrogate (kriging, sparse grid)</td><td>full grid explodes; increments keep tables ≤ 3 axes; surrogates are fewest cases but harder to trust</td></tr>
+        <tr><td>Where to sample</td><td>uniform spacing · <span class="hl">adaptive by surplus</span> · hand-placed</td><td>adaptive puts points at stall and nowhere wasteful</td></tr>
+        <tr><td>How each case runs</td><td>steady RANS · <span class="hl">URANS, time-averaged</span> · auto (steady, fall back to URANS if it won't settle)</td><td>steady is 3–10× faster but fails in separated flow</td></tr>
+        <tr><td>Starting point</td><td>from rest · <span class="hl">warm-start from the nearest finished case</span></td><td>warm starts typically cut settling time several-fold along an α sweep</td></tr>
+        <tr><td>Fidelity mix</td><td>one grid for all · <span class="hl">coarse everywhere + fine at a few anchors (multi-fidelity)</span></td><td>anchors calibrate the coarse cases' error</td></tr>
+        <tr><td>Scheduling</td><td>run now · overnight queue · <span class="hl">background when idle</span>, resumable</td><td>packs can take hours to days</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note" style="margin-top:10px">Highlighted options are the recommended defaults; every option stays selectable per pack.</p>
+
+  <h2>Accuracy settings</h2>
+  <div class="tablebox">
+    <table>
+      <thead><tr><th>Setting</th><th class="num">Total</th><th class="num">CFD grid</th><th class="num">Cases</th><th class="num">GPU time</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Draft</td><td class="num">±10 %</td><td class="num">~2 M cells</td><td class="num">~300</td><td class="num">≈ 3–4 h</td><td>trends</td></tr>
+        <tr><td class="hl">Standard</td><td class="num hl">±5 %</td><td class="num">~5 M</td><td class="num">~530</td><td class="num hl">≈ 15 h</td><td>one night on your PC</td></tr>
+        <tr><td>Fine</td><td class="num">±3 %</td><td class="num">~20 M</td><td class="num">~780</td><td class="num">≈ 3½ days</td><td>at our solver's floor</td></tr>
+        <tr><td>Reference</td><td class="num">±1 %</td><td class="num bad">body-fitted</td><td class="num">~1,100</td><td class="num bad">weeks (CPU)</td><td>SU2 only</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note" style="margin-top:10px">Trainer estimates, scaled from the solver's measured 5.8 ms per step on 0.87 M cells on your RX 6700 XT, before warm starts. Each halving of the error costs about 7–10× more time.</p>
+
+  <h2>Questions for you</h2>
+  <ol class="qs">
+    <li><div class="q">Precision or speed first?</div><div class="opts">precision stack (body-fitted RANS + DDES at stall, days–weeks per pack) · fast GPU packs first, precision stack added later · GPU only</div></li>
+    <li><div class="q">Cases: base table + increments, adaptive sampling, URANS with warm starts as the defaults?</div><div class="opts">yes · something else (say which row to change)</div></li>
+    <li><div class="q">What should "±5 %" mean?</div><div class="opts">percent of each coefficient's full range (recommended) · percent of the local value · absolute, e.g. ΔC_L ≤ 0.02</div></li>
+    <li><div class="q">Which craft first?</div><div class="opts">Trainer (recommended) · Racer quad · New Shepard (needs SU2 above Mach 0.3)</div></li>
+    <li><div class="q">How far should the envelope reach?</div><div class="opts">normal flight (α −10…+25°) · post-stall to ±90° (hover, VTOL, landing rockets) · all directions</div></li>
+    <li><div class="q">Which toggles in version one?</div><div class="opts">props · engine plume · control surfaces · ground effect · rotation damping (each ≈ +15–30 % cases)</div></li>
+    <li><div class="q">After a BUILD edit makes a pack stale?</div><div class="opts">fast model with a warning · keep old pack, marked stale · regenerate in the background</div></li>
+  </ol>
+
+  <p class="sources" style="margin-top:28px">Sources: <a href="https://www.sto.nato.int/publications/STO%20Meeting%20Proceedings/STO-MP-AVT-246/MP-AVT-246-01.pdf">Drag Prediction Workshop overview (NATO AVT-246)</a>; <a href="https://research.chalmers.se/en/publication/542330">DPW-7 RANS grid convergence (Chalmers)</a>; <a href="https://hiliftpw.larc.nasa.gov/Workshop5/Publications/ICAS-2024-1217-rumsey-hilift_finalpaper.pdf">High Lift Prediction Workshop 5 (Rumsey, ICAS 2024)</a>; <a href="https://www.arxiv.org/abs/2406.09840">DDES near C<sub>L,max</sub> (arXiv 2406.09840)</a>; <a href="https://ntrs.nasa.gov/api/citations/20240015729/downloads/LAVA_WMLES_Final.pdf">NASA LAVA wall-modelled LES</a>; <a href="https://arxiv.org/pdf/2010.15307">grid and cost scaling of DNS / LES (Yang &amp; Griffin, arXiv 2010.15307)</a>; <a href="https://arxiv.org/pdf/1911.02924">aerodynamic data fusion (arXiv 1911.02924)</a>; <a href="https://ntrs.nasa.gov/citations/20200002382">SLS ascent aero database (NASA)</a>; <a href="https://stuff.mit.edu/afs/athena.mit.edu/software/su2/su2_v6.0/SU2_AIAA_ASM2013.pdf">SU2 overview, AIAA 2013</a>; <a href="https://episteme.tllm.fr/wiki/SU2_code">SU2 code history and licence</a>; <a href="https://deepblue.lib.umich.edu/bitstream/2027.42/143038/1/6.2017-0357.pdf">overset meshing for aerodynamics (Michigan, AIAA 2017-0357)</a>; <a href="https://arxiv.org/pdf/2502.16518">immersed-boundary RANS accuracy (arXiv 2502.16518)</a>; <a href="https://arxiv.org/pdf/1709.04562">adaptive sampling by hierarchical surplus (arXiv 1709.04562)</a>; <a href="https://www.aoe.vt.edu/content/dam/aoe_vt_edu/people/faculty/cjroy/Publications-Articles/re_jfe-phillips-2014.pdf">grid-convergence error (Phillips &amp; Roy 2014)</a>; report 1: <a href="https://claude.ai/artifact/VBYQaZXtKcGCpAnxXS3KNg">CFD Aero Tables</a>.</p>
+</div>
