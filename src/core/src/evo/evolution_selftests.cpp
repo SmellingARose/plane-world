@@ -489,6 +489,34 @@ void registerRunTests() {
         return ok;
     });
 
+    selftest::add("evolution.switch-craft-rewires", [](Context& c) -> bool {
+        // The quick start names a plane's controls (Ailerons, Elevator, Rudder, Engine). Picking New Shepard in the EVOLVE
+        // craft picker must re-fit that wiring (it used to keep the names: "MLP output 'Ailerons' not found").
+        ExperimentDocument e = presets::make("Neural controller", "Trainer");
+        e.name = "Quick start — hold altitude (Trainer)";
+        CraftRef ref; ref.name = "New Shepard";
+        std::string err; auto rocket = resolveCraft(&ref, "", err);
+        bool ok = expect(c, rocket.has_value(), "New Shepard resolves: " + err);
+        if (!rocket) return false;
+        auto layout = [&](ExperimentContext& ctx) { auto rt = scripts::make(e.scripts); rt->compile(e.scripts, e); ctx.buildLayout(*rt); };
+        try { ExperimentContext ctx(e, *rocket, EvoWorld::flat()); layout(ctx); ok &= expect(c, false, "plane wiring on the rocket should be refused"); }
+        catch (const std::exception&) { ok &= expect(c, true, ""); }
+        const auto notes = switchCraft(e, "New Shepard", *rocket);
+        ok &= expect(c, e.crafts.size() == 1 && e.crafts[0].name == std::optional<std::string>("New Shepard"), "craft switched");
+        ok &= expect(c, e.genome.mlp && e.genome.mlp->outputs.empty(), "outputs fall back to every rocket control");
+        ok &= expect(c, e.genome.mlp && e.genome.mlp->inputs.size() == 9, "flight sensor inputs kept (the rocket gets the standard sensors)");
+        ok &= expect(c, e.name == "Quick start — hold altitude (New Shepard)", "name follows the craft: " + e.name);
+        ok &= expect(c, notes.size() == 1 && notes[0].find("Ailerons") != std::string::npos, "one note naming the dropped outputs");
+        try {
+            ExperimentContext ctx(e, *rocket, EvoWorld::flat()); layout(ctx);
+            ok &= expect(c, ctx.mlpOutputs.size() == 3, "MLP drives engine + both gimbal axes (" + std::to_string(ctx.mlpOutputs.size()) + ")");
+        } catch (const std::exception& ex) { ok &= expect(c, false, std::string("experiment context after switch: ") + ex.what()); }
+        // and back: an "all outputs" list stays valid on any craft, nothing to note
+        ref.name = "Trainer"; auto trainer = resolveCraft(&ref, "", err);
+        ok &= expect(c, trainer && switchCraft(e, "Trainer", *trainer).empty() && e.name == "Quick start — hold altitude (Trainer)", "switching back is clean");
+        return ok;
+    });
+
     selftest::add("evolution.rng-determinism", [](Context& c) -> bool {
         EvoRNG a(42), b(42), cc(43);
         bool ok = true, same = true, diff = false;

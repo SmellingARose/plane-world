@@ -83,9 +83,11 @@ controller or design, then fly the result.
   facing the way the camera looks; *Fly from spawn* uses the spawn point (spawn tool, key `O`). Save keeps a world for
   later sessions.
 - EVOLVE is laid out as steps: **Set up** (① craft & world, ② what evolves, ③ goal picked in plain words —
-  hold altitude, hover, fly to a target, max distance, drive to a point — or your own script, ④ algorithm) and
-  **Train** (⑤ Start training with live generation / best score / time left, ⑥ fly the best with its evolved
-  autopilot, replay it or save it as a craft). The default *Quick start* learns to hold altitude in about ten seconds.
+  hold altitude, hover, fly to a target, max distance, drive to a point, ④ algorithm), **Train** (⑤ Start training
+  with live generation / best score / time left, ⑥ fly the best with its evolved autopilot, replay it or save it as
+  a craft) and **Goal**, where the scoring is built from blocks that read as sentences ("stay near height above
+  ground at 150 m", "end the flight early if it crashes") or written as JavaScript. Switching craft re-wires the
+  controller to that craft's controls. The default *Quick start* learns to hold altitude in about ten seconds.
 - `Ctrl+1`…`4` switch tabs, `Ctrl+K` searches every action, and the welcome tour is in Settings (`Ctrl+,`).
 
 ## Platforms

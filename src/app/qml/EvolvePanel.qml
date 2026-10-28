@@ -2,12 +2,14 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import "EvolveBlocks.js" as Blocks
 import "EvolveGoals.js" as Goals
 
 // EVOLVE inspector as a guided flow. Page "Set up": ① craft & world, ② what evolves (diagram + I/O table),
-// ③ goal (plain-language reward picked from templates, or the script), ④ algorithm (sensible defaults, advanced
+// ③ goal (a preset or your own blocks, summarised in plain language), ④ algorithm (sensible defaults, advanced
 // folded away). Page "Train": ⑤ big Train button with live progress (generation, best score, ETA, chart) and
-// ⑥ results (replay, fly with the autopilot, export). Page "Script": the JavaScript editor for hand-written goals.
+// ⑥ results (replay, fly with the autopilot, export). Page "Goal": the goal as blocks (EvolveBlockEditor) or as the
+// JavaScript they generate, which can also be written by hand.
 // Ctrl+Return starts / pauses from anywhere in the tab; Alt+1..3 switch pages.
 Rectangle {
     id: root
@@ -25,9 +27,14 @@ Rectangle {
     function openFile() { openDlg.open() }
     function saveFileAs() { saveDlg.open() }
 
-    function num(path, def) { const v = ev.get(path); return v === undefined || v === null ? def : v }
+    // read through xp (not ev.get) so bindings follow the document, e.g. after Open
+    function num(path, def) { let v = root.xp; for (const k of path.split(".")) { if (v === undefined || v === null) break; v = v[k] } return v === undefined || v === null ? def : v }
     // palette "EVOLVE: show controller wiring": Set up page, sensors -> controls table open and scrolled into view
     function showWiring() { root.page = 0; ioSection.expanded = true; Qt.callLater(() => { const f = setupScroll.contentItem; f.contentY = Math.max(0, driveLabel.mapToItem(f.contentItem, 0, 0).y - 120) }) }
+    // palette "EVOLVE: show algorithm settings" / "EVOLVE: compare algorithms": Set up page, step ④ explained and in view
+    function showAlgorithm(compare) { root.page = 0; algoSettings.reveal(); Qt.callLater(() => { const f = setupScroll.contentItem; f.contentY = Math.max(0, algoTitle.mapToItem(f.contentItem, 0, 0).y - Theme.s4); if (compare) algoSettings.compare() }) }
+    // palette "EVOLVE: edit the goal …": Goal page, Blocks (0) or JavaScript (1)
+    function showGoal(view) { root.page = 2; goalView.currentIndex = view }
     function train() { root.page = 1; ev.running ? ev.pause() : (ev.hasRun && ev.runState === "idle" ? ev.resume() : ev.start()) }
     readonly property bool hasResults: ev.hasRun && ev.generations.length > 0
     readonly property color stateColor: ev.runState === "running" ? Theme.good : ev.runState === "stopping" || ev.runState === "preparing" ? Theme.warn
@@ -36,16 +43,33 @@ Rectangle {
                                            stopping: qsTr("Stopping…"), finished: qsTr("Finished"), failed: qsTr("Failed") })[ev.runState] || ev.runState
     readonly property string trainLabel: ev.running ? qsTr("Pause") : (ev.hasRun && ev.runState === "idle" ? qsTr("Resume training") : hasResults ? qsTr("Train again") : qsTr("Start training"))
 
-    // goal picker state (controller experiments only; scripted autopilots keep their own script)
+    // goal blocks (EvolveBlocks.js). Presets are for controller experiments; a scripted autopilot's script also flies
+    // the craft, so it stays JavaScript unless you replace it with blocks.
     readonly property bool goalsApply: xp.controller ? (xp.controller.mode === "mlp" || xp.controller.mode === "neat") : true
-    readonly property var goal: Goals.detect(xp.scripts ? xp.scripts.source : "", ev.presetScript("neural"))
-    readonly property var goalDef: goal ? Goals.byId(goal.id) : null
-    function applyGoal(id, param) {
-        const g = Goals.byId(id)
-        if (!g) return
-        const p = param !== undefined ? param : (g.param ? g.param.def : undefined)
-        ev.set("rewardTerms", Goals.terms(g))
-        ev.setScript(g.script ? g.script(p) : ev.presetScript("neural"))
+    readonly property string neuralPreset: ev.presetScript("neural")
+    readonly property var program: Blocks.programFor(xp.scripts, neuralPreset)            // null: hand-written
+    readonly property string blockState: Blocks.state(xp.scripts, neuralPreset)          // "blocks" | "edited" | "script"
+    readonly property var goalDef: blockState === "blocks" ? Blocks.goalOf(program) : null
+    function commitBlocks(p) { ev.setBlocks(p, Blocks.compile(p, neuralPreset), Blocks.terms(p)) }
+    function applyGoal(id) { const g = Blocks.goalById(id); if (g) replaceGoal(g.program()) }
+    // replacing a hand-written or hand-edited script asks first (there is no undo in EVOLVE)
+    function replaceGoal(p) { if (blockState === "blocks") commitBlocks(p); else { replaceDlg.program = p; replaceDlg.open() } }
+    MessageDialog {
+        id: replaceDlg
+        property var program
+        title: qsTr("Replace the script?")
+        text: root.blockState === "edited" ? qsTr("Your hand edits to the JavaScript will be lost.") : qsTr("The hand-written JavaScript goal will be replaced by blocks.")
+        buttons: MessageDialog.Ok | MessageDialog.Cancel
+        onAccepted: root.commitBlocks(program)
+    }
+    function brainText() {
+        const c = xp.controller ? xp.controller.mode : "mlp"
+        if (c === "neat") return qsTr("NEAT controller")
+        if (c === "script") return qsTr("script control()")
+        if (c === "none") return qsTr("no controller")
+        const used = (l) => (l || []).filter(x => x.used).length
+        const hidden = xp.genome && xp.genome.mlp ? xp.genome.mlp.hidden.reduce((a, b) => a + b, 0) : 0
+        return qsTr("controller\n%1 neurons").arg(hidden)
     }
 
     // time estimate: seconds per generation × generations left
@@ -140,11 +164,11 @@ Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
             fill: true
-            model: [qsTr("Set up"), qsTr("Train"), qsTr("Script")]
+            model: [qsTr("Set up"), qsTr("Train"), qsTr("Goal")]
             tips: [qsTr("Steps 1–4: craft, what evolves, goal, algorithm   Alt+1"), qsTr("Steps 5–6: run it and use the result   Alt+2"),
-                   qsTr("Advanced: the JavaScript that scores each flight   Alt+3")]
-            badges: ["", ev.running ? "●" : (ev.generations.length > 0 ? String(ev.generations.length) : ""), ev.scriptErrorLine > 0 ? "●" : ""]
-            tints: ({ "Set up": Theme.tabTint["EVOLVE"], "Train": Theme.tabTint["EVOLVE"], "Script": Theme.tabTint["EVOLVE"] })
+                   qsTr("How each flight is scored, as blocks or JavaScript   Alt+3")]
+            badges: ["", ev.running ? "●" : (ev.generations.length > 0 ? String(ev.generations.length) : ""), ev.scriptErrorLine > 0 || (root.program && Blocks.problems(root.program).length > 0) ? "●" : ""]
+            tints: ({ "Set up": Theme.tabTint["EVOLVE"], "Train": Theme.tabTint["EVOLVE"], "Goal": Theme.tabTint["EVOLVE"] })
         }
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.separator }
 
@@ -171,6 +195,7 @@ Rectangle {
                         Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.small
                             text: qsTr("Evolution tries many variations of a controller or a craft, scores each flight, keeps the best and varies them again — round after round — until they fly well. Pick the four settings below, then press Train.") }
                         Label { Layout.fillWidth: true; font.pixelSize: Theme.caption; color: Theme.accent
+                            linkColor: Theme.link
                             text: glossary.visible ? qsTr("<a href='#'>Hide the word list</a>") : qsTr("<a href='#'>What do fitness, generation, population… mean?</a>")
                             onLinkActivated: glossary.visible = !glossary.visible }
                         GridLayout {
@@ -202,12 +227,31 @@ Rectangle {
                                 Layout.fillWidth: true
                                 model: ev.crafts
                                 currentIndex: ev.crafts.indexOf(ev.io.craft)
-                                onActivated: ev.set("crafts", [{ name: currentText }])
+                                onActivated: ev.setCraft(currentText)
                             }
                         }
                         Label { visible: ev.io.error !== undefined && ev.io.error !== ""; text: ev.io.error || ""; color: Theme.bad; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: Theme.caption }
+                        Button { visible: !!ev.io.miswired; text: qsTr("Re-wire for %1").arg(ev.io.craft); onClicked: ev.setCraft(ev.io.craft)
+                            ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Drop the missing sensors and controls; the controller moves every control this craft has") }
                         Label { text: qsTr("Training worlds"); color: Theme.textMuted; font.pixelSize: Theme.small; Layout.topMargin: Theme.s1 }
                         TrainingWorlds { Layout.fillWidth: true }
+                        Label { text: qsTr("Each flight"); color: Theme.textMuted; font.pixelSize: Theme.small; Layout.topMargin: Theme.s1 }
+                        PwPropertyRow { label: qsTr("Flight length"); tip: Goals.glossary[6][1]; Layout.fillWidth: true
+                            PwNumberField { value: num("episode.duration", 30); suffix: " s"; decimals: 1; step: 1; minimum: 0.5; onCommitted: (v) => ev.set("episode.duration", v) } }
+                        PwPropertyRow { label: qsTr("Start"); tip: qsTr("Runway: from a standstill on the ground. Air: already flying at the height and speed below."); Layout.fillWidth: true
+                            PwSegmented { Layout.fillWidth: true
+                                readonly property var keys: ["runway", "air", "custom"]
+                                model: [{ text: qsTr("Runway"), tip: qsTr("Standing on the ground") }, { text: qsTr("In the air"), tip: qsTr("Already flying") }, { text: qsTr("Custom"), tip: qsTr("Position from the experiment") }]
+                                currentIndex: Math.max(0, keys.indexOf(num("episode.spawn.mode", "runway")))
+                                onActivated: (i) => ev.set("episode.spawn.mode", keys[i]) } }
+                        RowLayout {
+                            visible: num("episode.spawn.mode", "runway") !== "runway"
+                            Layout.fillWidth: true
+                            PwPropertyRow { label: qsTr("Height"); Layout.fillWidth: true
+                                PwNumberField { value: num("episode.spawn.altitudeAGL", 0); suffix: " m"; decimals: 0; step: 10; onCommitted: (v) => ev.set("episode.spawn.altitudeAGL", v) } }
+                        }
+                        PwPropertyRow { visible: num("episode.spawn.mode", "runway") !== "runway"; label: qsTr("Speed"); Layout.fillWidth: true
+                            PwNumberField { value: num("episode.spawn.speed", 0); suffix: " m/s"; decimals: 1; step: 1; onCommitted: (v) => ev.set("episode.spawn.speed", v) } }
                         PwSection {
                             title: qsTr("World details & aero model")
                             expanded: false
@@ -359,52 +403,55 @@ Rectangle {
                     }
 
                     // ---------------- ③ goal
-                    StepTitle { number: 3; title: qsTr("Goal"); summary: root.goalDef ? root.goalDef.title : qsTr("custom script") }
+                    StepTitle { number: 3; title: qsTr("Goal"); summary: root.goalDef ? root.goalDef.title : root.blockState === "script" ? qsTr("hand-written script") : qsTr("your own blocks") }
                     ColumnLayout {
                         Layout.fillWidth: true; Layout.leftMargin: Theme.s4; Layout.rightMargin: Theme.s4
                         spacing: Theme.s2
                         Hint { text: qsTr("The goal turns each flight into a score (its fitness). Evolution keeps whatever scores highest, so the goal decides what “flying well” means.") }
-                        PwPropertyRow { visible: root.goalsApply; label: qsTr("Goal"); Layout.fillWidth: true
+                        PwPropertyRow { visible: root.goalsApply || root.blockState !== "script"; label: qsTr("Goal"); Layout.fillWidth: true
                             ComboBox {
                                 Layout.fillWidth: true
-                                model: Goals.goals.map(g => g.title).concat([qsTr("Custom (edit the script)")])
-                                currentIndex: root.goalDef ? Goals.goals.indexOf(root.goalDef) : Goals.goals.length
-                                onActivated: (i) => i < Goals.goals.length ? root.applyGoal(Goals.goals[i].id) : root.page = 2
+                                readonly property bool own: !root.goalDef
+                                model: Blocks.goals.map(g => g.title).concat(own ? [root.blockState === "script" ? qsTr("Hand-written script") : qsTr("Your own blocks")] : [])
+                                currentIndex: root.goalDef ? Blocks.goals.indexOf(root.goalDef) : Blocks.goals.length
+                                onActivated: (i) => { if (i < Blocks.goals.length) root.applyGoal(Blocks.goals[i].id) }
                             }
                         }
-                        PwPropertyRow { visible: root.goalsApply && !!root.goalDef && !!root.goalDef.param; label: root.goalDef && root.goalDef.param ? root.goalDef.param.label : ""; Layout.fillWidth: true
+                        PwPropertyRow { visible: !!root.goalDef && !!root.goalDef.param; label: root.goalDef && root.goalDef.param ? root.goalDef.param.label : ""; Layout.fillWidth: true
                             PwNumberField {
-                                value: root.goal && root.goal.param !== undefined ? root.goal.param : (root.goalDef && root.goalDef.param ? root.goalDef.param.def : 0)
-                                suffix: root.goalDef && root.goalDef.param ? " " + root.goalDef.param.unit : ""
+                                value: root.goalDef && root.goalDef.param ? Number(root.goalDef.param.get(root.program)) : 0
+                                suffix: root.goalDef && root.goalDef.param ? root.goalDef.param.unit : ""
                                 decimals: 0; step: 10
                                 minimum: root.goalDef && root.goalDef.param ? root.goalDef.param.min : 0
-                                maximum: root.goalDef && root.goalDef.param ? root.goalDef.param.max : 1e6
-                                onCommitted: (v) => root.applyGoal(root.goalDef.id, Math.round(v))
+                                onCommitted: (v) => root.commitBlocks(root.goalDef.program(Math.round(v)))
                             }
                         }
                         PwCard {
                             Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.small
                                 text: root.goalDef ? root.goalDef.blurb
-                                     : (xp.genome && xp.genome.preset === "design" ? qsTr("An autopilot script flies every design; designs that climb well for their weight score highest.")
-                                                                                 : qsTr("A hand-written goal: see the Script page for exactly how it scores.")) }
+                                     : root.blockState === "blocks" ? qsTr("Your own goal, built from blocks.")
+                                     : root.blockState === "edited" ? qsTr("Built from blocks, then edited by hand: training uses the edited JavaScript.")
+                                     : xp.genome && xp.genome.preset === "design" ? qsTr("An autopilot script flies every design; designs that climb well for their weight score highest.")
+                                     : qsTr("A hand-written goal: the Goal page shows exactly how it scores.") }
                             Label { text: qsTr("HOW IT IS SCORED"); color: Theme.textFaint; font.pixelSize: Theme.micro; font.letterSpacing: Theme.sectionTracking; Layout.topMargin: Theme.s1 }
                             Repeater {
-                                model: root.goalDef ? root.goalDef.terms : (xp.rewardTerms || []).map(t => ({ name: t, plain: Goals.designTerms[t] || "" }))
+                                model: root.blockState === "blocks" ? Blocks.describe(root.program) : (xp.rewardTerms || []).map(t => ({ name: t, plain: Goals.designTerms[t] || "" }))
                                 delegate: RowLayout {
                                     required property var modelData
                                     Layout.fillWidth: true
                                     spacing: Theme.s2
-                                    Label { text: modelData.name; font.family: Theme.mono; font.pixelSize: Theme.caption; color: Theme.tabTint["EVOLVE"]; Layout.preferredWidth: 72; Layout.alignment: Qt.AlignTop }
+                                    Label { text: modelData.name; font.family: Theme.mono; font.pixelSize: Theme.caption; color: Theme.tabTint["EVOLVE"]; Layout.preferredWidth: 72; Layout.alignment: Qt.AlignTop; elide: Text.ElideRight }
                                     Label { text: modelData.plain || qsTr("defined in the script"); Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.textMuted }
                                 }
                             }
                             Label { Layout.fillWidth: true; font.pixelSize: Theme.caption; color: Theme.accent
-                                text: qsTr("<a href='#'>See or edit the script</a>"); onLinkActivated: root.page = 2 }
+                                linkColor: Theme.link
+                                text: root.program ? qsTr("<a href='#'>Change it with blocks</a>") : qsTr("<a href='#'>See or edit the script</a>"); onLinkActivated: root.page = 2 }
                         }
                     }
 
                     // ---------------- ④ algorithm
-                    StepTitle { number: 4; title: qsTr("Algorithm"); summary: (xp.algorithm ? xp.algorithm.kind : "") + " · " + qsTr("%1 × %2").arg(xp.population || 0).arg(xp.generations > 0 ? xp.generations : "∞") }
+                    StepTitle { id: algoTitle; number: 4; title: qsTr("Algorithm"); summary: algoSettings.displayName + " · " + qsTr("%1 × %2").arg(xp.population || 0).arg(xp.generations > 0 ? xp.generations : "∞") }
                     ColumnLayout {
                         Layout.fillWidth: true; Layout.leftMargin: Theme.s4; Layout.rightMargin: Theme.s4
                         spacing: Theme.s2
@@ -413,48 +460,14 @@ Rectangle {
                             PwNumberField { value: xp.population || 64; decimals: 0; step: 4; minimum: 2; maximum: 100000; tip: Goals.glossary[2][1]; onCommitted: (v) => ev.set("population", Math.round(v)) } }
                         PwPropertyRow { label: qsTr("Generations"); tip: Goals.glossary[3][1] + qsTr(" 0 = until you stop it."); Layout.fillWidth: true
                             PwNumberField { value: xp.generations || 0; decimals: 0; step: 10; minimum: 0; tip: qsTr("0 = until stopped"); onCommitted: (v) => ev.set("generations", Math.round(v)) } }
-                        PwPropertyRow { label: qsTr("Flight length"); tip: Goals.glossary[6][1]; Layout.fillWidth: true
-                            PwNumberField { value: num("episode.duration", 30); suffix: " s"; decimals: 1; step: 1; minimum: 0.5; onCommitted: (v) => ev.set("episode.duration", v) } }
-                        PwPropertyRow { label: qsTr("Start"); tip: qsTr("Runway: from a standstill on the ground. Air: already flying at the height and speed below."); Layout.fillWidth: true
-                            PwSegmented { Layout.fillWidth: true
-                                readonly property var keys: ["runway", "air", "custom"]
-                                model: [{ text: qsTr("Runway"), tip: qsTr("Standing on the ground") }, { text: qsTr("In the air"), tip: qsTr("Already flying") }, { text: qsTr("Custom"), tip: qsTr("Position from the experiment") }]
-                                currentIndex: Math.max(0, keys.indexOf(num("episode.spawn.mode", "runway")))
-                                onActivated: (i) => ev.set("episode.spawn.mode", keys[i]) } }
-                        RowLayout {
-                            visible: num("episode.spawn.mode", "runway") !== "runway"
-                            Layout.fillWidth: true
-                            PwPropertyRow { label: qsTr("Height"); Layout.fillWidth: true
-                                PwNumberField { value: num("episode.spawn.altitudeAGL", 0); suffix: " m"; decimals: 0; step: 10; onCommitted: (v) => ev.set("episode.spawn.altitudeAGL", v) } }
-                        }
-                        PwPropertyRow { visible: num("episode.spawn.mode", "runway") !== "runway"; label: qsTr("Speed"); Layout.fillWidth: true
-                            PwNumberField { value: num("episode.spawn.speed", 0); suffix: " m/s"; decimals: 1; step: 1; onCommitted: (v) => ev.set("episode.spawn.speed", v) } }
+
+                        // optimiser cards (ⓘ: how it works, pros / cons), "Compare all", and a folded "Tune …" section
+                        AlgorithmSettings { id: algoSettings }
 
                         PwSection {
                             title: qsTr("Advanced")
-                            hint: qsTr("Optimiser, randomness, checkpoints and episode details")
+                            hint: qsTr("Randomness, threads, checkpoints and episode details")
                             expanded: false
-                            PwPropertyRow { label: qsTr("Optimiser"); tip: qsTr("sep-cmaes adapts its own step size (good default for networks); ga suits craft dimensions"); Layout.fillWidth: true
-                                ComboBox { Layout.fillWidth: true; model: ev.algorithmKinds; currentIndex: model.indexOf(xp.algorithm ? xp.algorithm.kind : "simple-es")
-                                    onActivated: ev.set("algorithm.kind", currentText) } }
-                            Repeater {
-                                model: ev.algorithmSchema(xp.algorithm ? xp.algorithm.kind : "")
-                                delegate: PwPropertyRow {
-                                    id: prow
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    label: modelData.key
-                                    tip: modelData.help
-                                    readonly property var cur: (xp.algorithm && xp.algorithm[modelData.key] !== undefined) ? xp.algorithm[modelData.key] : modelData["default"]
-                                    Loader {
-                                        Layout.fillWidth: true
-                                        sourceComponent: modelData.type === "choice" ? choiceC : modelData.type === "flag" ? flagC : numC
-                                        Component { id: numC; PwNumberField { value: Number(prow.cur); decimals: 4; step: 0.01; tip: prow.modelData.help; onCommitted: (v) => ev.set("algorithm." + prow.modelData.key, v) } }
-                                        Component { id: choiceC; ComboBox { model: prow.modelData.options; currentIndex: Math.max(0, model.indexOf(String(prow.cur))); onActivated: ev.set("algorithm." + prow.modelData.key, currentText) } }
-                                        Component { id: flagC; Switch { checked: !!prow.cur && prow.cur !== 0; onToggled: ev.set("algorithm." + prow.modelData.key, checked) } }
-                                    }
-                                }
-                            }
                             PwPropertyRow { label: qsTr("Seed"); tip: qsTr("Same seed + same settings = same result"); Layout.fillWidth: true
                                 PwNumberField { value: xp.seed || 1; decimals: 0; step: 1; minimum: 0; onCommitted: (v) => ev.set("seed", Math.round(v)) } }
                             PwPropertyRow { label: qsTr("Workers"); tip: qsTr("CPU threads; 0 = all cores"); Layout.fillWidth: true
@@ -732,71 +745,159 @@ Rectangle {
                 }
             }
 
-            // ======================================================== SCRIPT (advanced)
+            // ======================================================== GOAL (blocks / JavaScript)
             ColumnLayout {
                 spacing: Theme.s2
-                Hint {
+                PwSegmented {
+                    id: goalView
                     Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3; Layout.topMargin: Theme.s2
-                    text: qsTr("reward() scores every control tick, fitness() totals a flight, terminate() can end it early. The goal picker in Set up writes this for you; anything you change here is kept.")
+                    model: [{ text: qsTr("Blocks"), tip: qsTr("Build the goal from blocks") }, { text: qsTr("JavaScript"), tip: qsTr("The script the blocks generate, or your own") }]
+                    currentIndex: root.blockState === "script" && !root.goalsApply ? 1 : 0
                 }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
-                    Repeater {
-                        model: jsTools.definedHooks(xp.scripts ? xp.scripts.source : "")
-                        Rectangle {
-                            required property string modelData
-                            radius: height / 2; color: Theme.accentSoft
-                            implicitWidth: hl.implicitWidth + Theme.s3; implicitHeight: hl.implicitHeight + 4
-                            Text { id: hl; anchors.centerIn: parent; text: modelData; color: Theme.text; font.pixelSize: Theme.micro; font.family: Theme.mono }
-                        }
-                    }
-                    Item { Layout.fillWidth: true }
-                    ToolButton { text: "⤢"; onClicked: root.openEditorWindow(); ToolTip.visible: hovered; ToolTip.text: qsTr("Open in a large editor  %1").arg(Theme.shortcutText("Ctrl+Shift+E")) }
-                }
-                EvolveCodeEditor {
-                    id: editor
+                StackLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
-                    text: xp.scripts ? xp.scripts.source : ""
-                    errorLine: ev.scriptErrorLine
-                    errorMessage: ev.scriptMessage
-                    onEdited: (t) => ev.setScript(t)
-                    onCheckRequested: ev.checkScript()
-                    Connections {
-                        target: EvolveModel
-                        function onExperimentChanged() { const s = EvolveModel.experiment.scripts ? EvolveModel.experiment.scripts.source : ""; if (s !== editor.text) editor.text = s }
+                    Layout.minimumWidth: 0
+                    Layout.preferredWidth: 0
+                    currentIndex: goalView.currentIndex
+
+                    // ---------------- blocks
+                    ScrollView {
+                        id: blocksScroll
+                        contentWidth: availableWidth
+                        clip: true
+                        ColumnLayout {
+                            width: blocksScroll.availableWidth
+                            spacing: Theme.s2
+                            RowLayout {
+                                Layout.fillWidth: true; Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
+                                Label { Layout.fillWidth: true; elide: Text.ElideRight; font.weight: Font.DemiBold
+                                    text: root.goalDef ? root.goalDef.title : root.blockState === "script" ? qsTr("Hand-written script") : root.blockState === "edited" ? qsTr("Blocks (edited by hand)") : qsTr("Your own blocks") }
+                                Button { text: qsTr("Start from…"); onClicked: startMenu.popup(); visible: root.goalsApply || root.blockState !== "script"
+                                    ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Replace the goal with a preset (its blocks are a good starting point)")
+                                    Menu { id: startMenu
+                                        Repeater { model: Blocks.goals; MenuItem { required property var modelData; text: modelData.title; onTriggered: root.applyGoal(modelData.id) } }
+                                        MenuSeparator {}
+                                        MenuItem { text: qsTr("Empty goal"); onTriggered: root.replaceGoal(Blocks.newProgram()) } } }
+                            }
+                            PwCard {
+                                Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
+                                visible: root.blockState === "edited"
+                                color: Theme.alpha(Theme.warn, 0.12); border.color: Theme.alpha(Theme.warn, 0.4)
+                                Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.small
+                                    text: qsTr("The JavaScript was edited by hand, so training uses that, not these blocks (shown faded below).") }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Button { text: qsTr("Discard my edits"); onClicked: root.commitBlocks(root.program)
+                                        ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Go back to the script these blocks write") }
+                                    Button { text: qsTr("Keep my edits"); onClicked: ev.setBlocks(null, xp.scripts.source, xp.rewardTerms || [])
+                                        ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Forget the blocks; the goal becomes a hand-written script") }
+                                }
+                            }
+                            PwEmptyState {
+                                Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
+                                visible: root.blockState === "script"
+                                title: ""
+                                text: root.goalsApply ? qsTr("Blocks can't read any code, so this goal stays JavaScript. “Start from…” builds a new goal from blocks instead, replacing this script.")
+                                                      : qsTr("This script also flies the craft, so it stays JavaScript.")
+                            }
+                            Button {
+                                Layout.leftMargin: Theme.s3
+                                visible: root.blockState === "script"
+                                highlighted: true
+                                text: qsTr("Open the JavaScript")
+                                onClicked: goalView.currentIndex = 1
+                            }
+                            EvolveBlockEditor {
+                                Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 0; Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
+                                visible: root.blockState !== "script"
+                                program: root.program || Blocks.newProgram()
+                                locked: root.blockState === "edited"
+                                io: ev.io
+                                brain: root.brainText()
+                                onEdited: (p) => root.commitBlocks(p)
+                                onWiringRequested: root.showWiring()
+                                onRewireRequested: ev.setCraft(ev.io.craft)
+                            }
+                            Item { height: Theme.s4 }
+                        }
+                    }
+
+                    // ---------------- javascript
+                    ColumnLayout {
+                        Layout.minimumWidth: 0
+                        Layout.preferredWidth: 0
+                        spacing: Theme.s2
+                        Hint {
+                            Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3; Layout.topMargin: Theme.s2
+                            text: root.blockState === "script" ? qsTr("reward() scores every control tick, fitness() totals a flight, terminate() can end it early.")
+                                  : root.blockState === "edited" ? qsTr("Edited by hand: training uses this script, not the blocks. The Blocks view can go back to them.")
+                                  : qsTr("Generated from the blocks. Editing it here makes it a hand-written script (the blocks are kept, so you can go back).")
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: Theme.s1
+                                Repeater {
+                                    model: jsTools.definedHooks(xp.scripts ? xp.scripts.source : "")
+                                    Rectangle {
+                                        required property string modelData
+                                        radius: height / 2; color: Theme.accentSoft
+                                        implicitWidth: hl.implicitWidth + Theme.s3; implicitHeight: hl.implicitHeight + 4
+                                        Text { id: hl; anchors.centerIn: parent; text: modelData; color: Theme.text; font.pixelSize: Theme.micro; font.family: Theme.mono }
+                                    }
+                                }
+                            }
+                            ToolButton { text: "⤢"; onClicked: root.openEditorWindow(); ToolTip.visible: hovered; ToolTip.text: qsTr("Open in a large editor  %1").arg(Theme.shortcutText("Ctrl+Shift+E")) }
+                        }
+                        EvolveCodeEditor {
+                            id: editor
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
+                            text: xp.scripts ? xp.scripts.source : ""
+                            errorLine: ev.scriptErrorLine
+                            errorMessage: ev.scriptMessage
+                            onEdited: (t) => ev.setScript(t)
+                            onCheckRequested: ev.checkScript()
+                            Connections {
+                                target: EvolveModel
+                                function onExperimentChanged() { const s = EvolveModel.experiment.scripts ? EvolveModel.experiment.scripts.source : ""; if (s !== editor.text) editor.text = s }
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
+                            Button { text: ev.checking ? qsTr("Checking…") : qsTr("Check"); enabled: !ev.checking; onClicked: ev.checkScript()
+                                ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.shortcutText("Ctrl+Return") + qsTr(" in the editor") }
+                            Button { text: qsTr("Start from…"); onClicked: tplMenu.popup()
+                                Menu { id: tplMenu
+                                    Repeater { model: Blocks.goals; MenuItem { required property var modelData; text: qsTr("Goal: %1").arg(modelData.title); onTriggered: root.applyGoal(modelData.id) } }
+                                    MenuSeparator {}
+                                    MenuItem { text: qsTr("Craft design preset (autopilot)"); onTriggered: ev.setScript(ev.presetScript("design")) } } }
+                            Item { Layout.fillWidth: true }
+                            Label { text: qsTr("Budget"); color: Theme.textMuted; font.pixelSize: Theme.caption }
+                            PwNumberField { Layout.preferredWidth: 64; value: num("scripts.callBudgetMs", 5); suffix: " ms"; decimals: 1; step: 1; minimum: 0.5; tip: qsTr("Time limit per script call"); onCommitted: (v) => ev.set("scripts.callBudgetMs", v) }
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3; Layout.bottomMargin: Theme.s3
+                            visible: ev.scriptMessage !== ""
+                            text: ev.scriptMessage + (ev.scriptErrorLine > 0 ? "   — " + qsTr("click to jump") : "")
+                            color: ev.scriptOk ? Theme.good : Theme.bad
+                            wrapMode: Text.Wrap; font.family: Theme.mono; font.pixelSize: Theme.caption
+                            MouseArea { anchors.fill: parent; enabled: ev.scriptErrorLine > 0; cursorShape: Qt.PointingHandCursor; onClicked: editor.goToLine(ev.scriptErrorLine) }
+                        }
+                        Label { Layout.leftMargin: Theme.s3; Layout.bottomMargin: Theme.s2; text: qsTr("Engine: %1").arg(ev.engineName); color: Theme.textFaint; font.pixelSize: Theme.micro }
                     }
                 }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
-                    Button { text: ev.checking ? qsTr("Checking…") : qsTr("Check"); enabled: !ev.checking; onClicked: ev.checkScript()
-                        ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.shortcutText("Ctrl+Return") + qsTr(" in the editor") }
-                    Button { text: qsTr("Templates"); onClicked: tplMenu.popup()
-                        Menu { id: tplMenu
-                            Repeater { model: Goals.goals; MenuItem { required property var modelData; text: qsTr("Goal: %1").arg(modelData.title); onTriggered: root.applyGoal(modelData.id) } }
-                            MenuSeparator {}
-                            MenuItem { text: qsTr("Craft design preset (autopilot)"); onTriggered: ev.setScript(ev.presetScript("design")) } } }
-                    Item { Layout.fillWidth: true }
-                    Label { text: qsTr("Budget"); color: Theme.textMuted; font.pixelSize: Theme.caption }
-                    PwNumberField { Layout.preferredWidth: 64; value: num("scripts.callBudgetMs", 5); suffix: " ms"; decimals: 1; step: 1; minimum: 0.5; tip: qsTr("Time limit per script call"); onCommitted: (v) => ev.set("scripts.callBudgetMs", v) }
-                }
-                Label {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3; Layout.bottomMargin: Theme.s3
-                    visible: ev.scriptMessage !== ""
-                    text: ev.scriptMessage + (ev.scriptErrorLine > 0 ? "   — " + qsTr("click to jump") : "")
-                    color: ev.scriptOk ? Theme.good : Theme.bad
-                    wrapMode: Text.Wrap; font.family: Theme.mono; font.pixelSize: Theme.caption
-                    MouseArea { anchors.fill: parent; enabled: ev.scriptErrorLine > 0; cursorShape: Qt.PointingHandCursor; onClicked: editor.goToLine(ev.scriptErrorLine) }
-                }
-                Label { Layout.leftMargin: Theme.s3; Layout.bottomMargin: Theme.s2; text: qsTr("Engine: %1").arg(ev.engineName); color: Theme.textFaint; font.pixelSize: Theme.micro }
             }
         }
 
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.separator; visible: ev.status !== "" }
-        Label { Layout.fillWidth: true; Layout.margins: Theme.s3; visible: ev.status !== ""; text: ev.status; color: Theme.textMuted; font.pixelSize: Theme.caption; elide: Text.ElideRight }
+        Label { Layout.fillWidth: true; Layout.margins: Theme.s3; visible: ev.status !== ""; text: ev.status; color: Theme.textMuted; font.pixelSize: Theme.caption
+                wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight }
     }
 }

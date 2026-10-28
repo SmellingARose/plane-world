@@ -89,7 +89,9 @@ struct EpisodeSettings {
     double crashSpeed = 8;
 };
 
-struct ScriptBundle { std::string language = "javascript", source; double callBudgetMs = 5; };
+/// `source` is what runs. `blocks` is the EVOLVE block program it was generated from (opaque to the core; the app's
+/// EvolveBlocks.js compiles it to `source`); absent for hand-written scripts.
+struct ScriptBundle { std::string language = "javascript", source; double callBudgetMs = 5; std::optional<Value> blocks; };
 
 struct AeroRunSettings {
     std::string model = "fast";       // always "fast" (kept in the file format; older files may say "full", read as fast)
@@ -170,5 +172,12 @@ craft::CraftDocument addStandardSensors(const craft::CraftDocument& c);
 
 /// Library craft by name (bundled presets, then the user's crafts), with standard sensors, flight-prepared.
 std::optional<craft::CraftDocument> resolveCraft(const CraftRef* ref, const std::string& experimentPath, std::string& err);
+
+/// Switch an experiment to another craft (the EVOLVE craft picker) and re-fit its controller wiring to that craft:
+/// `prepared` is the new craft as resolveCraft returns it. Selected MLP / NEAT inputs the craft lacks are dropped (none
+/// left = all); if any selected output is missing the list becomes "all outputs" (a plane's Ailerons mean nothing to a
+/// rocket, and a partial list would silently leave controls undriven). A name that ends in the old craft's name
+/// ("… (Trainer)", "… — Trainer") follows the new one. Returns one plain-language note per change.
+std::vector<std::string> switchCraft(ExperimentDocument& e, const std::string& craftName, const craft::CraftDocument& prepared);
 
 } // namespace pw::evo

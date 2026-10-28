@@ -146,6 +146,7 @@ public:
     Q_INVOKABLE void replaceWorld(int index, const QString& kind, const QString& arg = {});
     Q_INVOKABLE void removeWorld(int index);
     Q_INVOKABLE void setWorldSchedule(const QString& mode, int perGeneration);
+    Q_INVOKABLE void setCraft(const QString& name);           // switch craft and re-fit the controller wiring to it
     Q_INVOKABLE void setPreset(const QString& genomePreset);   // what evolves; adjusts controller mode + script
     Q_INVOKABLE void toggleIO(const QString& which, const QString& name, bool on);   // "inputs" | "outputs"
     Q_INVOKABLE void setInputScale(const QString& name, double scale);
@@ -157,7 +158,10 @@ public:
     Q_INVOKABLE void removeAxis(int index);
     // script
     Q_INVOKABLE void checkScript();
-    Q_INVOKABLE void setScript(const QString& source);
+    Q_INVOKABLE void setScript(const QString& source);         // hand edit: keeps any block program (the page shows it as edited)
+    /// The goal as EVOLVE blocks: the program (null = hand-written script), the JavaScript EvolveBlocks.js generated
+    /// from it and its reward terms, set together in one document change.
+    Q_INVOKABLE void setBlocks(const QVariant& program, const QString& source, const QStringList& terms);
     Q_INVOKABLE QString presetScript(const QString& kind) const;   // "neural" | "design"
     // run
     Q_INVOKABLE void start();

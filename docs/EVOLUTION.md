@@ -54,7 +54,8 @@ Rules:
 
 ## 3. JavaScript API
 
-There is one source string, `scripts.source`. Every function is optional.
+There is one source string, `scripts.source`. Every function is optional. An experiment built with EVOLVE goal blocks
+(§6) also stores the block program as `scripts.blocks`; the core ignores it and runs the generated `source`.
 
 ### 3.1 Execution model
 
@@ -151,16 +152,17 @@ All maximise `Fitness.total`, draw randomness only from their checkpointed RNG, 
 bit-identically (`evolution.run-checkpoint-resume`). Failed candidates score −1e12. Hooks (`select`, `crossover`,
 `mutate`) are consulted where the step exists.
 
-| Kind | Parameters (defaults) |
+| Kind | Parameters (`algorithm.values`; defaults) |
 |---|---|
-| `ga` | `selection` tournament\|roulette\|rank (tournament), `tournamentSize` 3, `elitism` 2, `crossover` uniform\|one-point\|blend\|sbx (sbx), `crossoverRate` 0.9, `blendAlpha` 0.5, `sbxEta` 15, `mutation` gaussian\|polynomial (gaussian), `mutationRate` 1/n, `mutationSigma` 1 (× gene scale), `polyEta` 20, `adaptive` false |
-| `cmaes` | `sigma0` (relative to gene scale), `lambda`, `mu`, `restarts` none\|ipop\|bipop |
-| `sep-cmaes` | as `cmaes`, diagonal covariance (genomes over ~200 genes) |
-| `openai-es` | `lr`, `sigma`, `antithetic`, `weightDecay`, `optimizer` adam\|sgd, `fitnessShaping` rank\|none |
-| `simple-es`, `random` | baselines |
-| `neat` | parameters at the top of the NEAT class in `algos_qd.cpp`; species reported every generation; flat genes (co-evolution) get Gaussian steps |
-| `map-elites` | archive over `descriptorAxes` (name, min, max, bins); candidates without a descriptor get no cell |
-| `novelty` | k-NN (k = 15) novelty over descriptors with an archive |
+| `ga` | `selection` tournament\|roulette\|rank (tournament), `tournamentSize` 3, `elitism` 2, `crossover` uniform\|one-point\|blend\|sbx (sbx), `crossoverRate` 0.9, `blendAlpha` 0.5, `sbxEta` 15, `mutation` gaussian\|polynomial (gaussian), `mutationRate` 1/n, `mutationSigma` 1 (× gene scale, gaussian only), `polyEta` 20, `adaptive` false (1/5 rule: sigma ×1.22 / ×0.85, rate ×1.1 / ×0.93) |
+| `cmaes` | `sigma0` 1 (× gene scale; then cumulative step-size adaptation), `lambda` population, `mu` λ/2, `restarts` none\|ipop\|bipop (none; trigger on tolX / conditionCov / tolFun / numerical) |
+| `sep-cmaes` | as `cmaes`, diagonal covariance (genomes over ~200 genes; `cmaes` refuses more than 400) |
+| `openai-es` | `lr` 0.05, `sigma` 0.5 (fixed), `antithetic` true, `weightDecay` 0, `optimizer` adam\|sgd, `fitnessShaping` rank\|none |
+| `simple-es` | `sigma` 1 (1/5 rule: ×1.22 / ×0.85), `mu` λ/4, `elite` 1 |
+| `random` | baseline (no parameters) |
+| `neat` | `compatThreshold` 3, `targetSpecies` 0, `addNodeRate` 0.03, `addConnRate` 0.05, `weightMutateRate` 0.8, `weightPerturbSigma` 0.5, `survivalThreshold` 0.2, `stagnation` 15; the rest at the top of the NEAT class in `algos_qd.cpp`; species reported every generation; flat genes (co-evolution) get Gaussian steps |
+| `map-elites` | archive over `descriptorAxes` (name, min, max, bins); `initialRandom` population, `isoSigma` 0.5, `lineSigma` 0.2, `cvt` 0 (grid); candidates without a descriptor get no cell |
+| `novelty` | k-NN novelty over descriptors with an archive: `k` 15, `fitnessWeight` 0, `archiveAddProbability` 0, `mutationSigma` 1 |
 | `script` | JS `ask`/`tell` (§3.2) |
 
 ## 5. Sensors (inputs)
@@ -191,16 +193,55 @@ FLY shows live values. Frames: +X forward, +Y up, +Z right; positive roll = righ
 ## 6. EVOLVE tab
 
 `src/app/qml/EvolvePanel.qml` with `src/app/evolvemodel.cpp`: preset menu, craft picker, training worlds, headless
-options, genome and MLP spec, design-gene table, algorithm form, script editor with error-line marking, run
-controls (start, stop, resume), live charts (best/mean/median, per term, species, archive heatmap, throughput),
-replay of any generation or archive cell in the viewport, and export of a craft with its controller embedded.
-FLY offers "Autopilot from evolved controller" for such crafts.
+options, genome and MLP spec, design-gene table, algorithm form, the goal as blocks or JavaScript (error-line
+marking), run controls (start, stop, resume), live charts (best/mean/median, per term, species, archive heatmap,
+throughput), replay of any generation or archive cell in the viewport, and export of a craft with its controller
+embedded. FLY offers "Autopilot from evolved controller" for such crafts. Pages: Set up (steps 1–4), Train (5–6),
+Goal (Alt+1..3). Step ① also holds how each flight starts (length, runway or air start); step ④ is only the search
+(population, generations, method).
+
+**Craft picker** (① Craft & worlds) calls `EvolveModel::setCraft`, which re-fits the experiment to the new craft
+(`evo::switchCraft`, `src/core/src/evo/experiment.cpp`): MLP / NEAT inputs the craft lacks are dropped, and if any
+selected output is missing the controller drives every control of the new craft (a plane's `Ailerons` mean nothing
+to New Shepard, and a partial list would leave controls undriven). A name ending in the old craft's name follows the
+new one, and the status bar lists what changed. A document that still names controls or sensors the craft lacks
+(an opened file, a hand edit) shows the problem under the craft picker, with a "Re-wire for <craft>" button, instead
+of failing at Start
+(`evolution.switch-craft-rewires`, pwuitests "goal blocks").
+
+**Goal blocks** (Goal page, `EvolveBlockEditor.qml` + `EvolveBlocks.js`): the reward script as stacked blocks that
+read as sentences, compiled to JavaScript on every edit. Top to bottom: the wiring (sensors → controller →
+controls, from the craft), an optional target point (ahead / to the side of the start), scores every second ("Stay
+near", "More is better, up to", "Earn for every", "Penalise while below / above", "Get closer to the target", "Stay
+over the start", each with a weight), reasons to end the flight early (crash, target reached, tipped over, too low,
+too high), one-off points when the flight ends (optionally plus a bonus for time left), and a custom-code block for
+anything else (helpers, `control()`, `descriptor()`). Set up › ③ Goal picks a preset (hold a height, hover, fly to a
+target, fly far, drive to a point; each is a block program), shows its one main setting (hover height, target
+distance…) and lists in plain language how it scores and when a flight ends. "Hold" at 150 m compiles
+to the Neural-controller preset script verbatim, so the native fast path still applies. The JavaScript view shows
+what the blocks generate; editing it there marks the goal "edited": training uses the edited script and the blocks
+are shown faded until you "Discard my edits" (back to the blocks) or "Keep my edits" (drop the blocks). A hand-written script that blocks can't represent stays JavaScript; "Start from…"
+replaces it with a preset or an empty goal. Scripts written by the earlier goal picker (`// Goal: <id> <param>`) open
+as their preset's blocks.
 
 **Training worlds** (`TrainingWorlds.qml`, ① Craft & worlds): a list of the worlds every candidate is tested in.
 "+ Add a world" and each row's "Change" offer flat ground, the open world (as it is in WORLD when training starts),
 any saved world, an embedded copy of the open world, or a world file elsewhere. With several worlds, "Each
 generation" picks every world, one in turn, or a random set (the same for every candidate), and the panel shows how
 many flights that makes per candidate. The replay caption names the world the replayed episode flew in.
+
+**Algorithm** (④, `AlgorithmSettings.qml`, words in `EvolveAlgorithms.js`): the optimiser is a card with a plain name,
+what it does and a "Recommended" badge (sep-CMA-ES; GA for craft-design genomes; NEAT for NEAT controllers); "Choose
+a different method" lists every registered kind as cards, each with ⓘ (how it works, good at / watch out / best for /
+genes / step size / needs) and a warning when the experiment cannot run it (cmaes over 400 genes, NEAT without the NEAT
+controller, MAP-Elites without axes). "Compare all" (`AlgorithmCompare.qml`) shows them in one table. The folded
+"Tune …" section starts with how the step size changes, with this experiment's numbers (CMA-ES: at most halves every
+ln 2 · damps / c_σ generations; the 1/5 rules; fixed), then each parameter of `EvolveModel.algorithmSchema` with a
+plain label (raw key on hover), unit, explanation, higher / lower effect and ↺ default; settings another setting
+switches off are dimmed, "0 = automatic" fields show the value they resolve to, and expert ones are folded. Parameter
+keys and defaults in `schemaFor` (`evolvemodel.cpp`) are the ones the algorithms read; edits go to
+`algorithm.values.<key>` and ↺ removes the key. Palette: "EVOLVE: show algorithm settings (step size, mutation…)", "EVOLVE: compare algorithms
+(CMA-ES, GA, NEAT…)".
 
 **Aero model picker** (`EvolvePanel.qml:158`) is the same `AeroModelPicker` list as FLY
 (`src/app/appcontroller.cpp:954`): Fast · classic, Fast · slipstream, Fast+ (all effects), Custom. The choice is stored in the experiment's `aero` object (§8).
@@ -216,7 +257,8 @@ transcendental math in a reward can differ in the last bits.
 
 Files (library root: `~/Library/Application Support/PlaneWorld` on macOS, `%APPDATA%\PlaneWorld` on Windows):
 - Experiments: `<root>/experiments/<name>.json` (`src/core/src/evo/experiment.cpp:286`). Every key is optional;
-  unknown keys are ignored; `version` is 1.
+  unknown keys are ignored; `version` is 1. `scripts.blocks` (optional) is the goal-block program behind
+  `scripts.source`.
 - Runs: `run.json` (experiment, craft, layout, terms, history, hall of fame), `algorithm.state`, `archive.json`.
   Checkpoints are written every `checkpointEvery` generations and on stop. Resume requires the same layout.
 - Exported craft: a normal craft JSON whose first part carries `"evolvedController"` (mode, hz, script, layout,

@@ -22,17 +22,18 @@ RowLayout {
             required property int index
             Layout.fillWidth: true
             text: typeof modelData === "string" ? modelData : modelData.text
-            checkable: true
-            checked: index === seg.currentIndex
+            readonly property bool selected: index === seg.currentIndex
+            // macOS paints a checked button solid blue while the window is active (and plain otherwise), so there the
+            // selection is only the overlay below: one look, focused or not
+            checkable: !Theme.mac
+            checked: selected && !Theme.mac
             ButtonGroup.group: grp
             font.pixelSize: Theme.small
             focusPolicy: Qt.NoFocus
             highlighted: checked
             onClicked: { seg.currentIndex = index; seg.activated(index) }
-            // The macOS style draws checkable / highlighted push buttons exactly like plain ones (and `highlighted`
-            // only when the window is key), so the selection was invisible there. Paint it explicitly.
             Rectangle {
-                visible: Theme.mac && parent.checked
+                visible: Theme.mac && parent.selected
                 anchors.fill: parent; anchors.margins: 3
                 radius: Theme.radiusSmall
                 color: Theme.accentSoft

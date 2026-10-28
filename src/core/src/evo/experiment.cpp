@@ -3,6 +3,8 @@
 #include <fstream>
 #include "pw/craft/library.h"
 #include "pw/craft/outputs.h"
+#include "pw/sim/craft_sim.h"
+#include "pw/sim/craft_spec.h"
 
 namespace pw::evo {
 namespace {
@@ -158,6 +160,7 @@ MLPSpec mlpFromJson(const Value& v) {
 ScriptBundle scriptsFromJson(const Value& v) {
     ScriptBundle s;
     s.language = rStr(v, "language"); s.source = rStr(v, "source"); s.callBudgetMs = rNum(v, "callBudgetMs");
+    if (v.has("blocks") && v["blocks"].isObject()) s.blocks = v["blocks"];
     return s;
 }
 
@@ -181,6 +184,7 @@ Value toJson(const MLPSpec& m) {
 Value toJson(const ScriptBundle& s) {
     Value o = Value::object();
     o.set("language", Value::string(s.language)); o.set("source", Value::string(s.source)); o.set("callBudgetMs", Value::number(s.callBudgetMs));
+    if (s.blocks) o.set("blocks", *s.blocks);
     return o;
 }
 
@@ -453,6 +457,51 @@ std::optional<craft::CraftDocument> resolveCraft(const CraftRef* ref, const std:
         if (!doc) { err = "craft '" + name + "' not found (bundled or in " + craft::library::craftsDir() + ")"; return std::nullopt; }
     }
     return craft::outputs::prepareForFlight(presets::addStandardSensors(*doc));
+}
+
+std::vector<std::string> switchCraft(ExperimentDocument& e, const std::string& craftName, const craft::CraftDocument& prepared) {
+    std::vector<std::string> notes;
+    std::string oldName;
+    if (!e.crafts.empty()) oldName = e.crafts[0].name ? *e.crafts[0].name : e.crafts[0].inlineDoc ? e.crafts[0].inlineDoc->name : "";
+    CraftRef r; r.name = craftName;
+    e.crafts = {r};
+
+    const sim::CraftSpec spec = sim::CraftSpec::fromDocument(prepared);
+    std::vector<std::string> ins, outs;
+    for (auto& i : sim::craftInputs(spec)) ins.push_back(i.name);
+    for (auto& o : sim::CraftSim::makeOutputs(spec)) outs.push_back(o.name);
+    auto has = [](const std::vector<std::string>& v, const std::string& n) { return std::find(v.begin(), v.end(), n) != v.end(); };
+    auto join = [](const std::vector<std::string>& v) { std::string s; for (auto& x : v) { if (!s.empty()) s += ", "; s += x; } return s; };
+    // inputs: keep what the new craft still has
+    auto fitInputs = [&](std::vector<std::string>& sel, const char* what) {
+        std::vector<std::string> gone;
+        std::erase_if(sel, [&](const std::string& n) { if (has(ins, n)) return false; gone.push_back(n); return true; });
+        if (!gone.empty()) notes.push_back(craftName + " has no " + join(gone) + " sensor, so the " + what + " no longer reads " + (gone.size() == 1 ? "it" : "them") + (sel.empty() ? " (it now reads every sensor)" : ""));
+    };
+    // outputs: all or nothing (a partial list would leave the new craft's other controls undriven)
+    auto fitOutputs = [&](std::vector<std::string>& sel, const char* what) {
+        std::vector<std::string> gone;
+        for (auto& n : sel) if (!has(outs, n)) gone.push_back(n);
+        if (gone.empty()) return;
+        sel.clear();
+        notes.push_back(craftName + " has no " + join(gone) + ", so the " + what + " now moves every control it has: " + join(outs));
+    };
+    if (e.genome.mlp) { fitInputs(e.genome.mlp->inputs, "controller"); fitOutputs(e.genome.mlp->outputs, "controller"); }
+    if (e.genome.neat) {
+        fitInputs(e.genome.neat->inputs, "controller"); fitOutputs(e.genome.neat->outputs, "controller");
+        if (e.genome.neat->inputs.empty()) e.genome.neat->inputs = ins;
+        if (e.genome.neat->outputs.empty()) e.genome.neat->outputs = outs;
+    }
+
+    if (!oldName.empty() && oldName != craftName) {
+        for (const std::string& suffix : {"(" + oldName + ")", "— " + oldName}) {
+            if (e.name.size() >= suffix.size() && e.name.compare(e.name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+                e.name = e.name.substr(0, e.name.size() - suffix.size()) + (suffix[0] == '(' ? "(" + craftName + ")" : "— " + craftName);
+                break;
+            }
+        }
+    }
+    return notes;
 }
 
 // MARK: - threat (missile interception)

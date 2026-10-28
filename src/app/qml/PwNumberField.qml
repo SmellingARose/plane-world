@@ -13,7 +13,7 @@ TextField {
     property string suffix: ""
     property string tip: ""
     signal committed(real value)
-    implicitWidth: 64
+    implicitWidth: 64 + (unit.visible ? unit.implicitWidth + 4 : 0)
     selectByMouse: true
     horizontalAlignment: TextInput.AlignRight
     font.family: Theme.mono
@@ -44,6 +44,10 @@ TextField {
         const v = clamp(Math.round((value + dir * step * m) / (step * (m < 1 ? 0.1 : 1))) * (step * (m < 1 ? 0.1 : 1)))
         committed(v); text = fmt(v); selectAll(); e.accepted = true
     }
+    // the unit, drawn faint inside the field's right edge
+    rightPadding: suffix.trim() !== "" ? unit.implicitWidth + 10 : 6
+    Text { id: unit; text: f.suffix.trim(); visible: text !== ""; color: Theme.textFaint; font.pixelSize: Theme.caption
+           anchors.right: parent.right; anchors.rightMargin: 6; anchors.verticalCenter: parent.verticalCenter }
     ToolTip.visible: hovered && tip !== "" && !activeFocus
     ToolTip.delay: Theme.tooltipDelay
     ToolTip.text: tip + "\n↑/↓ nudge (⇧ ×10, ⌥ ×0.1)"

@@ -4,6 +4,7 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QHash>
+#include <QJSValue>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -57,41 +58,58 @@ QVariantMap rowOf(const evo::GenerationRecord& r) {
 }
 
 struct ParamSpec { const char* key; const char* type; double def; const char* options; const char* help; };
-// Swift AlgoParamSchemas (App/Evolve/EvolveModel.swift) plus one-line help for every field.
+// Swift AlgoParamSchemas (App/Evolve/EvolveModel.swift) plus one-line help for every field. Keys and defaults are the
+// ones the algorithms in src/core/src/evo/algos_*.cpp actually read (an absent key = that default); "0 = …" numbers
+// are automatic, and the panel removes the key when 0 is entered. Step sizes are in units of each gene's own step
+// (GeneSpec::mutationScale: the gene's sigma, else a tenth of its range). Plain-language labels, explanations and
+// effects for the panel live in qml/EvolveAlgorithms.js, keyed by these keys.
 const std::vector<ParamSpec>& schemaFor(const std::string& k) {
     static const std::vector<ParamSpec> ga = {
         {"selection", "choice", 0, "tournament,roulette,rank", "How parents are picked"},
-        {"tournamentSize", "number", 3, "", "Candidates per tournament"},
+        {"tournamentSize", "number", 3, "", "Candidates per tournament (tournament selection)"},
         {"elitism", "number", 2, "", "Best candidates copied unchanged"},
         {"crossover", "choice", 3, "uniform,one-point,blend,sbx", "How two parents mix"},
-        {"crossoverRate", "number", 0.9, "", "Probability of crossover"},
-        {"blendAlpha", "number", 0.5, "", "Blend crossover spread"},
+        {"crossoverRate", "number", 0.9, "", "Probability a child mixes two parents"},
+        {"blendAlpha", "number", 0.5, "", "Blend crossover spread beyond the parents"},
         {"sbxEta", "number", 15, "", "SBX distribution index (higher = closer to parents)"},
         {"mutation", "choice", 0, "gaussian,polynomial", "Mutation operator"},
-        {"mutationRate", "number", 0, "", "Per-gene probability (0 = 1/n)"},
-        {"mutationSigma", "number", 1, "", "Mutation scale multiplier"},
-        {"polyEta", "number", 20, "", "Polynomial mutation index"},
-        {"adaptive", "flag", 0, "", "Adapt sigma from success rate"}};
+        {"mutationRate", "number", 0, "", "Per-gene mutation probability (0 = 1/genes)"},
+        {"mutationSigma", "number", 1, "", "Gaussian mutation size (x gene step)"},
+        {"polyEta", "number", 20, "", "Polynomial mutation index (higher = smaller steps)"},
+        {"adaptive", "flag", 0, "", "1/5 success rule: grow mutation when >20% of children beat their parents, else shrink"}};
     static const std::vector<ParamSpec> cma = {
-        {"sigma0", "number", 0.5, "", "Initial step size (fraction of gene range)"},
-        {"lambda", "number", 0, "", "Offspring per generation (0 = population)"},
-        {"mu", "number", 0, "", "Parents (0 = λ/2)"},
-        {"restarts", "choice", 0, "none,ipop,bipop", "Restart strategy on stagnation"}};
+        {"sigma0", "number", 1, "", "Initial step size (x gene step); adapted automatically afterwards"},
+        {"lambda", "number", 0, "", "Candidates per generation (0 = population)"},
+        {"mu", "number", 0, "", "Parents (0 = half the candidates)"},
+        {"restarts", "choice", 0, "none,ipop,bipop", "Restart from a new random point when the search stalls"}};
     static const std::vector<ParamSpec> oes = {
-        {"lr", "number", 0.02, "", "Learning rate"}, {"sigma", "number", 0.1, "", "Noise scale"},
-        {"antithetic", "flag", 1, "", "Mirrored sampling (±ε)"}, {"weightDecay", "number", 0.005, "", "L2 decay on the mean"},
+        {"lr", "number", 0.05, "", "Learning rate (how far the mean moves per generation)"},
+        {"sigma", "number", 0.5, "", "Noise scale (x gene step; fixed)"},
+        {"antithetic", "flag", 1, "", "Mirrored sampling (+/- each noise vector)"}, {"weightDecay", "number", 0, "", "L2 decay on the mean"},
         {"optimizer", "choice", 0, "adam,sgd", "Update rule"}, {"fitnessShaping", "choice", 0, "rank,none", "Rank-normalise fitness"}};
-    static const std::vector<ParamSpec> ses = {{"sigma", "number", 0.1, "", "Noise scale"}, {"elite", "number", 0.2, "", "Fraction kept as parents"}};
+    static const std::vector<ParamSpec> ses = {
+        {"sigma", "number", 1, "", "Initial step size (x gene step); 1/5 success rule afterwards"},
+        {"mu", "number", 0, "", "Best candidates averaged into the new mean (0 = a quarter)"},
+        {"elite", "flag", 1, "", "Re-test the best-ever candidate every generation"}};
     static const std::vector<ParamSpec> neat = {
-        {"compatThreshold", "number", 3, "", "Species distance threshold"}, {"addNodeRate", "number", 0.03, "", "Split-connection rate"},
-        {"addConnRate", "number", 0.05, "", "New-connection rate"}, {"weightMutRate", "number", 0.8, "", "Weight perturbation rate"},
-        {"survival", "number", 0.2, "", "Fraction of each species that breeds"}, {"stagnation", "number", 15, "", "Generations before a stale species dies"}};
+        {"compatThreshold", "number", 3, "", "Species distance threshold"},
+        {"targetSpecies", "number", 0, "", "Steer the threshold towards this many species (0 = off)"},
+        {"addNodeRate", "number", 0.03, "", "Chance per child to split a connection with a new node"},
+        {"addConnRate", "number", 0.05, "", "Chance per child to add a connection"},
+        {"weightMutateRate", "number", 0.8, "", "Chance per child that its weights are perturbed"},
+        {"weightPerturbSigma", "number", 0.5, "", "Weight perturbation size"},
+        {"survivalThreshold", "number", 0.2, "", "Fraction of each species that breeds"},
+        {"stagnation", "number", 15, "", "Generations before a stale species dies"}};
     static const std::vector<ParamSpec> me = {
-        {"initialRandom", "number", 0, "", "Random candidates before mutation (0 = population)"},
-        {"sigma", "number", 0.1, "", "Mutation scale"}, {"isoLineSigma", "number", 0, "", "Iso+line directional variation (0 = off)"}};
+        {"initialRandom", "number", 0, "", "Random candidates before breeding starts (0 = population)"},
+        {"isoSigma", "number", 0.5, "", "Random variation size (x gene step)"},
+        {"lineSigma", "number", 0.2, "", "Step along the line between two elites (0 = off)"},
+        {"cvt", "number", 0, "", "Use this many evenly spread cells instead of the grid (0 = grid)"}};
     static const std::vector<ParamSpec> nov = {
-        {"k", "number", 15, "", "Nearest neighbours for novelty"}, {"archiveProb", "number", 0.05, "", "Chance a candidate enters the archive"},
-        {"fitnessWeight", "number", 0, "", "Blend of fitness into the novelty score"}};
+        {"k", "number", 15, "", "Nearest neighbours for novelty"},
+        {"fitnessWeight", "number", 0, "", "Blend of fitness into the novelty score (0..1)"},
+        {"archiveAddProbability", "number", 0, "", "Extra random chance a candidate enters the archive"},
+        {"mutationSigma", "number", 1, "", "Gaussian mutation size (x gene step)"}};
     static const std::vector<ParamSpec> none;
     if (k == "ga") return ga;
     if (k == "cmaes" || k == "sep-cmaes") return cma;
@@ -495,6 +513,18 @@ QVariantList EvolveModel::algorithmSchema(const QString& kind) const {
     return l;
 }
 
+void EvolveModel::setCraft(const QString& name) {
+    evo::CraftRef ref; ref.name = name.toStdString();
+    std::string err;
+    auto craft = evo::resolveCraft(&ref, m_path.toStdString(), err);
+    if (!craft) { set("crafts", QVariantList{QVariantMap{{"name", name}}}); return; }   // refreshIO reports the error
+    evo::ExperimentDocument d = m_doc;
+    const auto notes = evo::switchCraft(d, name.toStdString(), *craft);
+    setDoc(d, true);
+    QStringList n; for (auto& x : notes) n << QString::fromStdString(x);
+    setStatus(n.isEmpty() ? tr("Craft: %1").arg(name) : tr("Craft: %1 — %2").arg(name, n.join("; ")));
+}
+
 void EvolveModel::setPreset(const QString& p) {
     evo::ExperimentDocument d = m_doc;
     d.genome.preset = p.toStdString();
@@ -628,13 +658,36 @@ void EvolveModel::refreshIO() {
         }
         if (pre == "design" || pre == "coevolve") m_geneCount += int(m_doc.genome.design.size());
     }
-    QVariantMap io; io["inputs"] = ins; io["outputs"] = outs; io["error"] = m_craft ? QString() : QString::fromStdString(err);
+    bool miswired = false;
+    // wiring that names controls / sensors this craft lacks: the run would refuse to start, so say it here
+    if (m_craft && m_doc.genome.mlp && m_doc.genome.preset != "design") {
+        auto missing = [](const std::vector<std::string>& sel, const QVariantList& have) {
+            QStringList r;
+            for (auto& n : sel) if (std::none_of(have.begin(), have.end(), [&](const QVariant& h) { return h.toMap()["name"].toString().toStdString() == n; })) r << QString::fromStdString(n);
+            return r;
+        };
+        const QStringList mi = missing(m_doc.genome.mlp->inputs, ins), mo = missing(m_doc.genome.mlp->outputs, outs);
+        if (!mi.isEmpty() || !mo.isEmpty())
+            err = tr("%1 has no %2, but the controller is wired to them.").arg(QString::fromStdString(m_craft->name), (mo + mi).join(", ")).toStdString();
+        miswired = !err.empty();
+    }
+    QVariantMap io; io["inputs"] = ins; io["outputs"] = outs; io["error"] = m_craft && err.empty() ? QString() : QString::fromStdString(err);
+    io["miswired"] = miswired;
     io["craft"] = m_craft ? QString::fromStdString(m_craft->name) : QString();
     m_io = io;
     emit ioChanged();
 }
 
 // ---------------------------------------------------------------- script
+
+void EvolveModel::setBlocks(const QVariant& program, const QString& source, const QStringList& terms) {
+    evo::ExperimentDocument d = m_doc;
+    const QVariant p = program.canConvert<QJSValue>() ? program.value<QJSValue>().toVariant() : program;
+    if (p.isValid() && !p.isNull()) d.scripts.blocks = fromVariant(p); else d.scripts.blocks.reset();
+    d.scripts.source = source.toStdString();
+    d.rewardTerms.clear(); for (auto& t : terms) d.rewardTerms.push_back(t.toStdString());
+    setDoc(d, true);
+}
 
 void EvolveModel::setScript(const QString& source) {
     if (source.toStdString() == m_doc.scripts.source) return;
