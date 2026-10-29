@@ -9,12 +9,15 @@ Item {
     property string tab: "BUILD"
     property var viewport: null
     signal openRequested()
+    signal libraryRequested()
     signal saveAsRequested()
     signal importRequested(bool intoCurrent)
     signal addPartRequested()
     signal focusPartName()
     signal showEquationsRequested()
-    readonly property bool building: tab === "BUILD"
+    // true while a page that owns the keyboard (the craft library) is open: BUILD's bare-key shortcuts stand down
+    property bool suspended: false
+    readonly property bool building: tab === "BUILD" && !suspended
     // craft-document shortcuts; WORLD / EVOLVE pages bind their own Ctrl+Z/S/O (two enabled Shortcuts on one
     // key are "ambiguous" in Qt and neither fires)
     readonly property bool craftTab: tab === "BUILD" || tab === "FLY"
@@ -34,6 +37,7 @@ Item {
             { name: "Undo" + (App.undoText ? " " + App.undoText : ""), shortcut: "Ctrl+Z", run: () => App.undo() },
             { name: "Redo" + (App.redoText ? " " + App.redoText : ""), shortcut: "Ctrl+Shift+Z", run: () => App.redo() },
             { name: "New craft", shortcut: "Ctrl+N", run: () => App.newCraft() },
+            { name: "Craft library…", shortcut: "Ctrl+L", run: () => cmds.libraryRequested() },
             { name: "Open craft or CAD file…", shortcut: "Ctrl+O", run: () => cmds.openRequested() },
             { name: "Save craft", shortcut: "Ctrl+S", run: () => cmds.saveOrSaveAs() },
             { name: "Save craft as…", shortcut: "Ctrl+Shift+S", run: () => cmds.saveAsRequested() },
@@ -83,6 +87,7 @@ Item {
     Shortcut { enabled: cmds.craftTab; sequences: [StandardKey.Redo, "Ctrl+Shift+Z"]; onActivated: App.redo() }
     Shortcut { enabled: cmds.craftTab; sequences: [StandardKey.New]; onActivated: App.newCraft() }
     Shortcut { enabled: cmds.craftTab; sequences: [StandardKey.Open]; onActivated: cmds.openRequested() }
+    Shortcut { enabled: cmds.craftTab && !cmds.suspended; sequence: "Ctrl+L"; onActivated: cmds.libraryRequested() }
     Shortcut { enabled: cmds.craftTab; sequences: [StandardKey.Save]; onActivated: cmds.saveOrSaveAs() }
     Shortcut { enabled: cmds.craftTab; sequence: "Ctrl+Shift+S"; onActivated: cmds.saveAsRequested() }
     Shortcut { enabled: cmds.craftTab; sequence: "Ctrl+Shift+L"; onActivated: App.saveToLibrary() }

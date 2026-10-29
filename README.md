@@ -44,6 +44,9 @@ C++20 core, Qt 6 Quick UI, Metal and Direct3D 12 renderers with shaders written 
 
 - **BUILD:** parts (wings, servos, props, motors, jets, solids, tanks, wheels, sensors, primitives), CAD import
   (STL / OBJ / glTF / GLB; USD / USDZ on macOS) with auto-rig, mesh cut, outputs with key bindings, undo / redo.
+  The **craft library** (Ctrl+L, or *Craft library…* in the inspector) shows every built-in and saved craft as a
+  picture card with its kind, part count and mass; click to open, search by typing, and rename, duplicate or move
+  your own crafts to the Trash (Delete asks first) so the library stays tidy.
 - **FLY:** 1 kHz physics, chase / orbit / cockpit cameras, per-output sliders, HUD, aero model picker and the
   EQUATIONS panel (every fast-model equation with live values).
 - **WORLD:** flat, procedural (GPU erosion), heightmap or real-world terrain; sculpt and paint; ocean, lakes, rivers,

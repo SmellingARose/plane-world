@@ -21,7 +21,7 @@ ApplicationWindow {
     property string viewportBackend: activeViewport.backendName
 
     readonly property var sectionsByTab: ({
-        "BUILD": [ { title: "Craft", rows: [["New craft", "Ctrl+N"], ["Open craft…", "Ctrl+O"], ["Save", "Ctrl+S"]] },
+        "BUILD": [ { title: "Craft", rows: [["New craft", "Ctrl+N"], ["Craft library", "Ctrl+L"], ["Open craft…", "Ctrl+O"], ["Save", "Ctrl+S"]] },
                    { title: "Edit", rows: [["Undo", "Ctrl+Z"], ["Redo", "Ctrl+Shift+Z"], ["Add part", "A"], ["Delete part", "Backspace"]] },
                    { title: "Parts", rows: [["Wings, props, jets, rockets, wheels, servos, CAD bodies", ""]] } ],
         "FLY":   [ { title: "Flight", rows: [["Launch / reset", "R"], ["Pause", "Space"], ["Camera", "C"]] },
@@ -174,7 +174,9 @@ ApplicationWindow {
         id: appCommands
         tab: win.tabs[win.currentTab]
         viewport: work.viewport
+        suspended: craftLibrary.opened
         onOpenRequested: openDialog.open()
+        onLibraryRequested: { win.currentTab = 0; craftLibrary.open() }
         onSaveAsRequested: saveDialog.open()
         onImportRequested: (into) => { cadDialog.intoCurrent = into; cadDialog.open() }
         onAddPartRequested: cmdPalette.openWith("add ")
@@ -185,6 +187,7 @@ ApplicationWindow {
         target: work.inspector.panel
         ignoreUnknownSignals: true
         function onOpenRequested() { openDialog.open() }
+        function onLibraryRequested() { craftLibrary.open() }
         function onSaveAsRequested() { saveDialog.open() }
         function onImportRequested(into) { cadDialog.intoCurrent = into; cadDialog.open() }
     }
@@ -246,6 +249,7 @@ ApplicationWindow {
     }
 
     CommandPalette { id: cmdPalette; parent: Overlay.overlay; commands: win.commands }
+    CraftLibrary { id: craftLibrary; parent: Overlay.overlay; onOpenFileRequested: openDialog.open() }
 
     Dialog {
         id: about

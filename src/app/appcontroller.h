@@ -57,7 +57,12 @@ class AppController : public QObject {
     Q_PROPERTY(QString undoText READ undoText NOTIFY undoChanged)
     Q_PROPERTY(QString redoText READ redoText NOTIFY undoChanged)
     // ---- library / import
+    // Each entry: name, source ("Built-in" | "Saved"), builtIn, path (saved file, else ""), key (thumbnail key), parts,
+    // mass (kg incl. fuel), kind ("plane" | "rotor" | "rocket" | "ground" | "other").
     Q_PROPERTY(QVariantList library READ library NOTIFY libraryChanged)
+    // thumbnail key -> picture file URL ("" until rendered); see requestLibraryThumbnails()
+    Q_PROPERTY(QVariantMap libraryThumbnails READ libraryThumbnails NOTIFY libraryThumbnailsChanged)
+    Q_PROPERTY(bool libraryThumbnailsUnavailable READ libraryThumbnailsUnavailable NOTIFY libraryThumbnailsChanged)
     Q_PROPERTY(QStringList cadExtensions READ cadExtensions CONSTANT)
     Q_PROPERTY(bool importUpZ MEMBER m_importUpZ NOTIFY importOptionsChanged)
     Q_PROPERTY(double importScale MEMBER m_importScale NOTIFY importOptionsChanged)
@@ -130,6 +135,17 @@ public:
     Q_INVOKABLE void saveToLibrary();
     Q_INVOKABLE void reloadLibrary();
     QVariantList library() const { return m_library; }
+    QVariantMap libraryThumbnails() const { return m_thumbMap; }
+    bool libraryThumbnailsUnavailable() const;
+    /// Render the missing library pictures (the craft library page calls this when it opens; cached ones show at once).
+    Q_INVOKABLE void requestLibraryThumbnails();
+    /// Saved crafts only: moves the file to the Trash and removes its picture. An open craft stays open, unsaved.
+    Q_INVOKABLE bool deleteLibraryCraft(int index);
+    /// Saved crafts only: renames the craft and its file. "" when `name` is fine for entry `index`, else why not.
+    Q_INVOKABLE QString libraryNameProblem(int index, const QString& name) const;
+    Q_INVOKABLE bool renameLibraryCraft(int index, const QString& name);
+    /// Any entry (a built-in one too): saves "<name> copy" to the library; returns the copy's index or -1.
+    Q_INVOKABLE int duplicateLibraryCraft(int index);
 
     Q_INVOKABLE void addPart(const QString& type);
     Q_INVOKABLE void deleteSelected();
@@ -235,6 +251,7 @@ signals:
     void selectionChanged();
     void undoChanged();
     void libraryChanged();
+    void libraryThumbnailsChanged();
     void importOptionsChanged();
     void rigReportChanged();
     void outputsChanged();
@@ -306,6 +323,10 @@ private:
     QVariantList m_parts, m_library, m_outputs, m_outputValues, m_inputs, m_equations;
     std::vector<pw::craft::CraftDocument> m_libraryDocs;
     std::vector<std::string> m_libraryPaths;
+    QVariantMap m_thumbMap;
+    class CraftThumbnails* m_thumbs = nullptr;
+    bool m_thumbsWanted = false;
+    bool libraryIsOpen(int index) const;
     QVariantMap m_selectedMap, m_telemetry, m_perf;
     QStringList m_warnings, m_rigReport;
     QString m_massSummary;

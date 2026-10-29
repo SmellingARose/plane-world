@@ -2,11 +2,12 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// BUILD inspector: craft, add part, parts list, selected part, outputs + keybinds, inputs, CAD import.
+// BUILD inspector: craft (name, craft library, file), add part, parts list, selected part, outputs + keybinds, inputs, CAD import.
 ColumnLayout {
     id: build
     spacing: Theme.s3
     signal openRequested()
+    signal libraryRequested()
     signal saveAsRequested()
     signal importRequested(bool intoCurrent)
     function focusPartName() { inspector.focusName() }
@@ -27,26 +28,13 @@ ColumnLayout {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.s1
-                ComboBox {
-                    id: lib
+                Button {
                     Layout.fillWidth: true
-                    model: App.library
-                    textRole: "name"
-                    displayText: "Load…"
+                    text: "Craft library…"
                     font.pixelSize: Theme.small
-                    delegate: ItemDelegate {
-                        required property var modelData
-                        required property int index
-                        width: ListView.view ? ListView.view.width : 200
-                        highlighted: lib.highlightedIndex === index
-                        contentItem: RowLayout {
-                            Label { text: modelData.name; Layout.fillWidth: true; elide: Text.ElideRight }
-                            Label { text: modelData.source + " · " + modelData.parts; color: Theme.textFaint; font.pixelSize: Theme.caption }
-                        }
-                    }
-                    onActivated: (i) => App.loadLibraryCraft(i)
+                    onClicked: build.libraryRequested()
                     ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay
-                    ToolTip.text: "Built-in presets and crafts saved to your library"
+                    ToolTip.text: Theme.tip("Pictures of the built-in crafts and yours: open, rename, duplicate or delete", "Ctrl+L")
                 }
                 PwIconButton { text: "New"; tip: "New craft"; shortcut: "Ctrl+N"; onClicked: App.newCraft() }
                 PwIconButton { text: "Open"; tip: "Open craft JSON or CAD file"; shortcut: "Ctrl+O"; onClicked: build.openRequested() }

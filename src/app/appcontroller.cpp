@@ -3,20 +3,24 @@
 #include <QScreen>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QQmlEngine>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <map>
 #include "pw/craft/autorig.h"
 #include "pw/craft/cad.h"
 #include "pw/craft/library.h"
+#include "pw/evo/experiment.h"
 #include "pw/craft/mesh.h"
 #include "pw/craft/meshcut.h"
 #include "pw/craft/outputs.h"
 #include "pw/evo/evaluator.h"
+#include "craftthumbnails.h"
 #include "evolvemodel.h"
 #include "worldmodel.h"
 
@@ -94,6 +98,12 @@ AppController::AppController(QObject* parent) : QObject(parent) {
             if (s != Qt::ApplicationActive && !m_held.isEmpty()) { m_held.clear(); emit heldKeysChanged(); }
         });
     }
+    m_thumbs = new CraftThumbnails(this);
+    connect(m_thumbs, &CraftThumbnails::ready, this, [this](const QString& key, const QString& path) {
+        m_thumbMap[key] = QUrl::fromLocalFile(path).toString();
+        emit libraryThumbnailsChanged();
+    });
+    connect(m_thumbs, &CraftThumbnails::unavailableChanged, this, &AppController::libraryThumbnailsChanged);
     reloadLibrary();
     std::optional<pc::CraftDocument> first = pc::presets::load("Trainer");
     if (!first && !m_libraryDocs.empty()) first = m_libraryDocs.front();
@@ -409,23 +419,124 @@ void AppController::newCraft() {
     setStatus("New craft");
 }
 
+static double craftMass(const pc::CraftDocument& d) {   // dry mass + the fuel tanks, jets and solid motors carry
+    double m = 0;
+    for (const auto& p : d.parts) {
+        const auto t = p.partType();
+        m += p.mass + ((t == pc::PartType::Tank || t == pc::PartType::Jet || t == pc::PartType::Solid) ? p.param("fuel", 0) : 0);
+    }
+    return m;
+}
+
+// Built-in crafts first, then every saved file (a saved craft that shares a built-in's name is listed too, so it can
+// be found and deleted).
 void AppController::reloadLibrary() {
     m_libraryDocs.clear(); m_libraryPaths.clear(); m_library.clear();
-    std::vector<std::string> seen;
-    auto add = [&](pc::CraftDocument d, const QString& source, const std::string& path) {
-        if (std::find(seen.begin(), seen.end(), d.name) != seen.end()) return;
-        seen.push_back(d.name);
-        m_library.push_back(QVariantMap{{"name", qs(d.name)}, {"source", source}, {"parts", int(d.parts.size())}});
+    QVariantMap thumbs;
+    auto add = [&](pc::CraftDocument d, const std::string& path) {
+        const bool builtIn = path.empty();
+        const QString key = builtIn ? "built-in/" + qs(d.name) : QFileInfo(qs(path)).completeBaseName();
+        m_library.push_back(QVariantMap{{"name", qs(d.name)}, {"source", builtIn ? "Built-in" : "Saved"}, {"builtIn", builtIn},
+                                        {"path", qs(path)}, {"key", key}, {"parts", int(d.parts.size())},
+                                        {"mass", craftMass(d)}, {"kind", qs(pw::evo::craftKind(d))}});
+        const QString pic = m_thumbsWanted ? m_thumbs->request(key, d) : CraftThumbnails::cached(key, d);
+        thumbs[key] = pic.isEmpty() ? QString() : QUrl::fromLocalFile(pic).toString();
         m_libraryDocs.push_back(std::move(d));
         m_libraryPaths.push_back(path);
     };
-    for (auto& d : pc::presets::bundled()) add(d, "Built-in", {});
-    const auto files = pc::library::listCrafts();
-    for (const auto& f : files) {
+    for (auto& d : pc::presets::bundled()) add(d, {});
+    for (const auto& f : pc::library::listCrafts()) {
         pc::CraftDocument d; std::string err;
-        if (pc::loadCraftFile(f, d, err)) add(std::move(d), "Saved", f);
+        if (pc::loadCraftFile(f, d, err)) add(std::move(d), f);
     }
+    m_thumbMap = thumbs;
     emit libraryChanged();
+    emit libraryThumbnailsChanged();
+}
+
+bool AppController::libraryThumbnailsUnavailable() const { return m_thumbs && m_thumbs->unavailable(); }
+
+void AppController::requestLibraryThumbnails() {
+    if (m_thumbsWanted) return;
+    m_thumbsWanted = true;
+    for (std::size_t i = 0; i < m_libraryDocs.size(); ++i) {
+        const QString key = m_library[int(i)].toMap()["key"].toString();
+        if (m_thumbMap.value(key).toString().isEmpty()) m_thumbs->request(key, m_libraryDocs[i]);
+    }
+}
+
+bool AppController::libraryIsOpen(int index) const {
+    if (index < 0 || index >= int(m_libraryPaths.size()) || m_libraryPaths[std::size_t(index)].empty() || m_filePath.empty()) return false;
+    std::error_code ec;
+    return std::filesystem::equivalent(m_libraryPaths[std::size_t(index)], m_filePath, ec);
+}
+
+bool AppController::deleteLibraryCraft(int index) {
+    if (index < 0 || index >= int(m_libraryPaths.size()) || m_libraryPaths[std::size_t(index)].empty()) return false;
+    const QString name = qs(m_libraryDocs[std::size_t(index)].name);
+    const bool open = libraryIsOpen(index);
+    // to the Trash like WORLD's saved worlds (deleted outright where there is no Trash); the picture goes for good
+    const std::string path = m_libraryPaths[std::size_t(index)];
+    std::string err;
+    if (QFile::moveToTrash(qs(path))) pc::library::removeThumbnails(ss(QFileInfo(qs(path)).completeBaseName()));
+    else if (!pc::library::deleteCraft(path, err)) { setStatus("Delete failed: " + qs(err), "bad"); return false; }
+    if (open) {   // keep the craft open; it now exists only here
+        m_filePath.clear();
+        m_dirty = true;
+        emit docChanged();
+    }
+    reloadLibrary();
+    setStatus(open ? QString::fromUtf8("Moved \u201c%1\u201d to the Trash. It is still open here, but no longer saved.").arg(name)
+                   : QString::fromUtf8("Moved \u201c%1\u201d to the Trash").arg(name), open ? "warn" : "info");
+    return true;
+}
+
+QString AppController::libraryNameProblem(int index, const QString& name) const {
+    if (index < 0 || index >= int(m_libraryPaths.size())) return "No such craft";
+    const QString n = name.trimmed();
+    if (n.isEmpty()) return "Type a name";
+    const std::filesystem::path self(m_libraryPaths[std::size_t(index)]);
+    const std::filesystem::path target = std::filesystem::path(pc::library::craftsDir()) / pc::library::fileName(ss(n));
+    std::error_code ec;
+    if (std::filesystem::exists(target, ec) && !(!self.empty() && std::filesystem::equivalent(self, target, ec)))
+        return QString::fromUtf8("You already have a craft called \u201c%1\u201d").arg(n);
+    for (const auto& d : pc::presets::bundled())
+        if (QString::compare(qs(d.name), n, Qt::CaseInsensitive) == 0) return QString::fromUtf8("\u201c%1\u201d is a built-in craft's name").arg(n);
+    return {};
+}
+
+bool AppController::renameLibraryCraft(int index, const QString& name) {
+    if (index < 0 || index >= int(m_libraryPaths.size()) || m_libraryPaths[std::size_t(index)].empty()) return false;
+    if (const QString why = libraryNameProblem(index, name); !why.isEmpty()) { setStatus(why, "warn"); return false; }
+    const bool open = libraryIsOpen(index);
+    const QString old = qs(m_libraryDocs[std::size_t(index)].name);
+    std::string out, err;
+    if (!pc::library::renameCraft(m_libraryPaths[std::size_t(index)], ss(name), out, err)) { setStatus("Rename failed: " + qs(err), "bad"); return false; }
+    if (open) {   // the open craft follows its file (its other edits, if any, stay unsaved)
+        m_filePath = out;
+        m_doc.name = ss(name.trimmed());
+        emit docChanged();
+    }
+    reloadLibrary();
+    setStatus(QString::fromUtf8("Renamed \u201c%1\u201d to \u201c%2\u201d").arg(old, name.trimmed()), "good");
+    return true;
+}
+
+int AppController::duplicateLibraryCraft(int index) {
+    if (index < 0 || index >= int(m_libraryDocs.size())) return -1;
+    std::vector<std::string> taken;
+    for (const auto& d : pc::presets::bundled()) taken.push_back(d.name);
+    std::string out, err;
+    if (!pc::library::duplicateCraft(m_libraryDocs[std::size_t(index)], out, err, {}, taken)) { setStatus("Duplicate failed: " + qs(err), "bad"); return -1; }
+    reloadLibrary();
+    for (std::size_t i = 0; i < m_libraryPaths.size(); ++i) {
+        std::error_code ec;
+        if (!m_libraryPaths[i].empty() && std::filesystem::equivalent(m_libraryPaths[i], out, ec)) {
+            setStatus(QString::fromUtf8("Saved a copy: \u201c%1\u201d").arg(qs(m_libraryDocs[i].name)), "good");
+            return int(i);
+        }
+    }
+    return -1;
 }
 
 void AppController::loadLibraryCraft(int index) {
@@ -463,6 +574,7 @@ void AppController::saveToLibrary() {
     std::string out, err;
     if (!pc::library::saveCraft(m_doc, out, err)) { setStatus("Save failed: " + qs(err), "bad"); return; }
     m_dirty = false;
+    m_filePath = out;   // later saves (Ctrl+S) and the library page's "open now" mark follow the library file
     reloadLibrary();
     emit docChanged();
     setStatus("Saved to library: " + qs(out), "good");
