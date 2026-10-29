@@ -16,7 +16,7 @@ touching one latches `crashed`; they never move or break, and raycast sensors ig
 | Algorithms and registry | `src/core/src/evo/algos_basic.cpp` (registry at `:431`; `random`, `simple-es`, `ga`), `algos_cma.cpp` (`cmaes`, `sep-cmaes`, `openai-es`), `algos_qd.cpp` (`neat`, `map-elites`, `novelty`) |
 | Native policies (`MLPPolicy`, design decoder) | `src/core/pw/evo/policy.h:33`, `src/core/src/evo/policy.cpp` |
 | Evaluator (`EvalWorker`, `SimEvaluator`) | `src/core/pw/evo/evaluator.h:95`, `:132` |
-| Run, checkpoints, export, replay, FLY autopilot (`EvolutionRun`, `exportCraft`, `EvolvedAutopilot`) | `src/core/pw/evo/run.h:57`, `:93`, `:139` |
+| Run, checkpoints, export, replay, behaviours, FLY pilots (`EvolutionRun`, `exportCraft`, `behaviours`, `EvolvedAutopilot`, `LivePilot`) | `src/core/pw/evo/run.h:91`, `:139`, `:64`, `:192`, `:216` |
 | Headless training (`--train`, `history.csv`, `best-craft.json`) | `src/core/src/evo/train.cpp`, `src/cli/train_cli.cpp` |
 | Headless world | `src/core/pw/world/bake.h:138` |
 | Script runtime and prelude | `src/core/pw/script/runtime.h:132`, `src/core/src/script/prelude.js` (see [SCRIPTING.md](SCRIPTING.md)) |
@@ -325,8 +325,17 @@ Files (library root: `~/Library/Application Support/PlaneWorld` on macOS, `%APPD
   `scripts.source`.
 - Runs: `run.json` (experiment, craft, layout, terms, history, hall of fame), `algorithm.state`, `archive.json`.
   Checkpoints are written every `checkpointEvery` generations and on stop. Resume requires the same layout.
-- Exported craft: a normal craft JSON whose first part carries `"evolvedController"` (mode, hz, script, layout,
-  genome, names, MLP spec, fitness).
+- Exported craft: a normal craft JSON with a top-level `"behaviours"` array; each entry is `{ name, key, controller }`
+  and `controller` holds mode, hz, script, layout, genome, names, MLP spec, fitness and the training experiment
+  (crafts dropped, world flat). Format and key rules: docs/CRAFTS.md › Behaviours. Crafts exported before behaviours
+  carry one `"evolvedController"` on their first part; they read as one behaviour on O.
+- Train › Results › "Add to craft as a behaviour…" (`EvolveModel::addBehaviour`): name (default: the goal preset in
+  short words, e.g. "Hover", else the experiment's name), key (a free one suggested; FLY's keys are refused and
+  listed) and target: the experiment's saved craft (updated in the library), another saved craft, or a new copy
+  (the only choice when the run reshapes the craft). "Add and fly" then opens it in FLY with the behaviour flying.
+- FLY flies a behaviour with `LivePilot` (`src/core/pw/evo/run.h:216`): the experiment context rebuilt on the flight
+  craft and `EvalWorker::bindLive`, the code training uses, so it flies bit-identically to EVOLVE's own context
+  (`evolution.behaviours`). If the craft no longer matches the trained genes it falls back to `EvolvedAutopilot`.
 
 Hot loop: zero heap allocations per control tick and physics substep (checked by `pwtests`); allocation is fine
 per episode, candidate and generation.
@@ -376,8 +385,8 @@ Options (`src/cli/train_cli.cpp`): `--generations N`, `--population N`, `--worke
 
 - One line per generation: best, mean, median, failures, sims/s, sim-s per wall-s and the best candidate's terms
   (NEAT adds `species=`, MAP-Elites/novelty `coverage=`).
-- `--out` gets `history.csv` (with `best_<term>` columns), the checkpoint files and `best-craft.json` (load it in
-  BUILD, then enable the evolved autopilot in FLY).
+- `--out` gets `history.csv` (with `best_<term>` columns), the checkpoint files and `best-craft.json` (the best candidate
+  as a behaviour named after the experiment: open it and press its key in FLY).
 - Crafts resolve as `inline`, then `path`, then a bundled or user craft by `name`.
 - World source `"current"` (the world open in the app) fails in the CLI unless `--current-as-flat` is given.
 

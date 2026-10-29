@@ -36,6 +36,29 @@ and `built-in/<name>` for built-ins; hash is `library::shapeHash` (FNV-1a over t
 not the name), so a rename moves the picture, an edit makes a new one and the stale one is removed.
 `pwcli --craft-thumbnail "<preset>|<craft.json>" out.png [--width W --height H]` renders the same picture headless.
 
+## Behaviours (evolved controllers a craft carries)
+
+A craft can carry several evolved controllers, each with a name and a FLY key: Hover on H, Race to a point on G.
+They are an optional top-level array (`src/core/pw/evo/run.h:64`, `pw::evo::behaviours`):
+
+```json
+"behaviours": [
+  { "name": "Hover", "key": "h", "controller": { "experimentName": "…", "runID": "…", "mode": "script", "hz": 100,
+      "script": {…}, "layout": {…}, "genome": {…}, "inputNames": […], "outputNames": […], "termNames": […],
+      "mlp": {…}, "fitness": 12.5, "experiment": { training experiment, crafts dropped, world flat } } }
+]
+```
+
+- `key` is a FLY key name (`"h"`, `"1"`, `"up"`); missing = none (start it from FLY › Behaviours). Keys FLY uses
+  (R, P, Space, C, E and the craft's flight keys) are refused when you pick one; two behaviours never share a key.
+- `controller.experiment` lets FLY rebuild the exact training context on the craft (`LivePilot`); without it (older
+  exports) a standalone controller flies it (`EvolvedAutopilot`), which can differ slightly.
+- Older crafts with one `"evolvedController"` on their first part read as one behaviour named after its experiment
+  on key O; saving any behaviour change writes `"behaviours"` and drops the old key.
+- Add behaviours from EVOLVE › Train › Results › "Add to craft as a behaviour…"; rename, rebind or remove them in
+  FLY › Behaviours (undoable, saved with the craft). A craft with behaviours flies with the standard sensors added
+  where it has none (massless), as in EVOLVE.
+
 ## Bundled presets
 
 | Craft | Parts | What it is for |

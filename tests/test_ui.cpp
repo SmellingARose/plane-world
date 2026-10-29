@@ -398,6 +398,27 @@ static void testEvolve(const QString& dir) {
     pw::craft::CraftDocument doc; std::string err;
     CHECK(pw::craft::loadCraftFile(out.toStdString(), doc, err));
     CHECK(pw::evo::EmbeddedController::find(doc).has_value());
+    CHECK(pw::evo::behaviours::list(doc).size() == 1);
+    // "Add to craft as a behaviour…": a new copy, then a second behaviour into that saved craft
+    const QVariantMap targets = e.behaviourTargets();
+    CHECK(!targets["newName"].toString().isEmpty());
+    const QVariantMap k0 = e.behaviourKeys("", "Hover", "r");
+    CHECK(!k0["conflict"].toString().isEmpty());                              // R is FLY's reset
+    CHECK(!k0["suggested"].toString().isEmpty() && !k0["used"].toList().isEmpty());
+    const QString copy = e.addBehaviour("Hover", k0["suggested"].toString(), "", "Behaviour test craft", false);
+    CHECK(!copy.isEmpty());
+    CHECK(e.addBehaviour("Climb", "r", copy, "", false).isEmpty());          // refused: FLY key
+    const QString hk = e.behaviourKeys(copy, "Climb", "").value("suggested").toString();
+    CHECK(!hk.isEmpty() && hk != k0["suggested"].toString());                 // the copy's Hover key is taken
+    CHECK(e.addBehaviour("Climb", hk, copy, "", false) == copy);
+    pw::craft::CraftDocument two;
+    CHECK(pw::craft::loadCraftFile(copy.toStdString(), two, err));
+    const auto bl = pw::evo::behaviours::list(two);
+    CHECK(bl.size() == 2 && bl[0].name == "Hover" && bl[1].name == "Climb" && bl[1].key == hk.toStdString());
+    CHECK(two.name == "Behaviour test craft");
+    bool listed = false;
+    for (auto& t : e.behaviourTargets()["crafts"].toList()) if (t.toMap()["path"].toString() == copy) listed = t.toMap()["behaviours"].toInt() == 2;
+    CHECK(listed);
     CHECK(!e.runDirs().isEmpty());
 }
 

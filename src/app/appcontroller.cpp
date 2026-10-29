@@ -85,6 +85,18 @@ AppController* AppController::create(QQmlEngine*, QJSEngine*) {
 AppController::AppController(QObject* parent) : QObject(parent) {
     s_instance = this;
     EvolveModel::autopilotSink = [this](auto ctx, auto genome, auto factory) { setAutopilotSource(std::move(ctx), std::move(genome), std::move(factory)); };
+    // EVOLVE added a behaviour to a saved craft: the open document gets it too when it is that file (an undo step, so
+    // unsaved BUILD edits stay), and the library lists it.
+    EvolveModel::behaviourSink = [this](const QString& path, const evo::Behaviour& b) {
+        reloadLibrary();
+        if (m_filePath.empty() || QFileInfo(qs(m_filePath)).canonicalFilePath() != QFileInfo(path).canonicalFilePath()) return;
+        const bool wasDirty = m_dirty;
+        pc::CraftDocument d = m_doc;
+        evo::behaviours::add(d, b);
+        editBehaviours("Add behaviour " + b.name, evo::behaviours::list(d));
+        m_dirty = wasDirty;
+        emit docChanged();
+    };
     m_ground = std::make_unique<sim::FlatTerrain>(0.0);
     m_env.terrain = m_ground.get();
     m_mergeClock.start();
@@ -214,7 +226,10 @@ void AppController::documentEdited(bool) {
     if (!m_selected.empty() && !m_doc.part(m_selected)) m_selected.clear();
     ++m_revision;
     rebuildMeshCache();
+    m_behaviours = evo::behaviours::list(m_doc);   // before reloadSim: behaviours want the standard sensors
     reloadSim();
+    rebuildBehaviours();
+    emit autopilotChanged();
     rebuildPartList();
     rebuildOutputs();
     rebuildSelected();
@@ -244,7 +259,9 @@ void AppController::rebuildMeshCache() {
 }
 
 void AppController::reloadSim() {
-    m_flightDoc = pc::outputs::prepareForFlight(m_doc);
+    // A craft with behaviours flies with the standard sensors its controllers were trained with (massless, added
+    // only where the craft has none, exactly as EVOLVE does), so a behaviour added to a plain library craft can see.
+    m_flightDoc = pc::outputs::prepareForFlight(m_behaviours.empty() ? m_doc : evo::presets::addStandardSensors(m_doc));
     auto fresh = std::make_unique<sim::CraftSim>();
     std::string err;
     if (!fresh->load(sim::CraftSpec::fromDocument(m_flightDoc), &err)) {
@@ -252,7 +269,7 @@ void AppController::reloadSim() {
         emit statusChanged();
     }
     fresh->equationCapture = &m_capture;
-    if (m_ap) { m_ap.reset(); emit autopilotChanged(); }   // it points at the old sim
+    if (m_ap) { m_ap.reset(); rebuildBehaviours(); emit autopilotChanged(); }   // it points at the old sim
     m_sim = std::move(fresh);
     syncWorld();
     respawn();
@@ -882,7 +899,7 @@ bool AppController::flyKey(QKeyEvent* e, bool press) {
     const QString name = keyName(e->key(), e->text());
     if (name.isEmpty()) return false;
     if (m_controls.usesKey(ss(name))) {
-        if (press && m_ap) { setAutopilot(false); emit notify("Autopilot off: you have control", "info"); }
+        if (press && m_ap) releaseBehaviour();   // any stick input takes control back
         if (press && !m_held.contains(name)) { m_held.insert(name); emit heldKeysChanged(); }
         if (!press && !e->isAutoRepeat() && m_held.remove(name)) emit heldKeysChanged();
         return true;
@@ -891,7 +908,9 @@ bool AppController::flyKey(QKeyEvent* e, bool press) {
     if (name == "r") { resetFlight(); return true; }
     if (name == "p" || name == "space") { setPaused(!m_paused); return true; }
     if (name == "c") { cycleCamera(); return true; }
-    if (name == "o" && autopilotAvailable()) { setAutopilot(!m_ap); return true; }
+    for (int i = 0; i < int(m_behaviours.size()); ++i)
+        if (m_behaviours[std::size_t(i)].key == ss(name)) { toggleBehaviour(i); return true; }
+    if (name == "o" && autopilotAvailable()) { toggleBehaviour(m_ap ? m_activeBehaviour : lastBehaviour()); return true; }
     if (name == "e") { setEquationsLive(!m_eqLive); emit equationsToggled(); return true; }
     return false;
 }
@@ -1077,32 +1096,154 @@ double AppController::groundHeight(double x, double z) const {
 }
 
 void AppController::setAutopilotSource(std::shared_ptr<const pw::evo::ExperimentContext> ctx, pw::evo::Genome genome, pw::evo::ScriptRuntimeFactory factory) {
-    m_ap.reset();
+    releaseBehaviour();
     m_apCtx = std::move(ctx); m_apGenome = std::move(genome); m_apFactory = std::move(factory);
     emit autopilotChanged();
 }
 
 void AppController::setAutopilot(bool on) {
-    if (on == (m_ap != nullptr)) return;
-    if (!on) {
-        m_ap.reset();
-        for (int i = 0; i < int(m_values.size()); ++i) m_sim->setOutput(i, m_values[std::size_t(i)]);   // hand back the sliders
-    } else {
-        if (!m_apCtx || !m_sim) return;
-        // start where it was trained: the experiment's spawn
-        const auto& s = m_apCtx->experiment.episode.spawn;
-        if (s.mode == "air") airStart(std::max(1.0, s.altitudeAGL), s.speed); else resetFlight();
-        try {
-            auto w = std::make_unique<pw::evo::EvalWorker>(m_apCtx, m_apFactory());
-            w->bindLive(m_apGenome, *m_sim, m_env);
-            m_ap = std::move(w);
-            m_apAccum = 0;
-            setStatus("Autopilot on — press O or any flight key to take over", "info");
-        } catch (const std::exception& e) {
-            setStatus(QString("Autopilot failed: %1").arg(QString::fromUtf8(e.what())), "error");
-        }
+    if (!on) { releaseBehaviour(); return; }
+    if (m_behaviours.empty()) return;
+    // the behaviour EVOLVE just handed over, else the last one flown
+    int index = std::clamp(m_lastBehaviour, 0, int(m_behaviours.size()) - 1);
+    if (m_apCtx)
+        for (int i = 0; i < int(m_behaviours.size()); ++i)
+            if (m_behaviours[std::size_t(i)].controller.genome == m_apGenome) { index = i; break; }
+    startBehaviour(index, true);
+}
+
+// ---------------------------------------------------------------- behaviours
+
+void AppController::rebuildBehaviours() {
+    if (m_activeBehaviour >= int(m_behaviours.size())) { m_ap.reset(); m_activeBehaviour = -1; }
+    m_behaviourList.clear();
+    for (int i = 0; i < int(m_behaviours.size()); ++i) {
+        const auto& b = m_behaviours[std::size_t(i)];
+        QVariantMap m;
+        m["name"] = qs(b.name);
+        m["key"] = qs(b.key);
+        m["keyLabel"] = b.key.empty() ? QString() : keyDisplay(qs(b.key));
+        m["active"] = m_ap && m_activeBehaviour == i;
+        m["conflict"] = qs(evo::behaviours::keyConflict(m_doc, b.key, b.name));
+        QString info = qs(b.controller.experimentName.empty() ? std::string("an EVOLVE run") : "“" + b.controller.experimentName + "”");
+        info = "Trained in " + info + ", generation " + QString::number(b.controller.genome.generation);
+        if (b.controller.fitness) info += ", score " + QString::number(*b.controller.fitness, 'f', 1);
+        m["info"] = info;
+        m_behaviourList.push_back(m);
     }
+}
+
+bool AppController::startBehaviour(int index, bool fromSpawn) {
+    if (index < 0 || index >= int(m_behaviours.size()) || !m_sim) return false;
+    if (m_ap) { m_ap.reset(); for (int i = 0; i < int(m_values.size()); ++i) m_sim->setOutput(i, m_values[std::size_t(i)]); }
+    const evo::Behaviour& b = m_behaviours[std::size_t(index)];
+    const bool handoff = m_apCtx && m_apGenome == b.controller.genome;   // EVOLVE's own run: fly with its exact context
+    std::optional<evo::SpawnSettings> spawn;
+    if (handoff) spawn = m_apCtx->experiment.episode.spawn;
+    else if (b.controller.experiment) try { spawn = evo::ExperimentDocument::fromJson(*b.controller.experiment).episode.spawn; } catch (const std::exception&) {}
+    const bool air = spawn && spawn->mode == "air";
+    const double agl = m_sim->position().y - groundHeight(m_sim->position().x, m_sim->position().z);
+    const bool resting = m_sim->groundContact() || (length(m_sim->velocity()) < 0.5 && agl < m_radius * 2);
+    if (fromSpawn) {   // start where it was trained: the experiment's spawn
+        if (air) airStart(std::max(1.0, spawn->altitudeAGL), spawn->speed); else resetFlight();
+    } else if (air && resting) {
+        airStart(std::max(1.0, spawn->altitudeAGL), spawn->speed);   // it learned from an air start: it can't take off
+    }
+    const QString name = qs(b.name);
+    try {
+        m_ap = handoff ? std::make_unique<evo::LivePilot>(m_apCtx, m_apGenome, m_apFactory, *m_sim, m_env)
+                       : std::make_unique<evo::LivePilot>(b.controller, m_flightDoc, *m_sim, m_env);
+        m_activeBehaviour = index; m_lastBehaviour = index;
+        const QString how = b.key.empty() ? QString("click it or move a stick to take over")
+                                          : QString("press %1 or move a stick to take over").arg(keyDisplay(qs(b.key)));
+        // the HUD shows it (no toast over the HUD pill); a fallback controller says why it may fly differently
+        m_status = name + " is flying — " + how + (m_ap->exact() ? QString() : QString(" (standalone controller: %1)").arg(qs(m_ap->note())));
+        emit statusChanged();
+        if (!m_ap->exact()) emit notify(m_status, "warn");
+    } catch (const std::exception& e) {
+        m_ap.reset(); m_activeBehaviour = -1;
+        setStatus(QString("%1 couldn't start: %2").arg(name, QString::fromUtf8(e.what())), "bad");
+    }
+    rebuildBehaviours();
     emit autopilotChanged();
+    return m_ap != nullptr;
+}
+
+void AppController::engageBehaviour(int index) { startBehaviour(index, false); }
+
+void AppController::toggleBehaviour(int index) {
+    if (m_ap && m_activeBehaviour == index) releaseBehaviour();
+    else startBehaviour(index, false);
+}
+
+void AppController::releaseBehaviour() {
+    if (!m_ap) return;
+    const QString name = m_activeBehaviour >= 0 && m_activeBehaviour < int(m_behaviours.size()) ? qs(m_behaviours[std::size_t(m_activeBehaviour)].name) : QString("Autopilot");
+    m_ap.reset();
+    m_activeBehaviour = -1;
+    if (m_sim) for (int i = 0; i < int(m_values.size()); ++i) m_sim->setOutput(i, m_values[std::size_t(i)]);   // hand back the sliders
+    m_controls.reset();   // axes start from neutral, not from before the behaviour flew
+    rebuildBehaviours();
+    emit autopilotChanged();
+    m_status = name + " off — you have control"; emit statusChanged();
+}
+
+void AppController::editBehaviours(const std::string& label, const std::vector<evo::Behaviour>& list) {
+    // Behaviours are craft metadata: no sim reload, so renaming or rebinding in FLY doesn't interrupt the flight.
+    pushUndo(label);
+    evo::behaviours::store(m_doc, list);
+    m_behaviours = evo::behaviours::list(m_doc);
+    m_dirty = true;
+    rebuildBehaviours();
+    emit autopilotChanged();
+    emit docChanged();
+}
+
+void AppController::renameBehaviour(int index, const QString& name) {
+    const std::string n = ss(name.trimmed());
+    if (index < 0 || index >= int(m_behaviours.size()) || n.empty() || n == m_behaviours[std::size_t(index)].name) return;
+    for (int i = 0; i < int(m_behaviours.size()); ++i)
+        if (i != index && QString::compare(qs(m_behaviours[std::size_t(i)].name), qs(n), Qt::CaseInsensitive) == 0) {
+            setStatus("There is already a behaviour called " + qs(n), "warn");
+            return;
+        }
+    auto l = m_behaviours;
+    l[std::size_t(index)].name = n;
+    editBehaviours("Rename behaviour", l);
+}
+
+QString AppController::behaviourKeyConflict(int index, const QString& key) const {
+    if (index < 0 || index >= int(m_behaviours.size())) return {};
+    return qs(evo::behaviours::keyConflict(m_doc, ss(key), m_behaviours[std::size_t(index)].name));
+}
+
+QString AppController::setBehaviourKey(int index, const QString& key) {
+    if (index < 0 || index >= int(m_behaviours.size())) return {};
+    const QString why = behaviourKeyConflict(index, key);
+    if (!why.isEmpty()) { setStatus(why + " — pick another key", "warn"); return why; }
+    auto l = m_behaviours;
+    l[std::size_t(index)].key = ss(key);
+    editBehaviours(key.isEmpty() ? "Clear behaviour key" : "Change behaviour key", l);
+    return {};
+}
+
+void AppController::removeBehaviour(int index) {
+    if (index < 0 || index >= int(m_behaviours.size())) return;
+    if (m_ap && m_activeBehaviour == index) releaseBehaviour();
+    else if (m_ap && m_activeBehaviour > index) --m_activeBehaviour;
+    const QString name = qs(m_behaviours[std::size_t(index)].name);
+    auto l = m_behaviours;
+    l.erase(l.begin() + index);
+    m_lastBehaviour = 0;
+    editBehaviours("Remove behaviour", l);
+    setStatus("Removed " + name + " (Undo brings it back)", "info");
+}
+
+QVariantList AppController::flyKeysInUse() const {
+    QVariantList l;
+    for (const auto& u : evo::behaviours::flyKeys(m_doc))
+        l.push_back(QVariantMap{{"key", qs(u.key)}, {"label", keyDisplay(qs(u.key))}, {"what", qs(u.what)}});
+    return l;
 }
 
 void AppController::airStart(double altitude, double speed) {
@@ -1206,14 +1347,15 @@ QVariantList AppController::axisValues() const {
 void AppController::stepFly(double dt) {
     if (!m_sim) return;
     stepControls(dt);
-    if (m_ap) {   // evolved controller at its trained control rate (zero-order hold between ticks, like EVOLVE)
-        const double period = 1 / m_ap->controlHz();
-        m_apAccum += dt;
+    if (m_ap) {   // a behaviour at its trained control rate (zero-order hold between ticks, like EVOLVE)
         try {
-            while (m_apAccum >= period) { m_apAccum -= period; m_ap->liveTick(m_env); }
+            m_ap->update(m_env, dt);
         } catch (const std::exception& e) {
-            m_ap.reset(); emit autopilotChanged();
-            setStatus(QString("Autopilot stopped: %1").arg(QString::fromUtf8(e.what())), "error");
+            const QString name = m_activeBehaviour >= 0 && m_activeBehaviour < int(m_behaviours.size()) ? qs(m_behaviours[std::size_t(m_activeBehaviour)].name) : QString("Autopilot");
+            m_ap.reset(); m_activeBehaviour = -1;
+            rebuildBehaviours();
+            emit autopilotChanged();
+            setStatus(QString("%1 stopped: %2").arg(name, QString::fromUtf8(e.what())), "bad");
         }
     }
     m_eqAccum += dt;

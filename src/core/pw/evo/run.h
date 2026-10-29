@@ -37,9 +37,10 @@ struct HallOfFameEntry { int generation = 0; Genome genome; Fitness fitness; };
 enum class RunState : uint8_t { Idle, Running, Stopping, Finished, Failed };
 const char* runStateName(RunState s);
 
-/// Controller + genome embedded in an exported craft (parts[0].extra["evolvedController"]).
+/// Controller + genome embedded in an exported craft: the "controller" of each entry of the craft's top-level
+/// "behaviours" (see Behaviour). Older crafts carry a single one as parts[0].extra["evolvedController"].
 struct EmbeddedController {
-    static constexpr const char* key = "evolvedController";
+    static constexpr const char* key = "evolvedController";   // legacy part key
     int version = kFormatVersion;
     std::string experimentName, runID, mode;
     double hz = 50;
@@ -49,10 +50,43 @@ struct EmbeddedController {
     std::vector<std::string> inputNames, outputNames, termNames;
     std::optional<MLPSpec> mlp;
     std::optional<double> fitness;
+    /// The training experiment (ExperimentDocument JSON, crafts dropped, worlds set to flat) so FLY can rebuild the
+    /// training context on the flight craft. Missing in crafts exported before behaviours.
+    std::optional<Value> experiment;
     Value toJson() const;
     static EmbeddedController fromJson(const Value& v);
+    /// The first behaviour's controller, else the legacy part key.
     static std::optional<EmbeddedController> find(const craft::CraftDocument& craft);
 };
+
+/// A named evolved controller a craft carries; FLY engages it with its key ("Hover — press H to take over").
+/// Craft JSON (top level): "behaviours": [ { "name": "Hover", "key": "h", "controller": { EmbeddedController } } ].
+struct Behaviour {
+    std::string name;
+    std::string key;   // FLY key name ("h", "1", "up" ...); "" = none (engage it from the FLY list)
+    EmbeddedController controller;
+};
+namespace behaviours {
+constexpr const char* key = "behaviours";
+Value toJson(const Behaviour& b);
+Behaviour fromJson(const Value& v);   // throws on a malformed controller
+/// The craft's behaviours: its "behaviours" (malformed entries skipped), else a legacy "evolvedController" on a part
+/// as one behaviour (named after its experiment, key O).
+std::vector<Behaviour> list(const craft::CraftDocument& craft);
+/// Writes `list` as "behaviours" (the key is removed when empty) and drops legacy "evolvedController" part keys.
+void store(craft::CraftDocument& craft, const std::vector<Behaviour>& list);
+/// Adds `b`; a behaviour with the same name (ignoring case) is replaced, another one on the same key loses its key.
+void add(craft::CraftDocument& craft, const Behaviour& b);
+/// Keys FLY already uses with this craft: its own (reset, pause, camera, equations) and the craft's flight keys
+/// (control axes / output keybinds). The behaviours' own keys are not listed; O is free (see docs/CONTROLS.md).
+struct KeyUse { std::string key, what; };
+std::vector<KeyUse> flyKeys(const craft::CraftDocument& craft);
+/// A free key for a behaviour called `name`: its first letter, its other letters, 1-9, then any letter ("" if none).
+/// FLY keys and the keys of the craft's behaviours not called `name` count as taken.
+std::string suggestKey(const craft::CraftDocument& craft, const std::string& name);
+/// Why `key` can't be a behaviour key on this craft ("" = it can): FLY uses it, or another behaviour has it.
+std::string keyConflict(const craft::CraftDocument& craft, const std::string& key, const std::string& name);
+}
 
 class EvolutionRun {
 public:
@@ -100,8 +134,12 @@ public:
                                                 ScriptRuntimeFactory factory = nullptr, jobs::JobSystem* jobs = nullptr) {
         return resume(dir, std::vector<std::shared_ptr<const EvoWorld>>{std::move(world)}, std::move(factory), jobs);
     }
-    /// The craft as decoded for `genome`, with the controller embedded (FLY "autopilot from evolved controller").
-    craft::CraftDocument exportCraft(const Genome& genome, const Fitness* fitness = nullptr);
+    /// The craft as decoded for `genome`, with the controller embedded as its one behaviour (`name`, default the
+    /// experiment's name; `key`, default behaviours::suggestKey).
+    craft::CraftDocument exportCraft(const Genome& genome, const Fitness* fitness = nullptr, const std::string& name = {},
+                                     const std::optional<std::string>& key = std::nullopt);
+    /// The behaviour (controller + training experiment) for `genome`, without a craft.
+    Behaviour behaviour(const Genome& genome, const Fitness* fitness, const std::string& name, const std::string& key) const;
 
 private:
     GenerationRecord record(int gen, const std::vector<Genome>& pop, const std::vector<Fitness>& fit);
@@ -154,6 +192,7 @@ Trajectory record(std::shared_ptr<const ExperimentContext> ctx, const Genome& ge
 class EvolvedAutopilot {
 public:
     EvolvedAutopilot(const craft::CraftDocument& craft, sim::CraftSim& sim);   // throws
+    EvolvedAutopilot(const EmbeddedController& controller, sim::CraftSim& sim);   // throws
     void attach(sim::CraftSim& sim);
     void update(sim::CraftSim& sim, const sim::SimEnvironment& env, double dt);
     const EmbeddedController& controller() const { return controller_; }
@@ -168,6 +207,32 @@ private:
     std::vector<double> scale_, simInputs_, x_, y_;
     double accumulator_ = 0;
     std::string lastError_;
+};
+
+/// FLY flies a behaviour with this: the training context rebuilt from the stored experiment on the flight craft and
+/// EvalWorker::bindLive (the code EVOLVE trains with) at the trained control rate, zero-order hold between ticks.
+/// Controllers without a stored experiment (older crafts), or that no longer fit the craft that way, fall back to
+/// EvolvedAutopilot (`exact()` false, `note()` says why).
+class LivePilot {
+public:
+    /// `flightCraft` = the document `sim` was loaded from. Throws when neither way can fly it.
+    LivePilot(const EmbeddedController& c, const craft::CraftDocument& flightCraft, sim::CraftSim& sim, const sim::SimEnvironment& env);
+    /// EVOLVE's "Fly it with the evolved autopilot": the run's own context.
+    LivePilot(std::shared_ptr<const ExperimentContext> ctx, const Genome& genome, const ScriptRuntimeFactory& factory, sim::CraftSim& sim,
+              const sim::SimEnvironment& env);
+    ~LivePilot();
+    /// Advance `dt` s: runs the controller for each control period due. Call before stepping physics. Throws on a script error.
+    void update(const sim::SimEnvironment& env, double dt);
+    double controlHz() const { return hz_; }
+    bool exact() const { return worker_ != nullptr; }
+    const std::string& note() const { return note_; }
+private:
+    sim::CraftSim* sim_;
+    std::shared_ptr<const ExperimentContext> ctx_;
+    std::unique_ptr<EvalWorker> worker_;
+    std::unique_ptr<EvolvedAutopilot> legacy_;
+    double hz_ = 50, acc_ = 0;
+    std::string note_;
 };
 
 } // namespace pw::evo

@@ -183,10 +183,26 @@ public:
     // replay / export
     Q_INVOKABLE void replay(const QString& candidate);   // "g<gen>" | "cell<k>" | "best"
     Q_INVOKABLE void stopReplay();
-    Q_INVOKABLE QString exportBest();                     // path of the exported craft ("" on failure)
-    Q_INVOKABLE void flyWithAutopilot();
+    /// A new craft copy carrying the selected candidate as a behaviour called `name` (default: the experiment's name)
+    /// on a suggested key; returns its path ("" on failure).
+    Q_INVOKABLE QString exportBest(const QString& name = {});
+    Q_INVOKABLE void flyWithAutopilot(const QString& name = {});
+    // "Add to craft as a behaviour…" (Train › Results)
+    /// Where the behaviour can go: { craftName, craftPath (the experiment's craft when it is a saved one, else ""),
+    /// newName (default name for a new copy), designChanges (the run reshapes the craft: new copy only),
+    /// crafts: [{ name, path, behaviours }] saved library crafts }.
+    Q_INVOKABLE QVariantMap behaviourTargets() const;
+    /// Keys for a behaviour `name` on target `path` ("" = a new copy of the run's craft): { suggested, conflict
+    /// (why `key` can't be used, "" = fine), used: [{ key, label, what }] (FLY keys + the craft's other behaviours) }.
+    Q_INVOKABLE QVariantMap behaviourKeys(const QString& path, const QString& name, const QString& key) const;
+    /// Adds the selected candidate as behaviour `name` on `key` to the saved craft at `path` (updated in the library),
+    /// or to a new copy called `newName` when `path` is "". `fly`: then open it in FLY with the behaviour flying.
+    /// Returns the craft's path ("" on failure; the status says why).
+    Q_INVOKABLE QString addBehaviour(const QString& name, const QString& key, const QString& path, const QString& newName, bool fly);
     /// Set by the FLY controller: receives the trained controller that flyWithAutopilot hands over.
     static std::function<void(std::shared_ptr<const pw::evo::ExperimentContext>, pw::evo::Genome, pw::evo::ScriptRuntimeFactory)> autopilotSink;
+    /// Set by the FLY controller: a behaviour was added to the saved craft at this path (BUILD / FLY may have it open).
+    static std::function<void(const QString& path, const pw::evo::Behaviour&)> behaviourSink;
 
     // ReplayProvider
     const pw::craft::CraftDocument* replayCraft(uint64_t& version) const override;

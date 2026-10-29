@@ -22,6 +22,7 @@
 #include <vector>
 #include "pw/craft/document.h"
 #include "pw/evo/evaluator.h"
+#include "pw/evo/run.h"
 #include "pw/geo.h"
 #include "pw/sim/controls.h"
 #include "pw/sim/craft_sim.h"
@@ -84,8 +85,12 @@ class AppController : public QObject {
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY telemetryChanged)
     Q_PROPERTY(QVariantMap perf READ perf NOTIFY telemetryChanged)
     Q_PROPERTY(bool crashed READ crashed NOTIFY telemetryChanged)
-    Q_PROPERTY(bool autopilot READ autopilot WRITE setAutopilot NOTIFY autopilotChanged)            // evolved controller flying
-    Q_PROPERTY(bool autopilotAvailable READ autopilotAvailable NOTIFY autopilotChanged)
+    Q_PROPERTY(bool autopilot READ autopilot WRITE setAutopilot NOTIFY autopilotChanged)            // a behaviour is flying
+    Q_PROPERTY(bool autopilotAvailable READ autopilotAvailable NOTIFY autopilotChanged)           // the craft has behaviours
+    // ---- behaviours: evolved controllers the craft carries ("behaviours" in the craft JSON), each on its own key
+    Q_PROPERTY(QVariantList behaviours READ behaviours NOTIFY autopilotChanged)   // { name, key, keyLabel, active, conflict, trainedOn }
+    Q_PROPERTY(int activeBehaviour READ activeBehaviour NOTIFY autopilotChanged)  // index, -1 = you fly
+    Q_PROPERTY(int lastBehaviour READ lastBehaviour NOTIFY autopilotChanged)      // the one O starts
     // ---- FLY world: the WORLD tab's live world (terrain, water, trees, props, wind) or flat ground
     Q_PROPERTY(bool flyInWorld READ flyInWorld WRITE setFlyInWorld NOTIFY worldChanged)
     Q_PROPERTY(QString worldName READ worldName NOTIFY worldChanged)
@@ -176,10 +181,26 @@ public:
     QVariantList controlAxes() const;
     QVariantList axisValues() const;
     bool autopilot() const { return m_ap != nullptr; }
-    bool autopilotAvailable() const { return m_apCtx != nullptr; }
+    bool autopilotAvailable() const { return !m_behaviours.empty(); }
+    /// on: restart from the trained spawn with the behaviour EVOLVE handed over (else the first one); off: you fly.
     void setAutopilot(bool on);
-    /// EVOLVE → FLY: the trained controller that "Fly with the evolved autopilot" hands over.
+    /// EVOLVE → FLY: the trained controller that "Fly with the evolved autopilot" hands over; the behaviour with
+    /// this genome flies with the run's own context.
     void setAutopilotSource(std::shared_ptr<const pw::evo::ExperimentContext> ctx, pw::evo::Genome genome, pw::evo::ScriptRuntimeFactory factory);
+    QVariantList behaviours() const { return m_behaviourList; }
+    int activeBehaviour() const { return m_ap ? m_activeBehaviour : -1; }
+    int lastBehaviour() const { return m_behaviours.empty() ? -1 : std::clamp(m_lastBehaviour, 0, int(m_behaviours.size()) - 1); }
+    /// Engage behaviour `index` where the craft is (it takes the outputs over), or take control back if it is flying.
+    Q_INVOKABLE void toggleBehaviour(int index);
+    Q_INVOKABLE void engageBehaviour(int index);
+    Q_INVOKABLE void releaseBehaviour();
+    Q_INVOKABLE void renameBehaviour(int index, const QString& name);
+    /// "" = done; else why the key can't be used (FLY uses it, another behaviour has it). key "" clears it.
+    Q_INVOKABLE QString setBehaviourKey(int index, const QString& key);
+    Q_INVOKABLE QString behaviourKeyConflict(int index, const QString& key) const;
+    Q_INVOKABLE void removeBehaviour(int index);
+    /// Keys FLY uses with this craft: [{ key, label, what }] (its own keys and the craft's flight keys).
+    Q_INVOKABLE QVariantList flyKeysInUse() const;
     Q_INVOKABLE void airStart(double altitude, double speed);   // FLY: reset in the air, level, moving forward
     /// Scripted FLY input (--command "key-down <name>" / "key-up <name>"): hold or release a control key by name.
     Q_INVOKABLE void holdKey(const QString& name, bool down);
@@ -359,8 +380,13 @@ private:
     std::shared_ptr<const pw::evo::ExperimentContext> m_apCtx;
     pw::evo::Genome m_apGenome;
     pw::evo::ScriptRuntimeFactory m_apFactory;
-    std::unique_ptr<pw::evo::EvalWorker> m_ap;   // bound to m_sim while the autopilot flies
-    double m_apAccum = 0;
+    std::unique_ptr<pw::evo::LivePilot> m_ap;   // bound to m_sim while a behaviour flies
+    std::vector<pw::evo::Behaviour> m_behaviours;   // parsed from m_doc
+    QVariantList m_behaviourList;
+    int m_activeBehaviour = -1, m_lastBehaviour = 0;
+    void rebuildBehaviours();
+    void editBehaviours(const std::string& label, const std::vector<pw::evo::Behaviour>& list);
+    bool startBehaviour(int index, bool fromSpawn);
     pw::sim::ControlSystem m_controls;   // keys -> axes -> controller -> outputs
     std::vector<double> m_values;   // output values (index = m_sim outputs)
     std::vector<int> m_outputSim;   // m_outputs row -> sim output index

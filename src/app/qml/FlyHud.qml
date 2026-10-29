@@ -132,6 +132,58 @@ Item {
         }
     }
 
+    // ---- bottom centre: behaviours. Flying: "Hover — press H to take over" (click to take over); idle: their keys.
+    Rectangle {
+        id: behaviourPill
+        readonly property var list: App.behaviours
+        readonly property int active: App.activeBehaviour
+        readonly property var cur: active >= 0 && active < list.length ? list[active] : null
+        visible: list.length > 0
+        anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: Theme.s3 }
+        radius: Theme.radius
+        color: cur ? Theme.alpha(Qt.lighter(Theme.tabTint["EVOLVE"], 1), pillMa.containsMouse ? 0.95 : 0.85) : Theme.hud
+        width: Math.min(parent.width - Theme.s4 * 2, pillRow.implicitWidth + Theme.s3 * 2)
+        height: pillRow.implicitHeight + Theme.s2 * 2
+        clip: true
+        Behavior on color { ColorAnimation { duration: Theme.normal } }
+        Row {
+            id: pillRow
+            anchors.centerIn: parent
+            spacing: Theme.s2
+            // flying
+            Text { visible: !!behaviourPill.cur; anchors.verticalCenter: parent.verticalCenter; text: "✈︎"; color: "white"; font.pixelSize: Theme.body }
+            Text { visible: !!behaviourPill.cur; anchors.verticalCenter: parent.verticalCenter; color: "white"; font.pixelSize: Theme.small; font.weight: Font.Bold
+                text: behaviourPill.cur ? behaviourPill.cur.name : "" }
+            Text { visible: !!behaviourPill.cur; anchors.verticalCenter: parent.verticalCenter; color: Qt.rgba(1, 1, 1, 0.85); font.pixelSize: Theme.small
+                text: behaviourPill.cur && behaviourPill.cur.key !== "" ? qsTr("— press") : qsTr("— move a stick to take over") }
+            KeyHint { visible: !!behaviourPill.cur && behaviourPill.cur.key !== ""; anchors.verticalCenter: parent.verticalCenter; hud: true; raw: true
+                sequence: behaviourPill.cur ? behaviourPill.cur.keyLabel : "" }
+            Text { visible: !!behaviourPill.cur && behaviourPill.cur.key !== ""; anchors.verticalCenter: parent.verticalCenter; color: Qt.rgba(1, 1, 1, 0.85)
+                font.pixelSize: Theme.small; text: qsTr("to take over") }
+            // idle: what each key starts
+            Text { visible: !behaviourPill.cur; anchors.verticalCenter: parent.verticalCenter; text: qsTr("Behaviours"); color: Theme.hudFaint
+                font.pixelSize: Theme.micro + 1; font.weight: Font.DemiBold; font.letterSpacing: 0.8 }
+            Repeater {
+                model: behaviourPill.cur ? [] : behaviourPill.list
+                Row {
+                    required property var modelData
+                    spacing: Theme.s1
+                    anchors.verticalCenter: parent.verticalCenter
+                    KeyHint { visible: modelData.key !== ""; hud: true; raw: true; sequence: modelData.keyLabel; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: modelData.name; color: Theme.hudMuted; font.pixelSize: Theme.caption; anchors.verticalCenter: parent.verticalCenter }
+                }
+            }
+        }
+        MouseArea {
+            id: pillMa
+            anchors.fill: parent
+            enabled: !!behaviourPill.cur
+            hoverEnabled: true
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: App.releaseBehaviour()
+        }
+    }
+
     // ---- paused veil
     Rectangle {
         anchors.fill: parent

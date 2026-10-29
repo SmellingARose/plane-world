@@ -19,6 +19,7 @@ SplitView {
     function showWiring() { panel.showWiring() }
     function showAlgorithm(compare) { panel.showAlgorithm(compare) }
     function showGoal(view) { panel.showGoal(view) }
+    function addBehaviour() { panel.addBehaviour() }
     Shortcut { sequence: "Ctrl+Return"; enabled: page.visible; onActivated: panel.train() }
     Shortcut { sequences: [StandardKey.Save]; enabled: page.visible; onActivated: ev.save() }
     Shortcut { sequence: "Ctrl+Shift+S"; enabled: page.visible; onActivated: panel.saveFileAs() }

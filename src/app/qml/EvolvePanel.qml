@@ -112,6 +112,14 @@ Rectangle {
         onAccepted: ev.removeGoalPreset(goal.file)
     }
     function deletePreset(g) { deletePresetDlg.goal = g; deletePresetDlg.open() }
+    // A behaviour's default name: short words for the goal preset ("Hover"), else its title, else the experiment's name.
+    function behaviourName() {
+        const short = { hold: qsTr("Hold height"), hover: qsTr("Hover"), target: qsTr("Fly to target"), distance: qsTr("Fly far"), drive: qsTr("Drive to point") }
+        if (root.goalDef) return short[root.goalDef.id] || root.goalDef.title
+        return xp.name || qsTr("Autopilot")
+    }
+    // palette "EVOLVE: add best to a craft as a behaviour": Train page, the dialog open
+    function addBehaviour() { if (!root.hasResults) return; root.page = 1; behaviourDlg.show(behaviourName()) }
     function brainText() {
         const c = xp.controller ? xp.controller.mode : "mlp"
         if (c === "neat") return qsTr("NEAT controller")
@@ -681,13 +689,13 @@ Rectangle {
                     ColumnLayout {
                         Layout.fillWidth: true; Layout.leftMargin: Theme.s4; Layout.rightMargin: Theme.s4
                         spacing: Theme.s2
-                        Hint { visible: !root.hasResults; text: qsTr("After the first generation you can replay the best flight here, fly it yourself with the evolved autopilot, or save it as a craft.") }
+                        Hint { visible: !root.hasResults; text: qsTr("After the first generation you can replay the best flight here, fly it yourself with the evolved autopilot, or add it to a craft as a behaviour you start with a key.") }
                         Button {
                             Layout.fillWidth: true
                             highlighted: root.hasResults && !ev.running
                             enabled: root.hasResults
                             text: qsTr("✈︎  Fly it with the evolved autopilot")
-                            onClicked: ev.flyWithAutopilot()
+                            onClicked: ev.flyWithAutopilot(root.behaviourName())
                             ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Opens the best candidate in FLY with its controller driving the outputs")
                         }
                         RowLayout {
@@ -695,9 +703,16 @@ Rectangle {
                             spacing: Theme.s1
                             Button { Layout.fillWidth: true; Layout.preferredWidth: 1; text: qsTr("Replay best"); enabled: root.hasResults; onClicked: ev.replay("best")
                                 ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Watch the best flight so far in the 3D view (Space plays / pauses)") }
-                            Button { Layout.fillWidth: true; Layout.preferredWidth: 1; text: qsTr("Save as craft"); enabled: root.hasResults; onClicked: ev.exportBest()
-                                ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Saves the craft with the evolved controller embedded to your craft library") }
                         }
+                        Button {
+                            Layout.fillWidth: true
+                            text: qsTr("Add to craft as a behaviour…")
+                            enabled: root.hasResults
+                            onClicked: behaviourDlg.show(root.behaviourName())
+                            ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay
+                            ToolTip.text: qsTr("Keeps this controller on a craft under a name and a key, so in FLY you press the key and it flies (a craft can carry several)")
+                        }
+                        BehaviourDialog { id: behaviourDlg }
 
                         PwSection {
                             visible: ev.termNames.length > 0

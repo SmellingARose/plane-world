@@ -1181,12 +1181,118 @@ void EvolveModel::frame() {
 
 // ---------------------------------------------------------------- export
 
-QString EvolveModel::exportBest() {
+namespace {
+bool isBuiltIn(const std::string& name) {
+    for (auto& c : craft::presets::bundled()) if (c.name == name) return true;
+    return false;
+}
+// Saved library crafts a behaviour can go into (a saved craft named like a built-in is hidden by it, so not those).
+std::vector<std::pair<std::string, craft::CraftDocument>> savedCrafts() {
+    std::vector<std::pair<std::string, craft::CraftDocument>> r;
+    for (const auto& f : craft::library::listCrafts()) {
+        craft::CraftDocument d; std::string err;
+        if (craft::loadCraftFile(f, d, err) && !isBuiltIn(d.name)) r.push_back({f, std::move(d)});
+    }
+    return r;
+}
+}
+
+QVariantMap EvolveModel::behaviourTargets() const {
+    QVariantMap m;
+    QVariantList crafts;
+    for (auto& [path, d] : savedCrafts())
+        crafts << QVariantMap{{"name", QString::fromStdString(d.name)}, {"path", QString::fromStdString(path)},
+                              {"behaviours", int(evo::behaviours::list(d).size())}};
+    m["crafts"] = crafts;
+    if (!m_run) return m;
+    const auto& e = m_run->context()->experiment;
+    const std::string craftName = m_run->context()->craft.name;
+    m["craftName"] = QString::fromStdString(craftName);
+    m["designChanges"] = e.genome.preset == "design" || e.genome.preset == "coevolve";
+    QString path;
+    if (!e.crafts.empty() && !e.crafts[0].inlineDoc) {
+        if (e.crafts[0].path) {
+            std::filesystem::path p(*e.crafts[0].path);
+            if (p.is_relative() && !m_path.isEmpty()) p = std::filesystem::path(m_path.toStdString()).parent_path() / p;
+            if (std::filesystem::exists(p)) path = QString::fromStdString(p.string());
+        } else if (e.crafts[0].name && !isBuiltIn(*e.crafts[0].name)) {
+            for (auto& [f, d] : savedCrafts()) if (d.name == *e.crafts[0].name) { path = QString::fromStdString(f); break; }
+        }
+    }
+    m["craftPath"] = path;
+    m["newName"] = QString::fromStdString(craftName + " (evolved)");
+    return m;
+}
+
+QVariantMap EvolveModel::behaviourKeys(const QString& path, const QString& name, const QString& key) const {
+    QVariantMap m;
+    craft::CraftDocument doc;
+    if (path.isEmpty()) { if (m_run) doc = m_run->context()->craft; }
+    else { std::string err; craft::loadCraftFile(path.toStdString(), doc, err); }
+    const std::string n = name.trimmed().toStdString();
+    m["suggested"] = QString::fromStdString(evo::behaviours::suggestKey(doc, n));
+    m["conflict"] = QString::fromStdString(evo::behaviours::keyConflict(doc, key.toStdString(), n));
+    QVariantList used;
+    for (auto& u : evo::behaviours::flyKeys(doc))
+        used << QVariantMap{{"key", QString::fromStdString(u.key)}, {"label", QString::fromUtf8(craft::keyDisplayName(u.key))}, {"what", QString::fromStdString(u.what)}};
+    for (auto& b : evo::behaviours::list(doc))
+        if (!b.key.empty() && QString::fromStdString(b.name).compare(name.trimmed(), Qt::CaseInsensitive) != 0)
+            used << QVariantMap{{"key", QString::fromStdString(b.key)}, {"label", QString::fromUtf8(craft::keyDisplayName(b.key))}, {"what", QString::fromStdString(b.name)}};
+    m["used"] = used;
+    return m;
+}
+
+std::function<void(const QString&, const pw::evo::Behaviour&)> EvolveModel::behaviourSink;
+
+QString EvolveModel::addBehaviour(const QString& name, const QString& key, const QString& path, const QString& newName, bool fly) {
+    if (!m_run) { setStatus(tr("Train first, then add the result to a craft")); return {}; }
+    auto c = candidate(m_selected.isEmpty() ? QStringLiteral("best") : m_selected);
+    if (!c) { setStatus(tr("Nothing to add yet")); return {}; }
+    const std::string n = name.trimmed().isEmpty() ? m_run->context()->experiment.name : name.trimmed().toStdString();
+    const std::string k = key.toStdString();
+    try {
+        craft::CraftDocument doc;
+        std::string target = path.toStdString();
+        if (target.empty()) {   // a new copy: the run's craft as decoded for the candidate (keeps its other behaviours)
+            const std::string copyName = newName.trimmed().isEmpty() ? m_run->context()->craft.name + " (evolved)" : newName.trimmed().toStdString();
+            for (auto& [f, d] : savedCrafts()) if (d.name == copyName) { target = f; doc = d; break; }   // that name exists: add to it
+            if (target.empty()) {
+                doc = m_run->exportCraft(c->genome, &c->fitness, n, std::string());
+                doc.name = copyName;
+                evo::behaviours::store(doc, {});   // re-added below, after the key check
+                for (auto& b : evo::behaviours::list(m_run->context()->craft)) evo::behaviours::add(doc, b);
+            }
+        } else {
+            std::string err;
+            if (!craft::loadCraftFile(target, doc, err)) throw evo::EvoError(err);
+        }
+        if (const std::string why = evo::behaviours::keyConflict(doc, k, n); !why.empty()) throw evo::EvoError(why + ": pick another key");
+        const evo::Behaviour b = m_run->behaviour(c->genome, &c->fitness, n, k);
+        evo::behaviours::add(doc, b);
+        std::string out, err;
+        if (!craft::library::saveCraft(doc, out, err, target)) throw evo::EvoError(err);
+        refreshLibrary();
+        if (behaviourSink) behaviourSink(QString::fromStdString(out), b);
+        const QString keyText = k.empty() ? QString() : tr(" on %1").arg(QString::fromUtf8(craft::keyDisplayName(k)));
+        setStatus(tr("Added “%1”%2 to “%3”").arg(QString::fromStdString(n), keyText, QString::fromStdString(doc.name)));
+        if (fly) {
+            stopReplay();
+            if (autopilotSink) autopilotSink(m_run->context(), c->genome, m_run->runtimeFactory());
+            emit flyRequested(QUrl::fromLocalFile(QString::fromStdString(out)).toString());
+        }
+        return QString::fromStdString(out);
+    } catch (const std::exception& e) {
+        setStatus(tr("Couldn't add the behaviour: %1").arg(QString::fromUtf8(e.what())));
+        return {};
+    }
+}
+
+QString EvolveModel::exportBest(const QString& name) {
     if (!m_run) { setStatus(tr("Nothing to export")); return {}; }
     auto c = candidate(m_selected.isEmpty() ? QStringLiteral("best") : m_selected);
     if (!c) { setStatus(tr("Nothing to export")); return {}; }
     try {
-        craft::CraftDocument doc = m_run->exportCraft(c->genome, &c->fitness);
+        craft::CraftDocument doc = m_run->exportCraft(c->genome, &c->fitness, name.trimmed().toStdString());
         std::string out, err;
         if (!craft::library::saveCraft(doc, out, err)) throw evo::EvoError(err);
         refreshLibrary();
@@ -1200,8 +1306,8 @@ QString EvolveModel::exportBest() {
 
 std::function<void(std::shared_ptr<const pw::evo::ExperimentContext>, pw::evo::Genome, pw::evo::ScriptRuntimeFactory)> EvolveModel::autopilotSink;
 
-void EvolveModel::flyWithAutopilot() {
-    QString p = exportBest();
+void EvolveModel::flyWithAutopilot(const QString& name) {
+    QString p = exportBest(name);
     if (p.isEmpty()) return;
     stopReplay();
     if (auto c = candidate(m_selected.isEmpty() ? QStringLiteral("best") : m_selected); c && autopilotSink)

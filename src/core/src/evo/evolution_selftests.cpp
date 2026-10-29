@@ -14,6 +14,7 @@
 #include <set>
 #include <thread>
 #include "pw/craft/library.h"
+#include "pw/craft/outputs.h"
 #include "pw/evo/run.h"
 #include "pw/json.h"
 #include "pw/evo/selftests.h"
@@ -904,6 +905,79 @@ void registerRunTests() {
         for (auto& o : sim.outputs()) if (o.name == "Engine" && o.value != 0) drives = true;
         ok &= expect(c, ap.lastError().empty() && drives, "autopilot drives outputs");
         std::error_code ec2; std::filesystem::remove_all(dir, ec2);
+        return ok;
+    });
+    selftest::add("evolution.behaviours", [](Context& c) -> bool {
+        c.note("a craft carries several named evolved controllers (\"behaviours\"), each on its own FLY key");
+        ExperimentDocument e = presets::neuralController();   // its JavaScript goal: FLY rebuilds the run from the craft alone
+        e.algorithm = AlgorithmParams{"simple-es", {}};
+        e.population = 8; e.episode.duration = 4; e.checkpointEvery = 0; e.worlds = {WorldRef{"flat"}};
+        EvolutionRun run(e, trainer(), EvoWorld::flat(), "behaviours", {});
+        run.runGeneration();
+        const HallOfFameEntry best = run.hallOfFame().front();
+        auto roundTrip = [](const craft::CraftDocument& d) {
+            craft::CraftDocument r; std::string err;
+            craft::fromJson(json::parse(craft::dumpCraft(d)).value, r, err);
+            return r;
+        };
+        // export: one behaviour, named, on a suggested free key
+        craft::CraftDocument doc = roundTrip(run.exportCraft(best.genome, &best.fitness, "Hold height"));
+        auto l = behaviours::list(doc);
+        bool ok = expect(c, l.size() == 1 && l[0].name == "Hold height" && l[0].key == "h" && l[0].controller.genome == best.genome
+                                && l[0].controller.experiment.has_value(), "export: one behaviour \"Hold height\" on H, with genome + experiment");
+        ok &= expect(c, doc.extra.find(behaviours::key) && !doc.parts[0].extra.find(EmbeddedController::key), "stored on the craft, no legacy part key");
+        ok &= expect(c, EmbeddedController::find(doc).has_value(), "EmbeddedController::find reads behaviours");
+        // old crafts: a single evolvedController on a part becomes one behaviour on O
+        craft::CraftDocument legacy = doc;
+        EmbeddedController old = l[0].controller; old.experiment.reset();
+        behaviours::store(legacy, {});
+        legacy.parts[0].extra.set(EmbeddedController::key, old.toJson());
+        legacy = roundTrip(legacy);
+        auto ll = behaviours::list(legacy);
+        ok &= expect(c, ll.size() == 1 && ll[0].key == "o" && ll[0].name == e.name && ll[0].controller.genome == best.genome,
+                     "legacy evolvedController -> one behaviour \"" + (ll.empty() ? std::string() : ll[0].name) + "\" on O");
+        // several: add, replace by name, steal a key
+        Behaviour climb = l[0]; climb.name = "Climb"; climb.key = "2";
+        behaviours::add(legacy, climb);   // migrates the legacy one into "behaviours"
+        Behaviour cruise = l[0]; cruise.name = "Cruise"; cruise.key = "2";
+        behaviours::add(legacy, cruise);
+        Behaviour climb2 = climb; climb2.name = "climb"; climb2.key = "k";
+        behaviours::add(legacy, climb2);
+        legacy = roundTrip(legacy);
+        auto l3 = behaviours::list(legacy);
+        ok &= expect(c, l3.size() == 3 && l3[0].key == "o" && l3[1].name == "climb" && l3[1].key == "k" && l3[2].name == "Cruise" && l3[2].key == "2",
+                     "three behaviours round-trip in order; same name replaces, a taken key moves");
+        ok &= expect(c, !legacy.parts[0].extra.find(EmbeddedController::key), "storing drops the legacy part key");
+        // keys
+        ok &= expect(c, !behaviours::keyConflict(legacy, "r", "x").empty() && !behaviours::keyConflict(legacy, "up", "x").empty()
+                            && !behaviours::keyConflict(legacy, "k", "Cruise").empty() && behaviours::keyConflict(legacy, "k", "Climb").empty()
+                            && behaviours::keyConflict(legacy, "j", "x").empty(), "FLY keys, flight keys and other behaviours' keys are refused");
+        const std::string sk = behaviours::suggestKey(legacy, "Circle");
+        ok &= expect(c, sk == "i", "suggested key for \"Circle\" skips C (camera): " + sk);
+        // FLY: the rebuilt training context flies the craft exactly like the run's own context
+        craft::CraftDocument flight = craft::outputs::prepareForFlight(presets::addStandardSensors(doc));
+        sim::CraftSim a, b;
+        a.load(sim::CraftSpec::fromDocument(flight)); b.load(sim::CraftSpec::fromDocument(flight));
+        sim::SimEnvironment ea, eb;
+        a.reset(a.restingSpawn() + Vec3d{0, 150, 0}); b.reset(b.restingSpawn() + Vec3d{0, 150, 0});
+        LivePilot pa(l[0].controller, flight, a, ea);
+        LivePilot pb(run.context(), best.genome, run.runtimeFactory(), b, eb);
+        bool same = pa.exact();
+        for (int k = 0; k < 300 && same; ++k) {
+            pa.update(ea, 1.0 / 300); pb.update(eb, 1.0 / 300);
+            a.step(1.0 / 300, ea); b.step(1.0 / 300, eb);
+            ea.time += 1.0 / 300; eb.time += 1.0 / 300;
+            for (std::size_t i = 0; i < a.outputs().size(); ++i) same = same && a.outputs()[i].value == b.outputs()[i].value;
+        }
+        ok &= expect(c, same && a.position() == b.position(), "behaviour from the craft alone flies bit-identically to the run's context (" + pa.note() + ")");
+        // older controller without its experiment: the standalone autopilot still flies it
+        sim::CraftSim s; s.load(sim::CraftSpec::fromDocument(flight));
+        sim::SimEnvironment es;
+        LivePilot pl(old, flight, s, es);
+        for (int k = 0; k < 60; ++k) { pl.update(es, 1.0 / 60); s.step(1.0 / 60, es); }
+        bool drives = false;
+        for (auto& o : s.outputs()) if (o.value != 0) drives = true;
+        ok &= expect(c, !pl.exact() && drives, "no stored experiment: falls back to EvolvedAutopilot and drives the outputs");
         return ok;
     });
     selftest::add("evolution.replay-matches-training", [](Context& c) -> bool {
