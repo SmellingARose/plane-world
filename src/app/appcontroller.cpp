@@ -1306,10 +1306,11 @@ void AppController::tick() {
     if (m_statAccum >= 0.1) { m_statAccum = 0; updateTelemetry(); }
 }
 
-void AppController::stepControls(double dt) {
-    if (m_ap) return;   // the evolved autopilot is flying; any bound key hands control back (flyKey)
+// true when a direct-controlled output moved (the caller mirrors the outputs into the sliders once per frame)
+bool AppController::stepControls(double dt) {
+    if (m_ap) return false;   // the evolved autopilot is flying; any bound key hands control back (flyKey)
     const bool moved = m_controls.step(*m_sim, [this](const std::string& k) { return m_held.contains(qs(k)); }, dt);
-    if (moved && m_controls.controller() == sim::ControllerKind::Direct) syncOutputValues();
+    return moved && m_controls.controller() == sim::ControllerKind::Direct;
 }
 
 // Mirror the sim's output values into the FLY sliders (controllers and autopilots write them directly).
@@ -1346,26 +1347,36 @@ QVariantList AppController::axisValues() const {
 
 void AppController::stepFly(double dt) {
     if (!m_sim) return;
-    stepControls(dt);
-    if (m_ap) {   // a behaviour at its trained control rate (zero-order hold between ticks, like EVOLVE)
-        try {
-            m_ap->update(m_env, dt);
-        } catch (const std::exception& e) {
-            const QString name = m_activeBehaviour >= 0 && m_activeBehaviour < int(m_behaviours.size()) ? qs(m_behaviours[std::size_t(m_activeBehaviour)].name) : QString("Autopilot");
-            m_ap.reset(); m_activeBehaviour = -1;
-            rebuildBehaviours();
-            emit autopilotChanged();
-            setStatus(QString("%1 stopped: %2").arg(name, QString::fromUtf8(e.what())), "bad");
-        }
-    }
     m_eqAccum += dt;
     if (m_eqLive && m_eqAccum >= 0.1 && !m_capture.requested) {
         m_eqAccum = 0;
         m_capture.request(m_eqPart.empty() ? -1 : m_sim->partIndex(m_eqPart));
     }
     QElapsedTimer t; t.start();
-    m_sim->step(dt, m_env);
-    m_env.time += dt;
+    // Controls, behaviours and physics advance together in fixed slices of at most 1/kControlHz s, whatever the
+    // frame rate. The flight controllers are discrete loops tuned for >= 120 Hz: stepped once per 60 Hz frame, the
+    // multirotor controller slammed diagonal motor pairs between 0 and 1 on alternate frames and the quad jumped up
+    // every couple of seconds (physics.multirotor-fc-frame-rates).
+    const int slices = std::max(1, int(std::ceil(dt * kControlHz - 1e-9)));
+    const double sub = dt / slices;
+    bool moved = false;
+    for (int i = 0; i < slices; ++i) {
+        moved |= stepControls(sub);
+        if (m_ap) {   // a behaviour at its trained control rate (zero-order hold between ticks, like EVOLVE)
+            try {
+                m_ap->update(m_env, sub);
+            } catch (const std::exception& e) {
+                const QString name = m_activeBehaviour >= 0 && m_activeBehaviour < int(m_behaviours.size()) ? qs(m_behaviours[std::size_t(m_activeBehaviour)].name) : QString("Autopilot");
+                m_ap.reset(); m_activeBehaviour = -1;
+                rebuildBehaviours();
+                emit autopilotChanged();
+                setStatus(QString("%1 stopped: %2").arg(name, QString::fromUtf8(e.what())), "bad");
+            }
+        }
+        m_sim->step(sub, m_env);
+        m_env.time += sub;
+    }
+    if (moved) syncOutputValues();
     if (m_obstacles) {   // world props and tree trunks (same swept-corner test as EVOLVE's headless runs)
         const int n = m_sim->writeWorldCorners(m_cornersCur.data(), int(m_cornersCur.size()));
         const double travel = length(m_sim->position() - m_prevPos);

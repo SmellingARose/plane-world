@@ -1,7 +1,10 @@
 # Controls
 
 How a pilot (keyboard, slider, script or autopilot) flies a craft. Code: `src/core/pw/sim/controls.h`,
-`multirotor.h`; FLY wiring in `AppController::stepControls`.
+`multirotor.h`; FLY wiring in `AppController::stepControls`. FLY runs the controllers and the physics in fixed
+slices of at most 1/240 s per frame (`AppController::stepFly`, `kControlHz`): the flight controllers are discrete
+loops, and stepped once per 60 Hz frame the multirotor one limit-cycled, so a hands-off quad jumped up every couple of
+seconds (`physics.multirotor-fc-frame-rates`).
 
 ```
 keys / sliders / scripts ──► AXES ──► CONTROLLER ──► OUTPUTS (servos, motors, jets, boosters)

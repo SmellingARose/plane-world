@@ -324,7 +324,8 @@ private:
     double m_frameEma = 0;
     double m_lastStep = 0;   // sim time advanced in the last frame (s)   // smoothed frame interval (s)   // measured wall time not yet simulated (drift correction for refresh snapping)
     void stepFly(double dt);
-    void stepControls(double dt);
+    bool stepControls(double dt);
+    static constexpr double kControlHz = 240;   // FLY steps controls + physics at least this often (stepFly)
     void syncOutputValues();
     void updateTelemetry();
     void collectEquations();

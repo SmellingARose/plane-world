@@ -173,6 +173,9 @@ Item {
         Accessible.role: Accessible.CheckBox
         Accessible.checkable: true
         Accessible.checked: used
+        // VoiceOver / assistive "press" and "toggle" wire it in or out, like a click
+        Accessible.onPressAction: cv.toggled(which, node.name, !used)
+        Accessible.onToggleAction: cv.toggled(which, node.name, !used)
         Keys.onSpacePressed: cv.toggled(which, node.name, !used)
         Keys.onReturnPressed: cv.toggled(which, node.name, !used)
         // keep the focused node in view
