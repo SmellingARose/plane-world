@@ -234,7 +234,12 @@ Goal page's wiring card ("Change") and the palette entry "EVOLVE: show controlle
 
 **Craft kinds** (`evo::craftKind`, `evolution.craft-kind`): rocket (rocket or solid motor), rotor (propellers
 pushing up that can lift it, e.g. multirotors and the ducted tail-sitter), plane (wings), ground (wheels), else
-other. Goal lists show the presets that suit the craft first; the rest stay pickable, faded, with who they are for. A document that still names controls or sensors the craft lacks
+other. Presets are by craft: the three preset lists (Set up › ③ Goal, the Goal page's "Start from…" and the JavaScript
+view's "Start from…") show only the presets that suit the craft, plus the goal in use even when it is for another
+kind; "Show presets for other crafts" (a check box under ③'s list, a menu entry in both menus) adds the rest, faded,
+with who they are for. An "other" craft sees every preset. By kind: planes — Hold a height, Fly to a target, Fly as
+far as possible, Take off and climb, Hold a speed and heading; drones — Hover, Fly to a target, Hold position in
+wind; rockets — Hover, Hop and land softly; ground vehicles — Drive to a point, Drive fast without flipping. A document that still names controls or sensors the craft lacks
 (an opened file, a hand edit) shows the problem under the craft picker, with a "Re-wire for <craft>" button, instead
 of failing at Start
 (`evolution.switch-craft-rewires`, pwuitests "goal blocks").
@@ -248,9 +253,11 @@ too high, hasn't taken off by N s — ground contact, so a rocket standing on it
 the sum of the per-second weights for every second left, so crashing early never beats flying on; every preset
 uses it, and the Neural preset script (= Hold) does the same natively — without it, New Shepard learned to cut the
 engine and dive. Experiments saved with the older flat −20 open as Hold, "edited", with an update offer), and a custom-code block for
-anything else (helpers, `control()`, `descriptor()`). Set up › ③ Goal picks a preset (hold a height, hover, fly to a
-target, fly far, drive to a point; each is a block program), shows its one main setting (hover height, target
-distance…) and lists in plain language how it scores and when a flight ends. "Hold" at 150 m compiles
+anything else (helpers, `control()`, `descriptor()`). Two signals keep per-flight memory (a signal's `init` /
+`update` code in `EvolveBlocks.js`, emitted only when a term uses it): "highest height so far" and "turn from the
+start heading" (−180…180°). Set up › ③ Goal picks a preset (each is a block program, tagged with the craft kinds it
+suits), shows its one main setting (hover height, target distance, top speed…) and lists in plain language how it
+scores and when a flight ends. "Hold" at 150 m compiles
 to the Neural-controller preset script verbatim, so the native fast path still applies. The JavaScript view shows
 what the blocks generate; editing it there marks the goal "edited": training uses the edited script and the blocks
 are shown faded until you "Discard my edits" (back to the blocks) or "Keep my edits" (drop the blocks). A hand-written script that blocks can't represent stays JavaScript; "Start from…"
@@ -261,6 +268,23 @@ Hover is tuned for drones and rockets from either start: "still" (sideways speed
 keeps it over the start with a gradient everywhere, "drift" (distance from the start, full at 100 m) is a light
 backstop, and "hasn't taken off by 3 s" ends the flight with −20 plus the per-second charge, so sitting on the pad
 is as bad as crashing (before it, New Shepard from a runway start sat still for 40 generations).
+
+The other presets (setting in brackets; every crash / flip / never-took-off end charges the seconds not flown):
+
+| Preset | Craft | Scores |
+|---|---|---|
+| Take off and climb (height, 300 m) | plane | height up to the setting (1/s), airspeed up to 40 m/s (0.3/s, starts the take-off roll from gen 0), wings level (0.5/s); still below 3 m after 25 s ends it like a crash |
+| Hold a speed and heading (airspeed, 40 m/s) | plane | airspeed near the setting (full penalty at ±half of it), turn from the start heading (full at 90°, 0.5/s), wings level, penalised below 20 m once above; best from an air start |
+| Hold position in wind (height, 10 m) | drone | Hover on a short leash: height, distance from the start (full at 10 m, weight 1), sideways speed (full at 5 m/s), upright; wind is Set up › Advanced (Wind max, Turbulence) |
+| Hop and land softly (height, 30 m) | rocket | highest height so far up to the setting (1/s, kept after coming down), height now (−0.5/s at the setting, so landing beats hovering), sinking faster than 3 m/s, upright; a touchdown above the experiment's crash speed is a crash |
+| Drive fast without flipping (top speed, 15 m/s) | ground | ground speed up to the setting (1/s, any direction), tilt (0.25/s); tipping past 70° ends it |
+
+**Saved presets** ("Save as preset…" on the Goal page header, shown while the goal is blocks): names the current
+block program and stores it as `<experiment library>/goal-presets/<name>.json` (`{ name, suits, program }`; the same
+name replaces it) through `EvolveModel::saveGoalPreset`; `goalPresets` lists them and `removeGoalPreset` deletes one.
+It is saved for the current craft kind (an "other" craft: every craft) and appears in the preset lists after the
+built-in ones as "<name>  (yours)", without a setting. The × in ③'s list, or next to "Save as preset…" while it is the
+goal in use, deletes it (the goal keeps its blocks). A craft switch never replaces a saved preset goal.
 
 **Training worlds** (`TrainingWorlds.qml`, ① Craft & worlds): a list of the worlds every candidate is tested in.
 "+ Add a world" and each row's "Change" offer flat ground, the open world (as it is in WORLD when training starts),

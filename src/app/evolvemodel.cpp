@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QJSValue>
@@ -286,6 +287,52 @@ void EvolveModel::refreshLibrary() {
     for (auto& c : craft::library::loadUserCrafts()) if (!crafts.contains(QString::fromStdString(c.name))) crafts << QString::fromStdString(c.name);
     m_crafts = crafts;
     emit libraryChanged();
+    refreshGoalPresets();
+}
+
+QString EvolveModel::goalPresetsDir() const { return QDir(libraryDir()).filePath("goal-presets"); }
+
+void EvolveModel::refreshGoalPresets() {
+    QVariantList list;
+    for (auto& fi : QDir(goalPresetsDir()).entryInfoList({"*.json"}, QDir::Files, QDir::Name | QDir::IgnoreCase)) {
+        QFile f(fi.absoluteFilePath());
+        if (!f.open(QIODevice::ReadOnly)) continue;
+        const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+        if (!o["program"].isObject()) continue;   // not a preset (or damaged): skip it
+        QVariantMap m;
+        m["name"] = o["name"].toString(fi.completeBaseName());
+        m["file"] = fi.fileName();
+        m["suits"] = o["suits"].toArray().toVariantList();
+        m["program"] = o["program"].toObject().toVariantMap();
+        list << m;
+    }
+    m_goalPresets = list;
+    emit goalPresetsChanged();
+}
+
+QString EvolveModel::saveGoalPreset(const QString& name, const QVariant& program, const QStringList& suits) {
+    const QString n = name.trimmed();
+    const QVariant p = program.canConvert<QJSValue>() ? program.value<QJSValue>().toVariant() : program;
+    const QJsonObject prog = QJsonDocument::fromVariant(p).object();
+    if (n.isEmpty() || prog.isEmpty()) return {};
+    QDir().mkpath(goalPresetsDir());
+    const QString file = fileName(n.toStdString());
+    QJsonObject o;
+    o["name"] = n;
+    o["suits"] = QJsonArray::fromStringList(suits);
+    o["program"] = prog;
+    QFile f(QDir(goalPresetsDir()).filePath(file));
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate) || f.write(QJsonDocument(o).toJson()) < 0) return {};
+    f.close();
+    refreshGoalPresets();
+    return file;
+}
+
+bool EvolveModel::removeGoalPreset(const QString& file) {
+    const QString n = QFileInfo(file).fileName();   // only files in the presets folder
+    const bool ok = !n.isEmpty() && QFile::remove(QDir(goalPresetsDir()).filePath(n));
+    refreshGoalPresets();
+    return ok;
 }
 
 void EvolveModel::setDoc(const evo::ExperimentDocument& d, bool dirty) {

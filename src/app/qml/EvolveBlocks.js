@@ -10,7 +10,8 @@
 // The goal presets below are block programs; "hold" compiles to the Neural-controller preset script verbatim so the
 // native runtime still fast-paths the quick start. Used by EvolvePanel (Set up › Goal, Goal › Blocks) and pwuitests.
 
-// what a term can measure: id -> label, unit, JavaScript expression (s = ctx.state, m = ctx.memory)
+// what a term can measure: id -> label, unit, JavaScript expression (s = ctx.state, m = ctx.memory). A signal with
+// "init" / "update" keeps per-flight memory: init runs in init(), update every tick before the terms.
 const signals = [
     { id: "agl", label: "height above ground", unit: "m", expr: "s.agl" },
     { id: "altitude", label: "altitude (sea level)", unit: "m", expr: "s.altitude" },
@@ -22,7 +23,9 @@ const signals = [
     { id: "tilt", label: "tilt (roll + pitch)", unit: "°", expr: "(Math.abs(s.roll) + Math.abs(s.pitch))" },
     { id: "distance", label: "distance from start", unit: "m", expr: "s.distance" },
     { id: "sideways", label: "sideways speed", unit: "m/s", expr: "Math.hypot(s.vx, s.vz)" },
-    { id: "target", label: "distance to target", unit: "m", expr: "dist(ctx)", needsTarget: true }
+    { id: "target", label: "distance to target", unit: "m", expr: "dist(ctx)", needsTarget: true },
+    { id: "peak", label: "highest height so far", unit: "m", expr: "m.peak", init: "m.peak = s.agl;", update: "m.peak = Math.max(m.peak, s.agl);" },
+    { id: "heading", label: "turn from the start heading", unit: "°", expr: "(((s.yaw - m.yaw0) % 360 + 540) % 360 - 180)", init: "m.yaw0 = s.yaw;" }
 ]
 function signal(id) { for (const x of signals) if (x.id === id) return x; return signals[0] }
 // plain words for the standard sensor channels (craft sensors keep their own names)
@@ -163,25 +166,91 @@ const goals = [
           stops: [ { kind: "crashed" }, { kind: "tipped", limit: 70 }, { kind: "reached", radius: 3 } ],
           bonuses: [ { name: "arrive", when: "reached", points: 20, timeBonus: 10 },
                      { name: "flip", when: "tipped", points: -20, timeBonus: 0, chargeRest: true },
-                     { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) }
+                     { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
+    { id: "speed", suits: ["ground"], title: "Drive fast without flipping", param: { label: "Top speed", unit: "m/s", def: 15, min: 1, get: p => p.terms && p.terms[0] ? p.terms[0].cap : undefined },
+      blurb: "Ground vehicles: keep up the chosen speed for the whole flight, in any direction, staying on its wheels. Flipping over or crashing ends it and costs the time left.",
+      program: (v) => ({ v: 1, target: null,
+          terms: [ { name: "speed", kind: "upTo", signal: "groundSpeed", cap: v === undefined ? 15 : v, weight: 1 },
+                   { name: "level", kind: "near", signal: "tilt", target: 0, range: 90, weight: 0.25 } ],
+          stops: [ { kind: "crashed" }, { kind: "tipped", limit: 70 } ],
+          bonuses: [ { name: "flip", when: "tipped", points: -20, timeBonus: 0, chargeRest: true },
+                     { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
+    { id: "climb", suits: ["plane"], title: "Take off and climb", param: { label: "Height", unit: "m", def: 300, min: 10, get: p => p.terms && p.terms[0] ? p.terms[0].cap : undefined },
+      blurb: "Planes: take off from the runway and climb to the height, wings level and keeping flying speed. Still on the ground after 25 s is as bad as crashing.",
+      // "speed" starts the take-off roll from generation 0 (§10: a reward for height alone is flat on the runway)
+      program: (h) => ({ v: 1, target: null,
+          terms: [ { name: "height", kind: "upTo", signal: "agl", cap: h === undefined ? 300 : h, weight: 1 },
+                   { name: "speed", kind: "upTo", signal: "airspeed", cap: 40, weight: 0.3 },
+                   { name: "level", kind: "near", signal: "roll", target: 0, range: 90, weight: 0.5 } ],
+          stops: [ { kind: "crashed" }, { kind: "tooLow", height: 3, after: 25 } ],
+          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true },
+                     { name: "takeoff", when: "tooLow", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
+    { id: "cruise", suits: ["plane"], title: "Hold a speed and heading", param: { label: "Airspeed", unit: "m/s", def: 40, min: 5, get: p => p.terms && p.terms[0] ? p.terms[0].target : undefined },
+      blurb: "Planes: fly straight on at the chosen airspeed, keeping the heading it started with, wings level and clear of the ground. Best from an air start.",
+      program: (v) => ({ v: 1, target: null,
+          terms: [ { name: "speed", kind: "near", signal: "airspeed", target: v === undefined ? 40 : v, range: (v === undefined ? 40 : v) / 2, weight: 1 },
+                   { name: "heading", kind: "near", signal: "heading", target: 0, range: 90, weight: 0.5 },
+                   { name: "level", kind: "near", signal: "roll", target: 0, range: 90, weight: 0.25 },
+                   { name: "low", kind: "below", signal: "agl", limit: 20, onceAbove: true, weight: 1 } ],
+          stops: [ { kind: "crashed" } ],
+          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
+    { id: "station", suits: ["rotor"], title: "Hold position in wind", param: { label: "Height", unit: "m", def: 10, min: 1, get: p => p.terms && p.terms[0] ? p.terms[0].target : undefined },
+      blurb: "Drones: take off, hover at the height and stay right over the start point while the wind pushes it. Set the wind in Set up › Advanced (Wind max, Turbulence); two or more flights each make it fair.",
+      // Hover on a short leash: "drift" is full at 10 m (Hover: 100 m) and weighs as much as the height
+      program: (h) => ({ v: 1, target: null,
+          terms: [ { name: "height", kind: "near", signal: "agl", target: h === undefined ? 10 : h, range: h === undefined ? 10 : h, weight: 1 },
+                   { name: "drift", kind: "stayOver", range: 10, weight: 1 },
+                   { name: "still", kind: "near", signal: "sideways", target: 0, range: 5, weight: 0.5 },
+                   { name: "upright", kind: "near", signal: "tilt", target: 0, range: 90, weight: 0.25 } ],
+          stops: [ { kind: "crashed" }, { kind: "grounded", after: 3 } ],
+          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true },
+                     { name: "liftoff", when: "grounded", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
+    { id: "hop", suits: ["rocket"], title: "Hop and land softly", param: { label: "Height", unit: "m", def: 30, min: 2, get: p => p.terms && p.terms[0] ? p.terms[0].cap : undefined },
+      blurb: "Rockets: lift off, climb to the height, then come back down and land gently (touching down faster than the crash speed is a crash). The height reached counts for the rest of the flight, so landing after the hop scores most.",
+      // "height" pays the highest point so far, so coming back down costs nothing; "land" (being up) and "gentle"
+      // (sinking faster than 3 m/s) are smaller, so a hop always pays more than staying on the pad
+      program: (h) => ({ v: 1, target: null,
+          terms: [ { name: "height", kind: "upTo", signal: "peak", cap: h === undefined ? 30 : h, weight: 1 },
+                   { name: "land", kind: "near", signal: "agl", target: 0, range: h === undefined ? 30 : h, weight: 0.5 },
+                   { name: "gentle", kind: "below", signal: "climb", limit: -3, onceAbove: false, weight: 0.5 },
+                   { name: "upright", kind: "near", signal: "tilt", target: 0, range: 90, weight: 0.5 } ],
+          stops: [ { kind: "crashed" } ],
+          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) }
 ]
-function goalById(id) { for (const g of goals) if (g.id === id) return g; return null }
+function goalById(id, extra) { for (const g of goals.concat(extra || [])) if (g.id === id) return g; return null }
 
 // Craft kinds (EvolveModel.io.craftKind, evo::craftKind): which presets suit which craft.
+// A craft of another kind ("other") sees every preset; a saved preset with no kind suits every craft.
 const kindWords = { plane: "planes", rotor: "drones and hovering craft", rocket: "rockets", ground: "ground vehicles" }
-function suits(g, kind) { return !kind || !kindWords[kind] || g.suits.indexOf(kind) >= 0 }
-// all presets, the ones that suit this craft first (original order within each group)
-function goalsFor(kind) { return goals.filter(g => suits(g, kind)).concat(goals.filter(g => !suits(g, kind))) }
-// "Drive to a point  (for ground vehicles)" for a preset that doesn't suit the craft
-function goalLabel(g, kind) { return suits(g, kind) ? g.title : g.title + "  (for " + g.suits.map(k => kindWords[k]).join(", ") + ")" }
+function suits(g, kind) { return !kind || !kindWords[kind] || !g.suits.length || g.suits.indexOf(kind) >= 0 }
+// The preset lists: the presets (built-in, then extra = userGoals) that suit this craft; all = the others too, after
+// them. current (the goal in use) is always listed, even when it is for another kind of craft.
+function goalsFor(kind, all, extra, current) {
+    const list = goals.concat(extra || []), fit = list.filter(g => suits(g, kind)), rest = list.filter(g => !suits(g, kind))
+    return all ? fit.concat(rest) : current && rest.indexOf(current) >= 0 ? fit.concat([current]) : fit
+}
+// how many presets "Show presets for other crafts" adds
+function otherCount(kind, extra) { return goals.concat(extra || []).filter(g => !suits(g, kind)).length }
+// "Drive to a point  (for ground vehicles)" for a preset that doesn't suit the craft, "Mine  (yours)" for a saved one
+function goalLabel(g, kind) {
+    const tags = (g.user ? ["yours"] : []).concat(suits(g, kind) ? [] : ["for " + g.suits.map(k => kindWords[k] || k).join(", ")])
+    return tags.length ? g.title + "  (" + tags.join(", ") + ")" : g.title
+}
+// Your saved presets (EvolveModel.goalPresets: [{ name, file, suits, program }]) as goals: no setting, marked "yours".
+function userGoals(list) {
+    return clone(list || []).map(u => ({ id: "user:" + u.file, user: true, file: u.file, suits: u.suits || [], title: u.name, param: null,
+                                         blurb: "Your saved preset" + ((u.suits || []).length ? ", for " + u.suits.map(k => kindWords[k] || k).join(", ") + "." : "."),
+                                         program: () => clone(u.program) }))
+}
 // the goal a craft of this kind starts with after a craft switch (null: keep whatever is there)
 function defaultGoal(kind) { return goalById({ plane: "hold", rotor: "hover", rocket: "hover", ground: "drive" }[kind] || "") }
 // Which preset a program is (unchanged), or null once edited.
 // A preset with a parameter (hover height, target distance…) still counts as that preset at any value of it.
-function goalOf(program) {
+// extra = userGoals: an unchanged saved preset is that preset (the built-ins are tried first).
+function goalOf(program, extra) {
     if (!program) return null
     const s = canon(program)
-    for (const g of goals) if (canon(g.program(g.param ? g.param.get(program) : undefined)) === s) return g
+    for (const g of goals.concat(extra || [])) if (canon(g.program(g.param ? g.param.get(program) : undefined)) === s) return g
     return null
 }
 
@@ -242,11 +311,14 @@ function compile(p, neuralPreset) {
     const init = []
     if (tgt) init.push("m.tx = s.x + " + num(p.target.ahead || 0) + "; m.tz = s.z + " + num(p.target.side || 0) + "; m.last = " + D + ";")
     if (T.some(t => t.kind === "stayOver")) init.push("m.x0 = s.x; m.z0 = s.z;")
+    const mem = signals.filter(x => (x.init || x.update) && T.some(t => t.signal === x.id))
+    for (const x of mem) if (x.init) init.push(x.init)
     T.forEach((t, i) => { if (t.kind === "below" && t.onceAbove) init.push("m.above" + i + " = false;") })
     if (init.length) L.push("\nfunction init(ctx) {\n  const s = ctx.state, m = ctx.memory;\n  " + init.join("\n  ") + "\n}")
     // reward: per-tick terms
     const pre = []
     if (tgt && T.some(t => t.kind === "approach")) pre.push("const now = dist(ctx), gain = (m.last - now) / " + D + ";", "m.last = now;")
+    for (const x of mem) if (x.update) pre.push(x.update)
     T.forEach((t, i) => { if (t.kind === "below" && t.onceAbove) pre.push("if (" + signal(t.signal).expr + " > " + num(Number(t.limit) + 2) + ") m.above" + i + " = true;") })
     L.push("\nfunction reward(ctx) {\n  const s = ctx.state, m = ctx.memory, dt = ctx.dt;" + (pre.length ? "\n  " + pre.join("\n  ") : "")
            + "\n  return {" + T.map((t, i) => "\n    " + t.name + ": " + termExpr(t, i) + ",").join("") + "\n  };\n}")

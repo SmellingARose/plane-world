@@ -1,4 +1,5 @@
 import QtQuick
+import QtQml.Models
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
@@ -49,16 +50,21 @@ Rectangle {
     readonly property string neuralPreset: ev.presetScript("neural")
     readonly property var program: Blocks.programFor(xp.scripts, neuralPreset)            // null: hand-written
     readonly property string blockState: Blocks.state(xp.scripts, neuralPreset)          // "blocks" | "edited" | "script"
-    readonly property var goalDef: blockState === "blocks" ? Blocks.goalOf(program) : null
+    // your saved presets (EvolveModel.goalPresets, files in <experiments>/goal-presets) next to the built-in ones
+    readonly property var userGoals: Blocks.userGoals(ev.goalPresets)
+    readonly property var goalDef: blockState === "blocks" ? Blocks.goalOf(program, userGoals) : null
     function commitBlocks(p) { ev.setBlocks(p, Blocks.compile(p, neuralPreset), Blocks.terms(p)) }
-    function applyGoal(id) { const g = Blocks.goalById(id); if (g) replaceGoal(g.program()) }
-    // presets, the ones that suit this craft first (Blocks.goalsFor); the others say what they are for
+    function applyGoal(id) { const g = Blocks.goalById(id, userGoals); if (g) replaceGoal(g.program()) }
+    // the preset lists show the presets for this kind of craft (Blocks.goalsFor), plus the goal in use; "Show presets
+    // for other crafts" adds the rest, faded and saying who they are for
     readonly property string craftKind: ev.io.craftKind || ""
-    readonly property var goalList: Blocks.goalsFor(craftKind)
+    property bool showAllGoals: false
+    readonly property int otherGoals: Blocks.otherCount(craftKind, userGoals)
+    readonly property var goalList: Blocks.goalsFor(craftKind, showAllGoals, userGoals, goalDef)
     // after a craft switch: a preset goal that doesn't suit the new craft becomes that kind's preset (the start is
-    // kept; Hover takes the air-start height). Own blocks and hand-written scripts are never replaced.
+    // kept; Hover takes the air-start height). Own blocks, saved presets and hand-written scripts are never replaced.
     function fitGoalToCraft() {
-        if (!goalDef || Blocks.suits(goalDef, craftKind)) return
+        if (!goalDef || goalDef.user || Blocks.suits(goalDef, craftKind)) return
         const g = Blocks.defaultGoal(craftKind)
         if (!g || g === goalDef) return
         const h = g.id === "hover" && num("episode.spawn.mode", "runway") === "air" ? num("episode.spawn.altitudeAGL", 0) : 0
@@ -75,6 +81,37 @@ Rectangle {
         buttons: MessageDialog.Ok | MessageDialog.Cancel
         onAccepted: root.commitBlocks(program)
     }
+    // Goal page "Save as preset…": the current blocks under a name, for this kind of craft (same name = replace)
+    Dialog {
+        id: savePresetDlg
+        title: qsTr("Save as preset")
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        standardButtons: Dialog.Save | Dialog.Cancel
+        onAboutToShow: { presetName.text = root.goalDef ? root.goalDef.title : ""; presetName.selectAll(); presetName.forceActiveFocus() }
+        onAccepted: {
+            const name = presetName.text.trim()
+            if (!name || !root.program) return
+            const file = ev.saveGoalPreset(name, root.program, Blocks.kindWords[root.craftKind] ? [root.craftKind] : [])
+            ev.appendStatus(file ? qsTr("Saved the preset “%1”").arg(name) : qsTr("Could not save the preset “%1”").arg(name))
+        }
+        ColumnLayout {
+            spacing: Theme.s2
+            TextField { id: presetName; Layout.preferredWidth: 300; placeholderText: qsTr("Name"); onAccepted: savePresetDlg.accept() }
+            Label { Layout.preferredWidth: 300; wrapMode: Text.WordWrap; color: Theme.textMuted; font.pixelSize: Theme.caption
+                text: (Blocks.kindWords[root.craftKind] ? qsTr("It will be listed for %1.").arg(Blocks.kindWords[root.craftKind]) : qsTr("It will be listed for every craft."))
+                      + " " + qsTr("A preset with the same name is replaced.") }
+        }
+    }
+    MessageDialog {
+        id: deletePresetDlg
+        property var goal
+        title: qsTr("Delete the saved preset?")
+        text: goal ? qsTr("“%1” will be removed from the preset lists. Goals that use it keep their blocks.").arg(goal.title) : ""
+        buttons: MessageDialog.Ok | MessageDialog.Cancel
+        onAccepted: ev.removeGoalPreset(goal.file)
+    }
+    function deletePreset(g) { deletePresetDlg.goal = g; deletePresetDlg.open() }
     function brainText() {
         const c = xp.controller ? xp.controller.mode : "mlp"
         if (c === "neat") return qsTr("NEAT controller")
@@ -405,22 +442,33 @@ Rectangle {
                         Hint { text: qsTr("The goal turns each flight into a score (its fitness). Evolution keeps whatever scores highest, so the goal decides what “flying well” means.") }
                         PwPropertyRow { visible: root.goalsApply || root.blockState !== "script"; label: qsTr("Goal"); Layout.fillWidth: true
                             ComboBox {
+                                id: goalCombo
                                 Layout.fillWidth: true
                                 readonly property bool own: !root.goalDef
                                 model: root.goalList.map(g => Blocks.goalLabel(g, root.craftKind)).concat(own ? [root.blockState === "script" ? qsTr("Hand-written script") : qsTr("Your own blocks")] : [])
                                 currentIndex: root.goalDef ? root.goalList.indexOf(root.goalDef) : root.goalList.length
                                 onActivated: (i) => { if (i < root.goalList.length) root.applyGoal(root.goalList[i].id) }
                                 delegate: ItemDelegate {
+                                    id: goalItem
                                     required property int index
                                     required property var modelData
+                                    readonly property var goal: index < root.goalList.length ? root.goalList[index] : null
                                     width: ListView.view ? ListView.view.width : implicitWidth
                                     text: modelData
+                                    rightPadding: delBtn.visible ? delBtn.width + Theme.s2 : padding
                                     highlighted: ListView.view ? ListView.view.currentIndex === index : false
                                     // presets for other kinds of craft stay pickable, just quieter
-                                    opacity: index < root.goalList.length && !Blocks.suits(root.goalList[index], root.craftKind) ? 0.55 : 1
+                                    opacity: goal && !Blocks.suits(goal, root.craftKind) ? 0.55 : 1
+                                    ToolButton { id: delBtn; visible: !!goalItem.goal && !!goalItem.goal.user; text: "×"
+                                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                        onClicked: { goalCombo.popup.close(); root.deletePreset(goalItem.goal) }
+                                        ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Delete this saved preset") }
                                 }
                             }
                         }
+                        CheckBox { visible: root.otherGoals > 0 && (root.goalsApply || root.blockState !== "script"); text: qsTr("Show presets for other crafts")
+                            checked: root.showAllGoals; onToggled: { root.showAllGoals = checked; checked = Qt.binding(() => root.showAllGoals) }
+                            font.pixelSize: Theme.caption; padding: 0 }
                         PwPropertyRow { visible: !!root.goalDef && !!root.goalDef.param; label: root.goalDef && root.goalDef.param ? root.goalDef.param.label : ""; Layout.fillWidth: true
                             PwNumberField {
                                 value: root.goalDef && root.goalDef.param ? Number(root.goalDef.param.get(root.program)) : 0
@@ -775,15 +823,22 @@ Rectangle {
                             spacing: Theme.s2
                             RowLayout {
                                 Layout.fillWidth: true; Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
-                                Label { Layout.fillWidth: true; elide: Text.ElideRight; font.weight: Font.DemiBold
+                                Label { Layout.fillWidth: true; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight; font.weight: Font.DemiBold
                                     text: root.goalDef ? root.goalDef.title : root.blockState === "script" ? qsTr("Hand-written script") : root.blockState === "edited" ? qsTr("Blocks (edited by hand)") : qsTr("Your own blocks") }
                                 Button { text: qsTr("Start from…"); onClicked: startMenu.popup(); visible: root.goalsApply || root.blockState !== "script"
                                     ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Replace the goal with a preset (its blocks are a good starting point)")
-                                    Menu { id: startMenu
-                                        Repeater { model: root.goalList; MenuItem { required property var modelData; text: Blocks.goalLabel(modelData, root.craftKind)
+                                    Menu { id: startMenu; width: Math.max(implicitWidth, 360)
+                                        // Instantiator, not Repeater: the list changes size (craft kind, saved presets) and Menu would append new items at the end
+                                        Instantiator { model: root.goalList; onObjectAdded: (i, o) => startMenu.insertItem(i, o); onObjectRemoved: (i, o) => startMenu.removeItem(o); MenuItem { required property var modelData; text: Blocks.goalLabel(modelData, root.craftKind)
                                             opacity: Blocks.suits(modelData, root.craftKind) ? 1 : 0.55; onTriggered: root.applyGoal(modelData.id) } }
                                         MenuSeparator {}
-                                        MenuItem { text: qsTr("Empty goal"); onTriggered: root.replaceGoal(Blocks.newProgram()) } } }
+                                        MenuItem { text: qsTr("Empty goal"); onTriggered: root.replaceGoal(Blocks.newProgram()) }
+                                        MenuItem { text: qsTr("Show presets for other crafts"); checkable: true; checked: root.showAllGoals; enabled: root.otherGoals > 0
+                                            onTriggered: { root.showAllGoals = checked; checked = Qt.binding(() => root.showAllGoals) } } } }
+                                Button { text: qsTr("Save as preset…"); visible: root.blockState === "blocks"; onClicked: savePresetDlg.open()
+                                    ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Keep these blocks as a preset of your own, listed with the others for this kind of craft") }
+                                ToolButton { text: "×"; visible: !!root.goalDef && !!root.goalDef.user; onClicked: root.deletePreset(root.goalDef)
+                                    ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Delete this saved preset") }
                             }
                             PwCard {
                                 Layout.leftMargin: Theme.s3; Layout.rightMargin: Theme.s3
@@ -878,11 +933,13 @@ Rectangle {
                             Button { text: ev.checking ? qsTr("Checking…") : qsTr("Check"); enabled: !ev.checking; onClicked: ev.checkScript()
                                 ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.shortcutText("Ctrl+Return") + qsTr(" in the editor") }
                             Button { text: qsTr("Start from…"); onClicked: tplMenu.popup()
-                                Menu { id: tplMenu
-                                    Repeater { model: root.goalList; MenuItem { required property var modelData; text: qsTr("Goal: %1").arg(Blocks.goalLabel(modelData, root.craftKind))
+                                Menu { id: tplMenu; width: Math.max(implicitWidth, 360)
+                                    Instantiator { model: root.goalList; onObjectAdded: (i, o) => tplMenu.insertItem(i, o); onObjectRemoved: (i, o) => tplMenu.removeItem(o); MenuItem { required property var modelData; text: qsTr("Goal: %1").arg(Blocks.goalLabel(modelData, root.craftKind))
                                         opacity: Blocks.suits(modelData, root.craftKind) ? 1 : 0.55; onTriggered: root.applyGoal(modelData.id) } }
                                     MenuSeparator {}
-                                    MenuItem { text: qsTr("Craft design preset (autopilot)"); onTriggered: ev.setScript(ev.presetScript("design")) } } }
+                                    MenuItem { text: qsTr("Craft design preset (autopilot)"); onTriggered: ev.setScript(ev.presetScript("design")) }
+                                    MenuItem { text: qsTr("Show presets for other crafts"); checkable: true; checked: root.showAllGoals; enabled: root.otherGoals > 0
+                                        onTriggered: { root.showAllGoals = checked; checked = Qt.binding(() => root.showAllGoals) } } } }
                             Item { Layout.fillWidth: true }
                             Label { text: qsTr("Budget"); color: Theme.textMuted; font.pixelSize: Theme.caption }
                             PwNumberField { Layout.preferredWidth: 64; value: num("scripts.callBudgetMs", 5); suffix: " ms"; decimals: 1; step: 1; minimum: 0.5; tip: qsTr("Time limit per script call"); onCommitted: (v) => ev.set("scripts.callBudgetMs", v) }

@@ -38,6 +38,8 @@ class EvolveModel : public QObject, public ReplayProvider {
     Q_PROPERTY(QVariantList library READ library NOTIFY libraryChanged)
     Q_PROPERTY(QString libraryDir READ libraryDir CONSTANT)
     Q_PROPERTY(QStringList crafts READ crafts NOTIFY libraryChanged)
+    /// Your saved goal presets (Goal page "Save as preset…"): [{ name, file, suits, program }], sorted by name.
+    Q_PROPERTY(QVariantList goalPresets READ goalPresets NOTIFY goalPresetsChanged)
     Q_PROPERTY(QStringList algorithmKinds READ algorithmKinds CONSTANT)
     Q_PROPERTY(QVariantMap io READ io NOTIFY ioChanged)
     Q_PROPERTY(int geneCount READ geneCount NOTIFY ioChanged)
@@ -91,6 +93,7 @@ public:
     QVariantList library() const { return m_library; }
     QString libraryDir() const;
     QStringList crafts() const { return m_crafts; }
+    QVariantList goalPresets() const { return m_goalPresets; }
     QStringList algorithmKinds() const;
     QVariantMap io() const { return m_io; }
     int geneCount() const { return m_geneCount; }
@@ -138,6 +141,12 @@ public:
     Q_INVOKABLE bool saveAs(const QString& pathOrUrl);
     Q_INVOKABLE void duplicate();
     Q_INVOKABLE void refreshLibrary();
+    /// Saved goal presets: JSON files { name, suits, program } in <experiment library>/goal-presets. save writes the
+    /// block program under a name (the same name replaces it; suits = craft kinds, [] = every craft) and returns the
+    /// file name ("" on failure); remove takes that file name.
+    Q_INVOKABLE QString goalPresetsDir() const;
+    Q_INVOKABLE QString saveGoalPreset(const QString& name, const QVariant& program, const QStringList& suits);
+    Q_INVOKABLE bool removeGoalPreset(const QString& file);
     Q_INVOKABLE QVariantList algorithmSchema(const QString& kind) const;
     Q_INVOKABLE void setAero(const QString& id);   // AeroModelPicker id: fast profile or "custom"
     /// Training worlds. kind: "open" (the WORLD tab's world when training starts), "flat", "saved" (arg = library name),
@@ -193,6 +202,7 @@ public:
 signals:
     void experimentChanged();
     void libraryChanged();
+    void goalPresetsChanged();
     void ioChanged();
     void scriptChanged();
     void runChanged();
@@ -207,6 +217,7 @@ private:
     void setStatus(const QString& s) { if (s != m_status) { m_status = s; emit statusChanged(); } }
     void refreshIO();
     void refreshRunDirs();
+    void refreshGoalPresets();
     void attach(std::unique_ptr<pw::evo::EvolutionRun> run, bool fresh, bool start = true);
     void drain();
     void rebuildDerived();
@@ -219,6 +230,7 @@ private:
     bool m_dirty = false;
     QVariantList m_library;
     QStringList m_crafts;
+    QVariantList m_goalPresets;
     QVariantMap m_io;
     int m_geneCount = 0;
     std::optional<pw::craft::CraftDocument> m_craft;   // resolved flight craft (for IO, design genes)
