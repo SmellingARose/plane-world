@@ -31,6 +31,9 @@ Popup {
     function massText(kg) { return kg >= 1000 ? (kg / 1000).toFixed(kg >= 10000 ? 0 : 1) + " t" : (kg >= 100 ? Math.round(kg) : kg.toFixed(1)) + " kg" }
     function isOpen(e) { return e.builtIn ? (App.filePath === "" && e.name === App.craftName) : e.path === App.filePath }
     function openEntry(i) { if (i < 0) return; close(); App.loadLibraryCraft(i) }
+    // the hint bar's Ctrl+D / F2 work wherever the focus is in the library (it usually starts in the search box)
+    Shortcut { sequence: "Ctrl+D"; enabled: lib.opened && !renameDlg.opened && !delConfirm.opened; onActivated: lib.duplicate(lib.currentIndex) }
+    Shortcut { sequence: "F2"; enabled: lib.opened && !renameDlg.opened && !delConfirm.opened; onActivated: lib.askRename(lib.currentIndex) }
     function askDelete(i) {
         if (i < 0) return
         if (all[i].builtIn) { notice.text = "Built-in crafts can't be deleted. Duplicate one to make it yours."; return }
@@ -138,8 +141,6 @@ Popup {
             Keys.onDeletePressed: lib.askDelete(lib.currentIndex)
             Keys.onPressed: (e) => {
                 if (e.key === Qt.Key_Backspace) { lib.askDelete(lib.currentIndex); e.accepted = true }
-                else if (e.key === Qt.Key_F2) { lib.askRename(lib.currentIndex); e.accepted = true }
-                else if (e.key === Qt.Key_D && (e.modifiers & Qt.ControlModifier)) { lib.duplicate(lib.currentIndex); e.accepted = true }
                 else if (e.text.length === 1 && e.text > " " && !(e.modifiers & (Qt.ControlModifier | Qt.MetaModifier))) {
                     search.text += e.text; search.forceActiveFocus(); e.accepted = true   // type to search
                 }
