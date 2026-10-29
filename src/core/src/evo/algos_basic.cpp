@@ -222,7 +222,8 @@ public:
     SimpleES(const GenomeLayout& layout, const AlgorithmParams& p, int population, uint64_t seed) : layout_(layout) {
         if (layout.count() == 0) throw EvoError("invalid experiment: simple-es needs at least one gene");
         lambda_ = std::max(2, population);
-        mu_ = std::max(1, std::min(lambda_, p.integer("mu", lambda_ / 4)));
+        int mu = p.num("mu", 0) == 0 ? lambda_ / 4 : p.integer("mu", 0);   // 0 (or absent) = automatic: a quarter
+        mu_ = std::max(1, std::min(lambda_, mu));
         elite_ = std::max(0, std::min(1, p.integer("elite", 1)));
         rng_ = EvoRNG(seed);
         mean_ = layout.randomValues(rng_);
@@ -308,7 +309,8 @@ public:
         cxRate_ = p.num("crossoverRate", 0.9); blendAlpha_ = p.num("blendAlpha", 0.5); sbxEta_ = p.num("sbxEta", 15); polyEta_ = p.num("polyEta", 20);
         adaptive_ = p.boolean("adaptive", false);
         rng_ = EvoRNG(seed);
-        mutationRate_ = p.num("mutationRate", 1 / double(layout.count()));
+        mutationRate_ = p.num("mutationRate", 0);                     // 0 (or absent) = automatic: 1/genes
+        if (mutationRate_ == 0) mutationRate_ = 1 / double(layout.count());
         mutationSigma_ = p.num("mutationSigma", 1);
     }
     const char* kind() const override { return "ga"; }

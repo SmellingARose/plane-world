@@ -78,8 +78,10 @@ struct CMAEngine {
         sigma0 = p.num("sigma0", 1);
         if (!(sigma0 > 0)) throw EvoError("invalid experiment: cmaes: sigma0 must be > 0");
         tolX = p.num("tolX", 1e-12); tolFun = p.num("tolFun", 1e-12);
-        lambdaDefault = std::max(4, p.integer("lambda", population > 1 ? population : 4 + int(3 * std::log(double(n)))));
-        if (p.find("mu")) muParam = std::max(1, p.integer("mu", 1));
+        // lambda / mu: 0 (or absent) = automatic (the population; half of lambda).
+        int lam = p.num("lambda", 0) == 0 ? (population > 1 ? population : 4 + int(3 * std::log(double(n)))) : p.integer("lambda", 0);
+        lambdaDefault = std::max(4, lam);
+        if (p.find("mu") && p.num("mu", 1) != 0) muParam = std::max(1, p.integer("mu", 1));
         lambda = lambdaDefault;
         mean = m; sigma = sigma0;
         resetDistribution(m, sigma0);

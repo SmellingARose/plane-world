@@ -60,7 +60,8 @@ QVariantMap rowOf(const evo::GenerationRecord& r) {
 struct ParamSpec { const char* key; const char* type; double def; const char* options; const char* help; };
 // Swift AlgoParamSchemas (App/Evolve/EvolveModel.swift) plus one-line help for every field. Keys and defaults are the
 // ones the algorithms in src/core/src/evo/algos_*.cpp actually read (an absent key = that default); "0 = …" numbers
-// are automatic, and the panel removes the key when 0 is entered. Step sizes are in units of each gene's own step
+// are automatic (the algorithms treat a stored 0 exactly like an absent key; the panel also removes the key when 0 is
+// entered, so files stay tidy). Step sizes are in units of each gene's own step
 // (GeneSpec::mutationScale: the gene's sigma, else a tenth of its range). Plain-language labels, explanations and
 // effects for the panel live in qml/EvolveAlgorithms.js, keyed by these keys.
 const std::vector<ParamSpec>& schemaFor(const std::string& k) {

@@ -149,19 +149,21 @@ Crafts without sensors get the standard set: `alt` (AGL), `att`, `rate`, `air`, 
 ## 4. Algorithms
 
 All maximise `Fitness.total`, draw randomness only from their checkpointed RNG, and must save and restore state
-bit-identically (`evolution.run-checkpoint-resume`). Failed candidates score −1e12. Hooks (`select`, `crossover`,
+bit-identically (`evolution.run-checkpoint-resume`). Failed candidates score −1e12.
+Parameters documented "0 = automatic" (`lambda`, `mu`, `mutationRate`, `initialRandom`) treat a stored 0 exactly like
+an absent key (`evolution-algo.zero-means-automatic`). Hooks (`select`, `crossover`,
 `mutate`) are consulted where the step exists.
 
 | Kind | Parameters (`algorithm.values`; defaults) |
 |---|---|
-| `ga` | `selection` tournament\|roulette\|rank (tournament), `tournamentSize` 3, `elitism` 2, `crossover` uniform\|one-point\|blend\|sbx (sbx), `crossoverRate` 0.9, `blendAlpha` 0.5, `sbxEta` 15, `mutation` gaussian\|polynomial (gaussian), `mutationRate` 1/n, `mutationSigma` 1 (× gene scale, gaussian only), `polyEta` 20, `adaptive` false (1/5 rule: sigma ×1.22 / ×0.85, rate ×1.1 / ×0.93) |
-| `cmaes` | `sigma0` 1 (× gene scale; then cumulative step-size adaptation), `lambda` population, `mu` λ/2, `restarts` none\|ipop\|bipop (none; trigger on tolX / conditionCov / tolFun / numerical) |
+| `ga` | `selection` tournament\|roulette\|rank (tournament), `tournamentSize` 3, `elitism` 2, `crossover` uniform\|one-point\|blend\|sbx (sbx), `crossoverRate` 0.9, `blendAlpha` 0.5, `sbxEta` 15, `mutation` gaussian\|polynomial (gaussian), `mutationRate` 1/n (0 = 1/n), `mutationSigma` 1 (× gene scale, gaussian only), `polyEta` 20, `adaptive` false (1/5 rule: sigma ×1.22 / ×0.85, rate ×1.1 / ×0.93) |
+| `cmaes` | `sigma0` 1 (× gene scale; then cumulative step-size adaptation), `lambda` population (0 = population), `mu` λ/2 (0 = λ/2), `restarts` none\|ipop\|bipop (none; trigger on tolX / conditionCov / tolFun / numerical) |
 | `sep-cmaes` | as `cmaes`, diagonal covariance (genomes over ~200 genes; `cmaes` refuses more than 400) |
 | `openai-es` | `lr` 0.05, `sigma` 0.5 (fixed), `antithetic` true, `weightDecay` 0, `optimizer` adam\|sgd, `fitnessShaping` rank\|none |
-| `simple-es` | `sigma` 1 (1/5 rule: ×1.22 / ×0.85), `mu` λ/4, `elite` 1 |
+| `simple-es` | `sigma` 1 (1/5 rule: ×1.22 / ×0.85), `mu` λ/4 (0 = λ/4), `elite` 1 |
 | `random` | baseline (no parameters) |
 | `neat` | `compatThreshold` 3, `targetSpecies` 0, `addNodeRate` 0.03, `addConnRate` 0.05, `weightMutateRate` 0.8, `weightPerturbSigma` 0.5, `survivalThreshold` 0.2, `stagnation` 15; the rest at the top of the NEAT class in `algos_qd.cpp`; species reported every generation; flat genes (co-evolution) get Gaussian steps |
-| `map-elites` | archive over `descriptorAxes` (name, min, max, bins); `initialRandom` population, `isoSigma` 0.5, `lineSigma` 0.2, `cvt` 0 (grid); candidates without a descriptor get no cell |
+| `map-elites` | archive over `descriptorAxes` (name, min, max, bins); `initialRandom` population (0 = population), `isoSigma` 0.5, `lineSigma` 0.2, `cvt` 0 (grid); candidates without a descriptor get no cell |
 | `novelty` | k-NN novelty over descriptors with an archive: `k` 15, `fitnessWeight` 0, `archiveAddProbability` 0, `mutationSigma` 1 |
 | `script` | JS `ask`/`tell` (§3.2) |
 

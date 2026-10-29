@@ -139,7 +139,8 @@ function problem(kind, xp, genes) {
 }
 
 // ---- parameters. level: "common" (shown) or "expert" (folded). effect.up / effect.down: what raising / lowering does.
-// auto: true = 0 means "automatic" (the key is removed so the algorithm's own default applies; see autoValue()).
+// auto: true = 0 means "automatic": the algorithm's own default applies (see autoValue()). The core treats a stored 0 like
+// an absent key; the panel removes the key on 0 anyway so the saved file stays tidy.
 // options: plain words for each choice value. unit is shown after the field.
 const cmaParams = {
     sigma0: { label: qsTr("Starting step size"), level: "common", unit: qsTr("× gene step"), min: 0.001, max: 100, step: 0.05, decimals: 3,

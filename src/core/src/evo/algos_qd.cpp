@@ -488,7 +488,8 @@ public:
         if (axes.empty()) throw EvoError("invalid experiment: map-elites needs descriptor axes (experiment.descriptorAxes) and a descriptor() hook");
         for (auto& a : axes) if (!(a.max > a.min) || a.bins < 1) throw EvoError("invalid experiment: descriptor axis '" + a.name + "': need max > min and bins >= 1");
         batch_ = std::max(1, p.integer("batch", population));
-        initialRandom_ = std::max(1, p.integer("initialRandom", population));
+        int initialRandom = p.num("initialRandom", 0) == 0 ? population : p.integer("initialRandom", population);   // 0 (or absent) = automatic
+        initialRandom_ = std::max(1, initialRandom);
         isoSigma_ = p.num("isoSigma", p.num("mutationSigma", 0.5));
         lineSigma_ = p.num("lineSigma", 0.2);
         rng_ = EvoRNG(seed);

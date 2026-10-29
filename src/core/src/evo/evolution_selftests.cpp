@@ -297,6 +297,34 @@ void registerAlgorithmTests() {
         ok &= expect(c, a->bestFitness() && a->bestFitness()->novelty.has_value(), "Fitness.novelty filled");
         return ok;
     });
+    // Parameters documented "0 = automatic" (schemaFor in src/app/evolvemodel.cpp): a stored 0 must behave exactly
+    // like the key being absent (same candidates, same state), not be taken literally.
+    selftest::add("evolution-algo.zero-means-automatic", [](Context& c) -> bool {
+        GenomeLayout flat = box(8, -2, 2);
+        struct Case { std::string kind, key; std::vector<std::pair<std::string, Value>> base; };
+        std::vector<Case> cases = {
+            {"cmaes", "lambda", {}}, {"sep-cmaes", "lambda", {}}, {"cmaes", "mu", {}}, {"sep-cmaes", "mu", {}},
+            {"simple-es", "mu", {}}, {"ga", "mutationRate", {}}, {"map-elites", "initialRandom", {{"axes", qdParams()}, {"batch", Value::number(4)}}},   // batch < population, so initialRandom matters
+        };
+        auto eval = [](const Genome& g) { Genome h; h.values.assign(g.values.begin(), g.values.begin() + 6); Fitness f = qdEval(h); f.total = -rastrigin(g.values); return f; };
+        auto step = [&](Algorithm& a) { auto p = a.ask(); std::vector<Fitness> f; for (auto& x : p) f.push_back(eval(x)); a.tell(p, f); return p; };
+        bool ok = true;
+        for (auto& cs : cases) {
+            auto zero = cs.base; zero.emplace_back(cs.key, Value::number(0));
+            auto a = make(cs.kind, flat, 24, 3, cs.base), b = make(cs.kind, flat, 24, 3, zero);
+            bool same = true;
+            for (int k = 0; k < 4; ++k) { auto pa = step(*a), pb = step(*b); if (!(pa == pb)) same = false; }
+            same = same && a->saveState() == b->saveState() && a->diagnostics() == b->diagnostics();
+            ok &= expect(c, same, cs.kind + ": " + cs.key + " = 0 behaves exactly like " + cs.key + " absent");
+        }
+        // The automatic values themselves: lambda = population, mu = half of it (CMA-ES) / a quarter (simple-es).
+        auto cma = make("cmaes", flat, 24, 3, {{"lambda", Value::number(0)}, {"mu", Value::number(0)}});
+        ok &= expect(c, cma->ask().size() == 24 && diag(*cma, "lambda") == 24, "cmaes: lambda 0 = population (24)");
+        auto lit = make("cmaes", flat, 24, 3, {{"mu", Value::number(1)}}), aut = make("cmaes", flat, 24, 3);
+        step(*lit); step(*aut);
+        ok &= expect(c, !(lit->saveState() == aut->saveState()), "cmaes: mu 1 differs from automatic (the check is sensitive)");
+        return ok;
+    });
     selftest::add("evolution-algo.checkpoint-roundtrip", [](Context& c) -> bool {
         NEATLayout nl = xorLayout();
         GenomeLayout flat = box(8, -2, 2);
