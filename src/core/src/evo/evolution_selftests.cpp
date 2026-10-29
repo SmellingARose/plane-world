@@ -536,14 +536,21 @@ void registerRunTests() {
         ok &= expect(c, e.genome.mlp && e.genome.mlp->outputs.empty(), "outputs fall back to every rocket control");
         ok &= expect(c, e.genome.mlp && e.genome.mlp->inputs.size() == 9, "flight sensor inputs kept (the rocket gets the standard sensors)");
         ok &= expect(c, e.name == "Quick start — hold altitude (New Shepard)", "name follows the craft: " + e.name);
-        ok &= expect(c, notes.size() == 1 && notes[0].find("Ailerons") != std::string::npos, "one note naming the dropped outputs");
+        ok &= expect(c, notes.size() == 2 && notes[0].find("Ailerons") != std::string::npos, "a note naming the dropped outputs");
+        ok &= expect(c, notes.size() == 2 && notes[1].find("angle mode") != std::string::npos && e.controller.assist == "angle", "and one for angle mode");
         try {
             ExperimentContext ctx(e, *rocket, EvoWorld::flat()); layout(ctx);
-            ok &= expect(c, ctx.mlpOutputs.size() == 3, "MLP drives engine + both gimbal axes (" + std::to_string(ctx.mlpOutputs.size()) + ")");
+            ok &= expect(c, ctx.assist == 2 && ctx.assistOutputs.size() == 3 && ctx.mlpOutputs.empty() && ctx.mlpSizes.back() == 3,
+                         "the rocket flight controller drives engine + both gimbal axes, the MLP its 3 sticks (" + std::to_string(ctx.mlpSizes.back()) + ")");
+            e.controller.assist = "none";
+            ExperimentContext direct(e, *rocket, EvoWorld::flat()); layout(direct);
+            ok &= expect(c, direct.assist == 0 && direct.mlpOutputs.size() == 3, "without assist the MLP drives engine + both gimbal axes (" + std::to_string(direct.mlpOutputs.size()) + ")");
+            e.controller.assist = "angle";
         } catch (const std::exception& ex) { ok &= expect(c, false, std::string("experiment context after switch: ") + ex.what()); }
         // and back: an "all outputs" list stays valid on any craft, nothing to note
         ref.name = "Trainer"; auto trainer = resolveCraft(&ref, "", err);
         ok &= expect(c, trainer && switchCraft(e, "Trainer", *trainer).empty() && e.name == "Quick start — hold altitude (Trainer)", "switching back is clean");
+        ok &= expect(c, e.controller.assist == "none", "a plane flies its controls directly");
         return ok;
     });
 
@@ -612,6 +619,7 @@ void registerRunTests() {
         std::string err; auto rocket = resolveCraft(&ref, "", err);
         if (!expect(c, rocket.has_value(), "New Shepard resolves: " + err)) return false;
         switchCraft(e, "New Shepard", *rocket);
+        e.controller.assist = "none";   // the unassisted network tips over and crashes, which is what this test needs
         e.population = 6; e.generations = 1; e.workers = 1;
         e.episode.duration = 8; e.episode.episodesPerCandidate = 1; e.episode.wind = {};
         e.episode.spawn.mode = "air"; e.episode.spawn.altitudeAGL = 40; e.episode.spawn.speed = 0;
@@ -637,6 +645,7 @@ void registerRunTests() {
             if (!craft) throw EvoError(err);
             e = presets::make("Neural controller", craftName);
             switchCraft(e, craftName, *craft);
+            e.controller.assist = "none";   // the network drives the throttles itself (angle mode: evolution.angle-assist)
             e.episode.spawn.mode = "air"; e.episode.spawn.altitudeAGL = 150; e.episode.spawn.speed = 0;
             auto ctx = std::make_shared<ExperimentContext>(e, *craft, std::vector<std::shared_ptr<const EvoWorld>>{EvoWorld::flat()});
             auto rt = scripts::make(e.scripts); rt->compile(e.scripts, e); ctx->buildLayout(*rt);
@@ -679,6 +688,70 @@ void registerRunTests() {
         ok &= expect(c, qv && std::fabs(*qv - std::pow(1 / 9.5, 1.5)) < 0.01 && !quad->hoverTrimGenes().empty(), "Racer quad (T/W 9.5) trims to (1/9.5)^1.5");
         ExperimentDocument et; auto trainer = context("Trainer", et);
         ok &= expect(c, trainer->hoverTrimGenes().empty(), "the Trainer (a plane) keeps 0");
+        return ok;
+    });
+
+    selftest::add("evolution.angle-assist", [](Context& c) -> bool {
+        // controller.assist "angle": the network's outputs are the sticks of the built-in flight controller (FLY's angle
+        // mode), so the starting network (every weight 0) already holds a drone or a rocket level instead of flipping it.
+        auto context = [&](const char* craftName, const char* spawn, double agl, ExperimentDocument& e, craft::CraftDocument& craft) {
+            CraftRef ref; ref.name = craftName;
+            std::string err; auto cr = resolveCraft(&ref, "", err);
+            if (!cr) throw EvoError(err);
+            craft = *cr;
+            e = presets::make("Neural controller", craftName);
+            switchCraft(e, craftName, craft);
+            e.episode.spawn.mode = spawn; e.episode.spawn.altitudeAGL = agl; e.episode.spawn.speed = 0;
+            e.episode.duration = 10; e.episode.episodesPerCandidate = 1; e.episode.wind = {};
+            auto ctx = std::make_shared<ExperimentContext>(e, craft, std::vector<std::shared_ptr<const EvoWorld>>{EvoWorld::flat()});
+            auto rt = scripts::make(e.scripts); rt->compile(e.scripts, e); ctx->buildLayout(*rt);
+            return ctx;
+        };
+        // fly the starting network: (crashed, largest tilt °, height change m); speed = its sideways speed at the end
+        double speed = 0;
+        auto fly = [&](const std::shared_ptr<ExperimentContext>& ctx) {
+            Genome g; g.id = 1;
+            for (auto& gs : ctx->layout.genes) g.values.push_back(gs.initial.value_or(0));
+            EvalWorker w(ctx, scripts::make(ctx->experiment.scripts));
+            w.prepare(g);
+            double tilt = 0, agl0 = -1, agl = 0;
+            TickObserver obs = [&](const sim::CraftSim&, const ControlFrame& f) {
+                tilt = std::max(tilt, std::fabs(f.state.roll) + std::fabs(f.state.pitch));
+                if (agl0 < 0) agl0 = f.state.agl;
+                agl = f.state.agl; speed = std::hypot(f.state.vx, f.state.vz);
+            };
+            w.runEpisode(g, 0, 0, 0, w.episodeSeed(0, 0, 0), &obs);
+            return std::tuple<bool, double, double>{w.sim().crashed(), tilt, agl - agl0};
+        };
+        bool ok = true;
+        try {
+            ExperimentDocument e; craft::CraftDocument craft;
+            auto quad = context("Racer quad", "air", 10, e, craft);
+            ok &= expect(c, e.controller.assist == "angle" && e.controller.hz == kRotorControlHz, "a drone flies in angle mode at " + fmt(e.controller.hz) + " Hz");
+            ok &= expect(c, quad->assist == 1 && quad->assistOutputs.size() == 4 && quad->mlpOutputs.empty() && quad->mlpSizes.back() == 4,
+                         "the multirotor controller drives the 4 motors, the MLP its 4 sticks");
+            ok &= expect(c, quad->hoverTrimGenes().empty(), "a centred climb stick holds height: nothing to trim");
+            auto [crashed, tilt, dh] = fly(quad);
+            c.note("Racer quad, starting network: tilt " + fmt(tilt) + "°, height change " + fmt(dh) + " m");
+            ok &= expect(c, !crashed && tilt < 5 && std::fabs(dh) < 2, "the starting network hovers level for 10 s");
+            // no horizontal-velocity sensor: the controller leans against drift, so centred sticks stop an 8 m/s start
+            e.episode.spawn.speed = 8;
+            auto moving = std::make_shared<ExperimentContext>(e, craft, std::vector<std::shared_ptr<const EvoWorld>>{EvoWorld::flat()});
+            { auto rt = scripts::make(e.scripts); rt->compile(e.scripts, e); moving->buildLayout(*rt); }
+            auto [mCrashed, mTilt, mdh] = fly(moving);
+            c.note("Racer quad from 8 m/s: sideways " + fmt(speed) + " m/s after 10 s, tilt " + fmt(mTilt) + "°");
+            ok &= expect(c, !mCrashed && speed < 0.5, "centred sticks bring an 8 m/s start to a stop");
+            const Value j = e.toJson();
+            ok &= expect(c, ExperimentDocument::fromJson(j).controller.assist == "angle", "assist round-trips through JSON");
+
+            auto shepard = context("New Shepard", "air", 30, e, craft);
+            ok &= expect(c, shepard->assist == 2 && shepard->mlpSizes.back() == 3, "the rocket controller drives engine + gimbals, the MLP climb, pitch, yaw");
+            ok &= expect(c, shepard->hoverTrimGenes().empty() && shepard->assistHover > 0.6 && shepard->assistHover < 0.9,
+                         "the climb loop starts at the hover throttle (" + fmt(shepard->assistHover) + "), the sticks centred");
+            auto [rCrashed, rTilt, rdh] = fly(shepard);
+            c.note("New Shepard, starting network: tilt " + fmt(rTilt) + "°, height change " + fmt(rdh) + " m");
+            ok &= expect(c, !rCrashed && rTilt < 5 && std::fabs(rdh) < 3, "the starting network holds height upright for 10 s");
+        } catch (const std::exception& ex) { ok &= expect(c, false, ex.what()); }
         return ok;
     });
 

@@ -39,10 +39,12 @@ const termKinds = [
     { id: "near", title: "Stay near", color: "penalty",
       hint: "Lose points the further a measurement drifts from a value (height, bank…)",
       fields: [ { key: "signal", type: "signal" }, { key: "target", label: "at", type: "number", unit: "@" },
-                { key: "range", label: "full penalty when off by", type: "number", unit: "@", min: 0.01 } ],
+                { key: "range", label: "full penalty when off by", type: "number", unit: "@", min: 0.01 },
+                { key: "soft", label: "soft: half of it there, the rest further out", type: "check" } ],
       defaults: { signal: "agl", target: 100, range: 100, weight: 1 },
       plain: t => "loses up to " + num(t.weight) + " points a second as its " + signal(t.signal).label + " strays from " + qty(t.target, signal(t.signal).unit)
-                  + " (all of it at ±" + qty(t.range, signal(t.signal).unit) + ")" },
+                  + (t.soft ? " (half of it at ±" + qty(t.range, signal(t.signal).unit) + ", more the further it is)"
+                            : " (all of it at ±" + qty(t.range, signal(t.signal).unit) + ")") },
     { id: "upTo", title: "More is better", color: "score",
       hint: "Reward a measurement, but stop rewarding past a cap (e.g. keep some speed)",
       fields: [ { key: "signal", type: "signal" }, { key: "cap", label: "up to", type: "number", unit: "@", min: 0.01 } ],
@@ -138,7 +140,7 @@ const goals = [
       // (New Shepard wandered 200–550 m). "liftoff" makes sitting on the pad as bad as crashing.
       program: (h) => ({ v: 1, target: null,
           terms: [ { name: "height", kind: "near", signal: "agl", target: h === undefined ? 20 : h, range: h === undefined ? 20 : h, weight: 1 },
-                   { name: "still", kind: "near", signal: "sideways", target: 0, range: 10, weight: 0.5 },
+                   { name: "still", kind: "near", signal: "sideways", target: 0, range: 10, soft: true, weight: 0.5 },
                    { name: "drift", kind: "stayOver", range: 100, weight: 0.25 },
                    { name: "upright", kind: "near", signal: "tilt", target: 0, range: 90, weight: 0.5 } ],
           stops: [ { kind: "crashed" }, { kind: "grounded", after: 3 } ],
@@ -200,7 +202,7 @@ const goals = [
       program: (h) => ({ v: 1, target: null,
           terms: [ { name: "height", kind: "near", signal: "agl", target: h === undefined ? 10 : h, range: h === undefined ? 10 : h, weight: 1 },
                    { name: "drift", kind: "stayOver", range: 10, weight: 1 },
-                   { name: "still", kind: "near", signal: "sideways", target: 0, range: 5, weight: 0.5 },
+                   { name: "still", kind: "near", signal: "sideways", target: 0, range: 5, soft: true, weight: 0.5 },
                    { name: "upright", kind: "near", signal: "tilt", target: 0, range: 90, weight: 0.25 } ],
           stops: [ { kind: "crashed" }, { kind: "grounded", after: 3 } ],
           bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true },
@@ -283,7 +285,10 @@ function termExpr(t, i) {
     switch (t.kind) {
     case "near": {
         const off = Number(t.target) === 0 ? (t.signal === "tilt" ? S : "Math.abs(" + S + ")") : "Math.abs(" + S + " - " + num(t.target) + ")"
-        return "-Math.min(" + off + " / " + num(Math.max(1e-6, t.range)) + ", 1) * dt" + scale(t.weight) }
+        const r = num(Math.max(1e-6, t.range))
+        // soft: off / (off + range) never flattens out, so there is a slope even far away (e.g. an air start at 35 m/s)
+        if (t.soft) return "-" + off + " / (" + off + " + " + r + ") * dt" + scale(t.weight)
+        return "-Math.min(" + off + " / " + r + ", 1) * dt" + scale(t.weight) }
     case "upTo": return "Math.min(" + S + ", " + num(t.cap) + ") / " + num(Math.max(1e-6, t.cap)) + " * dt" + scale(t.weight)
     case "per": return S + " * dt / " + num(Math.max(1e-6, t.per)) + scale(t.weight)
     case "below": {

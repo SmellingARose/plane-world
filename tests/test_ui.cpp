@@ -207,6 +207,9 @@ static void testBlocks() {
         QJSValue hv = goals.property(1).property("program").call();
         const QString code = lib.property("compile").call({hv, neural}).toString();
         CHECK(code.contains("s.crashed ? -20 - 2.25 * Math.max(0, ctx.info.duration - ctx.t) : 0"));
+        // "still" is soft: never flat, so an air start at 35 m/s still has a slope (half the penalty at 10 m/s)
+        CHECK(code.contains("still: -Math.abs(Math.hypot(s.vx, s.vz)) / (Math.abs(Math.hypot(s.vx, s.vz)) + 10) * dt * 0.5,"));
+        CHECK(code.contains("height: -Math.min(Math.abs(s.agl - 20) / 20, 1) * dt,"));   // a hard "Stay near" is unchanged
     }
     // a preset at another parameter value is still that preset (Set up shows its one setting)
     QJSValue hover = goals.property(1).property("program").call({QJSValue(35)});

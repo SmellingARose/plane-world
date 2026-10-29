@@ -40,7 +40,11 @@ void MultirotorFC::update(CraftSim& sim, const MultirotorSticks& s, double dt) {
     const double tilt = std::sin(maxTiltDeg * kDeg);
     // attitude: drive the body-frame up vector to the stick target.
     // Nose down tips world-up towards body -x, right side down tips it towards -z. Body rates: +w.z = nose up, +w.x = right side down.
-    const double tx = -std::clamp(s.pitch, -1.0, 1.0) * tilt, tz = -std::clamp(s.roll, -1.0, 1.0) * tilt;
+    double tx = -std::clamp(s.pitch, -1.0, 1.0) * tilt, tz = -std::clamp(s.roll, -1.0, 1.0) * tilt;
+    if (brake > 0) {   // lean against the horizontal velocity: centred sticks hold still, not just level
+        const Vec3d v = sim.velocity(), vb = inv.act(Vec3d{v.x, 0, v.z});
+        tx = std::clamp(tx + brake * vb.x, -tilt, tilt); tz = std::clamp(tz + brake * vb.z, -tilt, tilt);
+    }
     const double ex = up.x - tx, ez = up.z - tz;
     pitchI_ = std::clamp(pitchI_ + ex * dt, -0.5, 0.5); rollI_ = std::clamp(rollI_ + ez * dt, -0.5, 0.5);   // trims CoM / thrust offsets
     const double uPitch = -kp * ex - ki * pitchI_ - kd * w.z;   // > 0 raises the nose (more thrust on +x rotors)

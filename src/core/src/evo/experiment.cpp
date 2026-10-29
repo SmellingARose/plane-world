@@ -219,6 +219,7 @@ ExperimentDocument ExperimentDocument::fromJson(const Value& v) {
     tolerant(v, "controller", [&](auto& x) {
         ControllerSpec c; c.mode = rStr(x, "mode"); c.hz = rNum(x, "hz");
         if (x.has("hoverTrim") && x["hoverTrim"].type() == Value::Type::Bool) c.hoverTrim = x["hoverTrim"].boolean();
+        if (x.has("assist") && x["assist"].isString()) c.assist = x["assist"].str();
         e.controller = c;
     });
     // Not tolerant: an algorithm entry that can't be read used to fall back to Simple ES silently, so the run trained
@@ -302,6 +303,7 @@ Value ExperimentDocument::toJson() const {
     o.set("genome", std::move(g));
     Value c = Value::object(); c.set("mode", Value::string(controller.mode)); c.set("hz", Value::number(controller.hz));
     if (!controller.hoverTrim) c.set("hoverTrim", Value::fromBool(false));   // default on: not written
+    if (controller.assist != "none") c.set("assist", Value::string(controller.assist));   // default none: not written
     o.set("controller", std::move(c));
     o.set("algorithm", evo::toJson(algorithm));
     o.set("population", Value::i64(population)); o.set("generations", Value::i64(generations));
@@ -520,6 +522,19 @@ std::vector<std::string> switchCraft(ExperimentDocument& e, const std::string& c
         } else if (!gone.empty()) {
             notes.push_back(craftName + " has no part for " + join(gone) + ", so " + (gone.size() == 1 ? "that dimension no longer evolves" : "those dimensions no longer evolve"));
         }
+    }
+
+    // Drones and rockets: a network driving the motors / engine and gimbals directly has to learn to balance before it
+    // can learn anything else, and nearly every early candidate flips or tips over (§10). Angle mode lets the built-in
+    // flight controller keep it level, so the network starts from a craft that already hovers. The multirotor
+    // controller limit-cycles below ~100 Hz (FLY runs it at 240 Hz), so drones control at 200 Hz.
+    if (e.controller.mode == "mlp") {
+        const std::string kind = craftKind(prepared);
+        const bool hovers = kind == "rotor" || kind == "rocket";
+        if (hovers && e.controller.assist != "angle")
+            notes.push_back("the network flies " + craftName + " in angle mode (the built-in flight controller keeps it level; Set up › Advanced)");
+        e.controller.assist = hovers ? "angle" : "none";
+        if (kind == "rotor" && e.controller.hz < kRotorControlHz) e.controller.hz = kRotorControlHz;
     }
 
     if (!oldName.empty() && oldName != craftName) {

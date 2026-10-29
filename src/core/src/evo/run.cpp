@@ -468,6 +468,12 @@ EvolvedAutopilot::EvolvedAutopilot(const craft::CraftDocument& craft, sim::Craft
 EvolvedAutopilot::EvolvedAutopilot(const EmbeddedController& controller, sim::CraftSim& sim) {
     controller_ = controller;
     const EmbeddedController* c = &controller_;
+    // angle mode needs the training context (EvalWorker drives the flight controller); this fallback has none
+    if (c->experiment && c->experiment->isObject() && c->experiment->has("controller")) {
+        const Value& ctl = (*c->experiment)["controller"];
+        if (ctl.isObject() && ctl.has("assist") && ctl["assist"].isString() && ctl["assist"].str() != "none")
+            throw EvoError("this controller flies in angle mode and needs its training experiment, which no longer fits the craft");
+    }
     ExperimentDocument exp; exp.scripts = c->script; exp.rewardTerms = c->termNames;
     runtime_ = scripts::make(c->script);
     runtime_->compile(c->script, exp);

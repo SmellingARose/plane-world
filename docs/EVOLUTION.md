@@ -46,6 +46,21 @@ The layout is built once per run:
    thrust ∝ power^(2/3), so the Racer quad at T/W 9.5 trims to ≈ 3.4 %). Only genes still at 0 change (a
    `genome()` that set a value wins); planes and the parity references are unchanged
    (`ExperimentContext::hoverTrimGenes`, `evolution.hover-trim`).
+4. **Angle mode** (`controller.assist: "angle"`, MLP controllers on crafts with a built-in flight controller): the
+   network flies the craft like a FLY pilot in angle mode instead of driving the motors / engine itself. Its first
+   outputs are the sticks of the multirotor controller (`MultirotorFC`: climb, yaw, pitch, roll) or the rocket
+   controller (`RocketFC`: climb, pitch, yaw), then one per selected control the flight controller doesn't drive.
+   Each stick is −1…1: pitch / roll tilt up to the controller's limit (35° drone, 20° rocket) and self-level when
+   centred, climb commands a climb rate (6 m/s drone, 5 m/s rocket) around a hover throttle the loop learns in
+   flight (started at the measured one), so centred sticks hold the height; landed with the climb stick at or below
+   centre, the motors / engine are off. The standard sensors have no horizontal velocity, so the controller also
+   leans against drift (0.04 tilt sine per m/s): centred sticks hover in place. The sticks start centred (no hover
+   trim; a directly driven throttle still trims). It applies only when the network was given every control the
+   flight controller drives (else it is ignored), and the drone controller needs ≥ 100 Hz (it limit-cycles below; FLY
+   runs it at 240 Hz). Choosing a drone or rocket in the craft picker turns it on (and a drone's control rate up to
+   200 Hz); Set up › Controller details has the check box. FLY's autopilot rebuilds the training context, so the
+   exported controller flies the same way (a controller that can't rebuild it refuses to start rather than misfly).
+   (`EvalWorker::applyNativePolicy`, `evolution.angle-assist`.)
 
 Rules:
 - Legalising clamps to `[min, max]`, rounds `int` genes and thresholds `bool` genes at 0.5. Algorithms legalise
@@ -219,7 +234,8 @@ to New Shepard, and a partial list would leave controls undriven). Design genes 
 experiment left with none evolves the mass of the new craft's heaviest part (±50 %). If the goal is a preset that
 doesn't suit the new craft (see craft kinds below), it becomes that kind's preset (planes: Hold, drones and rockets:
 Hover at the air-start height, ground vehicles: Drive); your own blocks and hand-written scripts are kept, and so
-is how each flight starts. A name ending in the old craft's name follows the new one, and the status bar lists what
+is how each flight starts. An MLP controller flies a drone or rocket in angle mode (§2; a drone at ≥ 200 Hz) and
+any other craft directly. A name ending in the old craft's name follows the new one, and the status bar lists what
 changed.
 
 **Wiring canvas** (② What evolves › Sensors → controls, `src/app/qml/WiringCanvas.qml`): the controller's inputs
@@ -264,10 +280,14 @@ are shown faded until you "Discard my edits" (back to the blocks) or "Keep my ed
 replaces it with a preset or an empty goal. Scripts written by the earlier goal picker (`// Goal: <id> <param>`) open
 as their preset's blocks.
 
-Hover is tuned for drones and rockets from either start: "still" (sideways speed near 0, full penalty at 10 m/s)
-keeps it over the start with a gradient everywhere, "drift" (distance from the start, full at 100 m) is a light
-backstop, and "hasn't taken off by 3 s" ends the flight with −20 plus the per-second charge, so sitting on the pad
-is as bad as crashing (before it, New Shepard from a runway start sat still for 40 generations).
+Hover is tuned for drones and rockets from either start: "still" (sideways speed near 0, soft: half the penalty at
+10 m/s, more the faster, so an air start at 35 m/s still has a slope) keeps it over the start, "drift" (distance
+from the start, full at 100 m) is a light backstop, and "hasn't taken off by 3 s" ends the flight with −20 plus the
+per-second charge, so sitting on the pad is as bad as crashing (before it, New Shepard from a runway start sat still
+for 40 generations). Hover and Hold position in wind learn within the quick start's 40 generations because drones
+and rockets fly in angle mode (§2): unassisted, nearly every New Shepard candidate tipped over and the Racer quad
+flipped within 2 s (§10). A "Stay near" block's "soft" check makes its penalty off / (off + range) instead of
+min(off / range, 1).
 
 The other presets (setting in brackets; every crash / flip / never-took-off end charges the seconds not flown):
 
@@ -458,5 +478,20 @@ Lessons (from `hold100.js` and `hover.js`):
 - **Size failure penalties so trying is never worse than doing nothing.** `hover.js` charges −1 per remaining
   second and −1 more on a crash; a harsher penalty made "never take off" optimal.
 - **Check a reward quickly** with `--generations 3 --population 16` and a `log()` in `control()`.
+
+- **Let the craft balance before the network learns the task.** Hover with a network driving New Shepard's engine
+  and gimbals, or the Racer quad's four motors, failed in the 40-generation quick start: nearly every candidate
+  tipped over or flipped (the quad within 2 s: its motors hover at 3.4 % throttle, so a small weight change shifts
+  a rotor's thrust by tens of percent, and any bias difference between motors is a constant torque). Smaller steps
+  (`sigma0` 0.1) and longer runs got the quad there — a level hover after 60–130 generations at 50–200 Hz, with a
+  third of each generation still crashing — but New Shepard only learned to survive by climbing away (30–75 m) and
+  drifting 80–400 m. A faster control rate alone did not help the unassisted quad. Flying the network in angle mode
+  (§2) made generation 0 crash-free for both: the quad holds 10 m within ±0.3 m and 1 m of the start by generation
+  10–15 (median −5 by 40), and New Shepard climbs off the pad to 20–28 m, upright, with the median −60 → −11…−17 in
+  40 generations.
+- **Don't score what the network can't sense.** "still" and "drift" need horizontal velocity, which the standard
+  sensors lack. Angle mode's drift lean helps (an 8 m/s start stops within 13 m), but a stick offset the network
+  hasn't learned to centre leaves a steady drift of offset × tilt limit / 0.04 m/s: the 40-generation New Shepard
+  hovers drifted 10–50 m. A stronger lean (0.1) makes New Shepard's slow attitude loop limit-cycle (±17°).
 
 `hover-pid.json` is a useful baseline for judging whether an MLP learns anything a PID could not.

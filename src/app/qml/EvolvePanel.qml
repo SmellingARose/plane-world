@@ -388,6 +388,14 @@ Rectangle {
                             }
                             PwPropertyRow { label: qsTr("Control rate"); tip: qsTr("How often per second the controller decides"); Layout.fillWidth: true
                                 PwNumberField { value: num("controller.hz", 50); suffix: " Hz"; decimals: 0; step: 5; minimum: 1; maximum: 1000; onCommitted: (v) => ev.set("controller.hz", v) } }
+                            CheckBox {
+                                visible: num("controller.mode", "mlp") === "mlp" && (root.craftKind === "rotor" || root.craftKind === "rocket")
+                                text: qsTr("Angle mode (the flight controller keeps it level)")
+                                checked: num("controller.assist", "none") === "angle"
+                                onToggled: ev.set("controller.assist", checked ? "angle" : "none")
+                                ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay
+                                ToolTip.text: qsTr("The network flies like a FLY pilot in angle mode: its outputs are the sticks (climb, pitch, roll / yaw) and the built-in flight controller drives the motors or engine. Off: the network drives them itself and must first learn to balance.")
+                            }
                             ColumnLayout {
                                 visible: xp.genome && (xp.genome.preset === "neural" || xp.genome.preset === "coevolve")
                                 Layout.fillWidth: true

@@ -66,7 +66,10 @@ struct GenomeSource {
 
 /// hoverTrim: rotor / rocket MLP controllers start their throttles at the hover throttle (§2); pwcli --swift-legacy
 /// turns it off to reproduce the Swift reference histories.
-struct ControllerSpec { std::string mode = "mlp"; double hz = 50; bool hoverTrim = true; };   // "mlp" | "neat" | "script" | "none"
+/// assist: "none" (the network drives the controls directly) or "angle" (MLP only: the network flies the craft like a
+/// FLY pilot in angle mode — its outputs are the sticks of the built-in multirotor / rocket flight controller, which
+/// self-levels and turns them into motor / engine and gimbal commands; §2). Ignored on crafts without one.
+struct ControllerSpec { std::string mode = "mlp"; double hz = 50; bool hoverTrim = true; std::string assist = "none"; };   // "mlp" | "neat" | "script" | "none"
 
 struct SpawnSettings {
     std::string mode = "runway";      // "runway" | "air" | "custom"
@@ -182,6 +185,9 @@ std::optional<craft::CraftDocument> resolveCraft(const CraftRef* ref, const std:
 /// ("… (Trainer)", "… — Trainer") follows the new one. Returns one plain-language note per change.
 /// Design genes are re-fitted too: genes whose part the craft lacks are dropped (mirror names it lacks are removed),
 /// and a design / co-evolve experiment left with none gets defaultDesignGene.
+/// An MLP controller on a drone or rocket flies in angle mode (controller.assist "angle", noted when it turns on), on
+/// any other craft directly ("none"); drones control at kRotorControlHz at least.
+inline constexpr double kRotorControlHz = 200;
 std::vector<std::string> switchCraft(ExperimentDocument& e, const std::string& craftName, const craft::CraftDocument& prepared);
 /// What kind of craft it is, for picking goals that suit it: "rocket" (rocket / solid motor), "plane" (wings),
 /// "rotor" (3+ propellers, no wings), "ground" (wheels, no wings or propellers), else "other".

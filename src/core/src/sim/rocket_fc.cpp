@@ -43,7 +43,13 @@ void RocketFC::update(CraftSim& sim, const RocketSticks& s, double dt) {
     const Vec3d up = inv.act({0, 1, 0}), w = inv.act(sim.angularVelocityWorld());   // body axes: +y along the rocket
     // Same conventions as MultirotorFC: tilting forward tips world-up towards body -x, tilting right towards -z.
     const double tilt = std::sin(maxTiltDeg * kDeg);
-    const double ex = up.x + std::clamp(s.pitch, -1.0, 1.0) * tilt, ez = up.z + std::clamp(s.yaw, -1.0, 1.0) * tilt;
+    // the wanted up vector (body x, z); brake > 0 leans it against the horizontal velocity as well
+    double wx = -std::clamp(s.pitch, -1.0, 1.0) * tilt, wz = -std::clamp(s.yaw, -1.0, 1.0) * tilt;
+    if (brake > 0) {
+        const Vec3d v = sim.velocity(), vb = inv.act(Vec3d{v.x, 0, v.z});
+        wx = std::clamp(wx + brake * vb.x, -tilt, tilt); wz = std::clamp(wz + brake * vb.z, -tilt, tilt);
+    }
+    const double ex = up.x - wx, ez = up.z - wz;
     if (sim.groundContact()) iPitch_ = iRoll_ = 0;
     iPitch_ = std::clamp(iPitch_ + ex * dt, -0.3, 0.3); iRoll_ = std::clamp(iRoll_ + ez * dt, -0.3, 0.3);
     // wanted angular acceleration (rad/s^2) about body +z (nose up) and +x (right side down)
@@ -56,6 +62,22 @@ void RocketFC::update(CraftSim& sim, const RocketSticks& s, double dt) {
     const double tz = I.c[2].z * azW / authority, tx = I.c[0].x * axW / authority;
     sim.setOutput(gPitch_, std::clamp(inv_[0][0] * tz + inv_[0][1] * tx, -1.0, 1.0));
     sim.setOutput(gYaw_, std::clamp(inv_[1][0] * tz + inv_[1][1] * tx, -1.0, 1.0));
+}
+
+void RocketFC::updateClimb(CraftSim& sim, double climb, double pitch, double yaw, double dt) {
+    if (throttle_ < 0 || dt <= 0) return;
+    climb = std::clamp(climb, -1.0, 1.0);
+    double throttle = 0;
+    if (!(sim.groundContact() && climb <= 0)) {
+        // Climb-rate loop around the hover throttle, tilt compensated. Thrust is about linear in throttle, so a
+        // throttle step of hover_ is about 1 g: gains scaled by hover_ give the same response (~1 m/s² per m/s of
+        // climb-rate error, the hover estimate following at 0.3 m/s² per m/s·s) on any vehicle.
+        const Vec3d up = sim.orientation().conjugate().act({0, 1, 0});
+        const double err = climb * maxClimb - sim.velocity().y;
+        hover_ = std::clamp(hover_ + 0.03 * hover_ * err * dt, 0.02, 1.0);
+        throttle = std::clamp((hover_ + 0.1 * hover_ * err) / std::max(0.5, up.y), 0.0, 1.0);
+    }
+    update(sim, RocketSticks{throttle, pitch, yaw}, dt);
 }
 
 } // namespace pw::sim
