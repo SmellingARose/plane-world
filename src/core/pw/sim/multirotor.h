@@ -20,9 +20,9 @@ public:
     /// Compute and apply motor outputs for this step.
     void update(CraftSim& sim, const MultirotorSticks& s, double dt);
     double maxTiltDeg = 35, maxClimb = 6, maxYawRate = 3;
-    double kp = 1.6, ki = 1.0, kd = 0.22;
-    double hoverStart = 0.1;
-    double brake = 0;   // > 0: also lean against horizontal velocity (tilt sine per m/s), so centred sticks hold still (EVOLVE)                // hover thrust fraction the climb loop starts from (it learns the real one)   // attitude gains, in throttle units per unit tilt (sin) / rad/s
+    double kp = 1.6, ki = 1.0, kd = 0.22;   // attitude gains, in throttle units per unit tilt (sin) / rad/s
+    double hoverStart = 0.1;                // hover thrust fraction the climb loop starts from (it learns the real one)
+    double brake = 0;   // > 0: also lean against horizontal velocity (tilt sine per m/s), so centred sticks hold still (EVOLVE)
 private:
     struct Rotor { int output; double x, z, spin; };
     std::vector<Rotor> rotors_;
