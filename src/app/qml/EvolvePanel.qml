@@ -114,8 +114,8 @@ Rectangle {
     function deletePreset(g) { deletePresetDlg.goal = g; deletePresetDlg.open() }
     // A behaviour's default name: short words for the goal preset ("Hover"), else its title, else the experiment's name.
     function behaviourName() {
-        const short = { hold: qsTr("Hold height"), hover: qsTr("Hover"), target: qsTr("Fly to target"), distance: qsTr("Fly far"), drive: qsTr("Drive to point") }
-        if (root.goalDef) return short[root.goalDef.id] || root.goalDef.title
+        const words = { hold: qsTr("Hold height"), hover: qsTr("Hover"), target: qsTr("Fly to target"), distance: qsTr("Fly far"), drive: qsTr("Drive to point") }
+        if (root.goalDef) return words[root.goalDef.id] || root.goalDef.title
         return xp.name || qsTr("Autopilot")
     }
     // palette "EVOLVE: add best to a craft as a behaviour": Train page, the dialog open
