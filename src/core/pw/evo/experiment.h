@@ -64,7 +64,9 @@ struct GenomeSource {
     std::optional<NEATLayout> neat;
 };
 
-struct ControllerSpec { std::string mode = "mlp"; double hz = 50; };   // "mlp" | "neat" | "script" | "none"
+/// hoverTrim: rotor / rocket MLP controllers start their throttles at the hover throttle (§2); pwcli --swift-legacy
+/// turns it off to reproduce the Swift reference histories.
+struct ControllerSpec { std::string mode = "mlp"; double hz = 50; bool hoverTrim = true; };   // "mlp" | "neat" | "script" | "none"
 
 struct SpawnSettings {
     std::string mode = "runway";      // "runway" | "air" | "custom"

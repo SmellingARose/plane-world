@@ -176,7 +176,7 @@ std::vector<std::pair<std::string, double>> ExperimentContext::hoverTrimGenes() 
     std::vector<std::pair<std::string, double>> r;
     const ExperimentDocument& e = experiment;
     const bool mlp = (e.genome.preset == "neural" || e.genome.preset == "coevolve") && e.controller.mode == "mlp";
-    if (!mlp || mlpSizes.size() < 2 || mlpOutputs.empty()) return r;
+    if (!mlp || !e.controller.hoverTrim || mlpSizes.size() < 2 || mlpOutputs.empty()) return r;
     const std::string kind = craftKind(craft);
     if (kind != "rotor" && kind != "rocket") return r;
     const std::string act = e.genome.mlp ? e.genome.mlp->outputActivation : "tanh";

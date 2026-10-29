@@ -216,7 +216,11 @@ ExperimentDocument ExperimentDocument::fromJson(const Value& v) {
         h.vegetation = rBool(x, "vegetation"); h.breakables = rBool(x, "breakables"); e.headless = h;
     });
     tolerant(v, "genome", [&](auto& x) { e.genome = genomeSourceFromJson(x); });
-    tolerant(v, "controller", [&](auto& x) { ControllerSpec c; c.mode = rStr(x, "mode"); c.hz = rNum(x, "hz"); e.controller = c; });
+    tolerant(v, "controller", [&](auto& x) {
+        ControllerSpec c; c.mode = rStr(x, "mode"); c.hz = rNum(x, "hz");
+        if (x.has("hoverTrim") && x["hoverTrim"].type() == Value::Type::Bool) c.hoverTrim = x["hoverTrim"].boolean();
+        e.controller = c;
+    });
     // Not tolerant: an algorithm entry that can't be read used to fall back to Simple ES silently, so the run trained
     // with a different method than the file names. Refuse and say what to fix instead.
     if (v.has("algorithm") && !v["algorithm"].isNull()) {
@@ -297,6 +301,7 @@ Value ExperimentDocument::toJson() const {
     if (genome.neat) g.set("neat", evo::toJson(*genome.neat));
     o.set("genome", std::move(g));
     Value c = Value::object(); c.set("mode", Value::string(controller.mode)); c.set("hz", Value::number(controller.hz));
+    if (!controller.hoverTrim) c.set("hoverTrim", Value::fromBool(false));   // default on: not written
     o.set("controller", std::move(c));
     o.set("algorithm", evo::toJson(algorithm));
     o.set("population", Value::i64(population)); o.set("generations", Value::i64(generations));
