@@ -99,7 +99,7 @@ function canonOf(x) {
 }
 function ident(n) { return /^[A-Za-z_$][\w$]*$/.test(n) }
 
-function newProgram() { return { v: 1, target: null, terms: [], stops: [{ kind: "crashed" }], bonuses: [{ name: "crash", when: "crashed", points: -20, timeBonus: 0 }], code: "" } }
+function newProgram() { return { v: 1, target: null, terms: [], stops: [{ kind: "crashed" }], bonuses: [{ name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true }], code: "" } }
 function newTerm(kind, program) {
     const k = termKind(kind), t = Object.assign({ name: kind, kind: kind }, clone(k.defaults))
     t.name = uniqueName(program, kind === "near" ? "hold" : kind === "upTo" ? "speed" : kind === "per" ? "distance" : kind === "below" ? "low"
@@ -133,7 +133,7 @@ const goals = [
                    { name: "drift", kind: "stayOver", range: 20, weight: 0.5 },
                    { name: "upright", kind: "near", signal: "tilt", target: 0, range: 90, weight: 0.5 } ],
           stops: [ { kind: "crashed" } ],
-          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0 } ], code: "" }) },
+          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
     { id: "target", suits: ["plane", "rotor"], title: "Fly to a target", param: { label: "Distance", unit: "m", def: 800, min: 10, get: p => p.target ? p.target.ahead : undefined },
       blurb: "Reach a point straight ahead of the start, staying clear of the ground. Arriving early scores more.",
       program: (d) => ({ v: 1, target: { ahead: d === undefined ? 800 : d, side: 0 },
@@ -141,22 +141,22 @@ const goals = [
                    { name: "clearance", kind: "below", signal: "agl", limit: 20, onceAbove: true, weight: 1 } ],
           stops: [ { kind: "crashed" }, { kind: "reached", radius: 30 } ],
           bonuses: [ { name: "arrive", when: "reached", points: 20, timeBonus: 10 },
-                     { name: "crash", when: "crashed", points: -20, timeBonus: 0 } ], code: "" }) },
+                     { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
     { id: "distance", suits: ["plane"], title: "Fly as far as possible", param: { label: "Min. height", unit: "m", def: 10, min: 0, get: p => p.terms && p.terms[1] ? p.terms[1].limit : undefined },
       blurb: "Cover the most ground in the episode without crashing or scraping the ground.",
       program: (hmin) => ({ v: 1, target: null,
           terms: [ { name: "distance", kind: "per", signal: "groundSpeed", per: 100, weight: 1 },
                    { name: "low", kind: "below", signal: "agl", limit: hmin === undefined ? 10 : hmin, onceAbove: true, weight: 1 } ],
           stops: [ { kind: "crashed" } ],
-          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0 } ], code: "" }) },
+          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
     { id: "drive", suits: ["ground"], title: "Drive to a point", param: { label: "Distance", unit: "m", def: 100, min: 1, get: p => p.target ? p.target.ahead : undefined },
       blurb: "Ground vehicles: reach a point straight ahead without flipping over.",
       program: (d) => ({ v: 1, target: { ahead: d === undefined ? 100 : d, side: 0 },
           terms: [ { name: "progress", kind: "approach", weight: 10 } ],
           stops: [ { kind: "crashed" }, { kind: "tipped", limit: 70 }, { kind: "reached", radius: 3 } ],
           bonuses: [ { name: "arrive", when: "reached", points: 20, timeBonus: 10 },
-                     { name: "flip", when: "tipped", points: -20, timeBonus: 0 },
-                     { name: "crash", when: "crashed", points: -20, timeBonus: 0 } ], code: "" }) }
+                     { name: "flip", when: "tipped", points: -20, timeBonus: 0, chargeRest: true },
+                     { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) }
 ]
 function goalById(id) { for (const g of goals) if (g.id === id) return g; return null }
 
@@ -195,6 +195,10 @@ function cond(kind, args) {
 }
 // a bonus's condition uses the settings of the stop block of the same kind (e.g. the "reached" radius)
 function whenArgs(p, when) { for (const x of p.stops || []) if (x.kind === when) return x; return stopKind(when) ? stopKind(when).defaults : {} }
+// The most the per-second scores can change in a second (sum of their weights). Ending the flight early on purpose
+// must not beat flying on: "chargeRest" end points also take this for every second not flown, or the search learns to
+// crash early to stop paying the per-second penalties (seen on New Shepard: engine off, dive).
+function perSecondWeight(p) { return (p.terms || []).filter(t => t.kind !== "approach").reduce((a, t) => a + Math.abs(Number(t.weight) || 0), 0) }
 function scale(w) { return Number(w) === 1 ? "" : " * " + num(w) }
 
 function termExpr(t, i) {
@@ -242,8 +246,10 @@ function compile(p, neuralPreset) {
     const ends = X.map(x => cond(x.kind, x))
     L.push("\nfunction terminate(ctx) {\n  const s = ctx.state;\n  return " + (ends.length ? ends.join(" || ") : "false") + ";\n}")
     // fitness: summed terms + end bonuses
+    const W = perSecondWeight(p)
     const lines = B.map(b => "const " + b.name + " = " + cond(b.when, whenArgs(p, b.when)) + " ? "
-                         + (Number(b.timeBonus) ? num(b.points) + " + " + num(b.timeBonus) + " * Math.max(0, 1 - ctx.t / ctx.info.duration)" : num(b.points)) + " : 0;")
+                         + (Number(b.timeBonus) ? num(b.points) + " + " + num(b.timeBonus) + " * Math.max(0, 1 - ctx.t / ctx.info.duration)" : num(b.points))
+                         + (b.chargeRest && W > 0 ? " - " + num(W) + " * Math.max(0, ctx.info.duration - ctx.t)" : "") + " : 0;")
     const sum = T.map(t => "ctx.sum." + t.name).concat(B.map(b => b.name))
     L.push("\nfunction fitness(ctx) {\n  const s = ctx.state;" + (lines.length ? "\n  " + lines.join("\n  ") : "")
            + "\n  return { fitness: " + (sum.length ? sum.join(" + ") : "0") + ", terms: { " + B.map(b => b.name + ": " + b.name).join(", ") + " } };\n}")
@@ -275,7 +281,8 @@ function describe(p) {
     for (const b of p.bonuses || []) {
         const k = stopKind(b.when)
         r.push({ name: b.name, plain: (Number(b.points) >= 0 ? "+" : "−") + num(Math.abs(b.points)) + " points if " + (k ? k.endTitle : b.when)
-                                      + (Number(b.timeBonus) ? ", plus up to " + num(b.timeBonus) + " for time left" : "") })
+                                      + (Number(b.timeBonus) ? ", plus up to " + num(b.timeBonus) + " for time left" : "")
+                                      + (b.chargeRest && perSecondWeight(p) > 0 ? ", and " + num(perSecondWeight(p)) + " more for every second it didn't fly" : "") })
     }
     return r
 }

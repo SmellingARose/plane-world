@@ -277,9 +277,10 @@ ColumnLayout {
                 required property int index
                 tint: ed.pointsTint; title: qsTr("If"); named: true
                 spec: [{ key: "when", type: "when" }, { key: "points", label: qsTr("give"), type: "number", unit: qsTr("points") }]
-                      .concat(modelData.when === "reached" ? [{ key: "timeBonus", label: qsTr("plus up to"), type: "number", unit: qsTr("more for arriving early"), min: 0 }] : [])
+                      .concat(modelData.when === "reached" ? [{ key: "timeBonus", label: qsTr("plus up to"), type: "number", unit: qsTr("more for arriving early"), min: 0 }]
+                              : [{ key: "chargeRest", label: qsTr("and charge the seconds it didn't fly"), type: "check" }])
                 item: modelData
-                plain: Blocks.describe({ terms: [], stops: [], bonuses: [modelData] })[0].plain
+                plain: Blocks.describe({ terms: ed.program.terms, stops: [], bonuses: [modelData] }).filter(d => d.name === modelData.name)[0].plain
                 onField: (key, v) => ed.edit(p => { p.bonuses[index][key] = v; if (key === "when" && Blocks.stopKind(v).needsTarget) ed.addTarget(p) })
                 onRemove: ed.edit(p => p.bonuses.splice(index, 1))
             }

@@ -224,7 +224,9 @@ read as sentences, compiled to JavaScript on every edit. Top to bottom: the wiri
 controls, from the craft), an optional target point (ahead / to the side of the start), scores every second ("Stay
 near", "More is better, up to", "Earn for every", "Penalise while below / above", "Get closer to the target", "Stay
 over the start", each with a weight), reasons to end the flight early (crash, target reached, tipped over, too low,
-too high), one-off points when the flight ends (optionally plus a bonus for time left), and a custom-code block for
+too high), one-off points when the flight ends (optionally plus a bonus for time left, or "charge the seconds it didn't fly":
+the sum of the per-second weights for every second left, so crashing early never beats flying on; the presets
+except Hold use it — without it, New Shepard learned to cut the engine and dive), and a custom-code block for
 anything else (helpers, `control()`, `descriptor()`). Set up › ③ Goal picks a preset (hold a height, hover, fly to a
 target, fly far, drive to a point; each is a block program), shows its one main setting (hover height, target
 distance…) and lists in plain language how it scores and when a flight ends. "Hold" at 150 m compiles
