@@ -118,7 +118,7 @@ function terms(program) { return names(program) }
 
 // ---------------------------------------------------------------- goal presets (block programs)
 const goals = [
-    { id: "hold", title: "Hold a height, wings level", param: { label: "Height", unit: "m", def: 150, min: 5, get: p => p.terms && p.terms[0] ? p.terms[0].target : undefined },
+    { id: "hold", suits: ["plane"], title: "Hold a height, wings level", param: { label: "Height", unit: "m", def: 150, min: 5, get: p => p.terms && p.terms[0] ? p.terms[0].target : undefined },
       blurb: "Get to (or stay at) the height above the ground, keep the wings level and keep some speed.",
       program: (h) => ({ v: 1, target: null,
           terms: [ { name: "altitude", kind: "near", signal: "agl", target: h === undefined ? 150 : h, range: h === undefined ? 150 : h, weight: 1 },
@@ -126,7 +126,7 @@ const goals = [
                    { name: "level", kind: "near", signal: "roll", target: 0, range: 90, weight: 0.5 } ],
           stops: [ { kind: "crashed" } ],
           bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0 } ], code: "" }) },
-    { id: "hover", title: "Hover at a height", param: { label: "Height", unit: "m", def: 20, min: 1, get: p => p.terms && p.terms[0] ? p.terms[0].target : undefined },
+    { id: "hover", suits: ["rotor", "rocket"], title: "Hover at a height", param: { label: "Height", unit: "m", def: 20, min: 1, get: p => p.terms && p.terms[0] ? p.terms[0].target : undefined },
       blurb: "Stay at the chosen height above the ground, stay over the start point and stay upright. Best with drones or rotorcraft.",
       program: (h) => ({ v: 1, target: null,
           terms: [ { name: "height", kind: "near", signal: "agl", target: h === undefined ? 20 : h, range: h === undefined ? 20 : h, weight: 1 },
@@ -134,7 +134,7 @@ const goals = [
                    { name: "upright", kind: "near", signal: "tilt", target: 0, range: 90, weight: 0.5 } ],
           stops: [ { kind: "crashed" } ],
           bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0 } ], code: "" }) },
-    { id: "target", title: "Fly to a target", param: { label: "Distance", unit: "m", def: 800, min: 10, get: p => p.target ? p.target.ahead : undefined },
+    { id: "target", suits: ["plane", "rotor"], title: "Fly to a target", param: { label: "Distance", unit: "m", def: 800, min: 10, get: p => p.target ? p.target.ahead : undefined },
       blurb: "Reach a point straight ahead of the start, staying clear of the ground. Arriving early scores more.",
       program: (d) => ({ v: 1, target: { ahead: d === undefined ? 800 : d, side: 0 },
           terms: [ { name: "progress", kind: "approach", weight: 10 },
@@ -142,14 +142,14 @@ const goals = [
           stops: [ { kind: "crashed" }, { kind: "reached", radius: 30 } ],
           bonuses: [ { name: "arrive", when: "reached", points: 20, timeBonus: 10 },
                      { name: "crash", when: "crashed", points: -20, timeBonus: 0 } ], code: "" }) },
-    { id: "distance", title: "Fly as far as possible", param: { label: "Min. height", unit: "m", def: 10, min: 0, get: p => p.terms && p.terms[1] ? p.terms[1].limit : undefined },
+    { id: "distance", suits: ["plane"], title: "Fly as far as possible", param: { label: "Min. height", unit: "m", def: 10, min: 0, get: p => p.terms && p.terms[1] ? p.terms[1].limit : undefined },
       blurb: "Cover the most ground in the episode without crashing or scraping the ground.",
       program: (hmin) => ({ v: 1, target: null,
           terms: [ { name: "distance", kind: "per", signal: "groundSpeed", per: 100, weight: 1 },
                    { name: "low", kind: "below", signal: "agl", limit: hmin === undefined ? 10 : hmin, onceAbove: true, weight: 1 } ],
           stops: [ { kind: "crashed" } ],
           bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0 } ], code: "" }) },
-    { id: "drive", title: "Drive to a point", param: { label: "Distance", unit: "m", def: 100, min: 1, get: p => p.target ? p.target.ahead : undefined },
+    { id: "drive", suits: ["ground"], title: "Drive to a point", param: { label: "Distance", unit: "m", def: 100, min: 1, get: p => p.target ? p.target.ahead : undefined },
       blurb: "Ground vehicles: reach a point straight ahead without flipping over.",
       program: (d) => ({ v: 1, target: { ahead: d === undefined ? 100 : d, side: 0 },
           terms: [ { name: "progress", kind: "approach", weight: 10 } ],
@@ -159,6 +159,16 @@ const goals = [
                      { name: "crash", when: "crashed", points: -20, timeBonus: 0 } ], code: "" }) }
 ]
 function goalById(id) { for (const g of goals) if (g.id === id) return g; return null }
+
+// Craft kinds (EvolveModel.io.craftKind, evo::craftKind): which presets suit which craft.
+const kindWords = { plane: "planes", rotor: "drones and hovering craft", rocket: "rockets", ground: "ground vehicles" }
+function suits(g, kind) { return !kind || !kindWords[kind] || g.suits.indexOf(kind) >= 0 }
+// all presets, the ones that suit this craft first (original order within each group)
+function goalsFor(kind) { return goals.filter(g => suits(g, kind)).concat(goals.filter(g => !suits(g, kind))) }
+// "Drive to a point  (for ground vehicles)" for a preset that doesn't suit the craft
+function goalLabel(g, kind) { return suits(g, kind) ? g.title : g.title + "  (for " + g.suits.map(k => kindWords[k]).join(", ") + ")" }
+// the goal a craft of this kind starts with after a craft switch (null: keep whatever is there)
+function defaultGoal(kind) { return goalById({ plane: "hold", rotor: "hover", rocket: "hover", ground: "drive" }[kind] || "") }
 // Which preset a program is (unchanged), or null once edited.
 // A preset with a parameter (hover height, target distance…) still counts as that preset at any value of it.
 function goalOf(program) {

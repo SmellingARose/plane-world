@@ -203,8 +203,16 @@ Goal (Alt+1..3). Step ① also holds how each flight starts (length, runway or a
 **Craft picker** (① Craft & worlds) calls `EvolveModel::setCraft`, which re-fits the experiment to the new craft
 (`evo::switchCraft`, `src/core/src/evo/experiment.cpp`): MLP / NEAT inputs the craft lacks are dropped, and if any
 selected output is missing the controller drives every control of the new craft (a plane's `Ailerons` mean nothing
-to New Shepard, and a partial list would leave controls undriven). A name ending in the old craft's name follows the
-new one, and the status bar lists what changed. A document that still names controls or sensors the craft lacks
+to New Shepard, and a partial list would leave controls undriven). Design genes for parts the craft lacks are dropped too; a Craft / Both
+experiment left with none evolves the mass of the new craft's heaviest part (±50 %). If the goal is a preset that
+doesn't suit the new craft (see craft kinds below), it becomes that kind's preset (planes: Hold, drones and rockets:
+Hover at the air-start height, ground vehicles: Drive); your own blocks and hand-written scripts are kept, and so
+is how each flight starts. A name ending in the old craft's name follows the new one, and the status bar lists what
+changed.
+
+**Craft kinds** (`evo::craftKind`, `evolution.craft-kind`): rocket (rocket or solid motor), rotor (propellers
+pushing up that can lift it, e.g. multirotors and the ducted tail-sitter), plane (wings), ground (wheels), else
+other. Goal lists show the presets that suit the craft first; the rest stay pickable, faded, with who they are for. A document that still names controls or sensors the craft lacks
 (an opened file, a hand edit) shows the problem under the craft picker, with a "Re-wire for <craft>" button, instead
 of failing at Start
 (`evolution.switch-craft-rewires`, pwuitests "goal blocks").
@@ -257,7 +265,8 @@ transcendental math in a reward can differ in the last bits.
 
 Files (library root: `~/Library/Application Support/PlaneWorld` on macOS, `%APPDATA%\PlaneWorld` on Windows):
 - Experiments: `<root>/experiments/<name>.json` (`src/core/src/evo/experiment.cpp:286`). Every key is optional;
-  unknown keys are ignored; `version` is 1. `scripts.blocks` (optional) is the goal-block program behind
+  unknown keys are ignored; `version` is 1. Exception: an `algorithm` entry that is not an object with a `kind`
+  string and a `values` object refuses to load and says how to fix it (it used to fall back to Simple ES silently). `scripts.blocks` (optional) is the goal-block program behind
   `scripts.source`.
 - Runs: `run.json` (experiment, craft, layout, terms, history, hall of fame), `algorithm.state`, `archive.json`.
   Checkpoints are written every `checkpointEvery` generations and on stop. Resume requires the same layout.

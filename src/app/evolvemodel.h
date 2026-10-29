@@ -146,7 +146,8 @@ public:
     Q_INVOKABLE void replaceWorld(int index, const QString& kind, const QString& arg = {});
     Q_INVOKABLE void removeWorld(int index);
     Q_INVOKABLE void setWorldSchedule(const QString& mode, int perGeneration);
-    Q_INVOKABLE void setCraft(const QString& name);           // switch craft and re-fit the controller wiring to it
+    Q_INVOKABLE void setCraft(const QString& name);
+    Q_INVOKABLE void appendStatus(const QString& s) { setStatus(m_status.isEmpty() ? s : m_status + "; " + s); }           // switch craft and re-fit the controller wiring to it
     Q_INVOKABLE void setPreset(const QString& genomePreset);   // what evolves; adjusts controller mode + script
     Q_INVOKABLE void toggleIO(const QString& which, const QString& name, bool on);   // "inputs" | "outputs"
     Q_INVOKABLE void setInputScale(const QString& name, double scale);

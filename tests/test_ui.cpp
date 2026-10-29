@@ -162,7 +162,7 @@ static void testBlocks() {
     QString src = QString::fromUtf8(f.readAll());
     src.replace(".pragma library", "");
     QJSEngine js;
-    QJSValue lib = js.evaluate("(function () {\n" + src + "\nreturn { goals, goalOf, compile, terms, problems, programFor, state, newProgram, newTerm, termKinds, stopKinds, newStop, newBonus };\n})()");
+    QJSValue lib = js.evaluate("(function () {\n" + src + "\nreturn { goals, goalOf, goalsFor, defaultGoal, suits, compile, terms, problems, programFor, state, newProgram, newTerm, termKinds, stopKinds, newStop, newBonus };\n})()");
     CHECK(!lib.isError());
     if (lib.isError()) { std::printf("  EvolveBlocks.js: %s\n", lib.toString().toUtf8().constData()); return; }
     e.newFromPreset("Neural controller");
@@ -222,6 +222,15 @@ static void testBlocks() {
     CHECK(e.document().crafts.size() == 1 && e.document().crafts[0].name == std::optional<std::string>("New Shepard"));
     CHECK(e.document().genome.mlp && e.document().genome.mlp->outputs.empty());
     CHECK(e.name().endsWith("(New Shepard)"));
+    // craft kind drives which presets come first and the goal a craft switch picks (EvolvePanel.fitGoalToCraft)
+    CHECK(e.io()["craftKind"].toString() == "rocket");
+    CHECK(lib.property("goalsFor").call({QJSValue("rocket")}).property(0).property("id").toString() == "hover");
+    CHECK(lib.property("goalsFor").call({QJSValue("ground")}).property(0).property("id").toString() == "drive");
+    CHECK(lib.property("goalsFor").call({QJSValue("rocket")}).property("length").toInt() == 5);
+    CHECK(lib.property("defaultGoal").call({QJSValue("rotor")}).property("id").toString() == "hover");
+    CHECK(lib.property("defaultGoal").call({QJSValue("other")}).isNull());
+    CHECK(!lib.property("suits").call({goals.property(0), QJSValue("rocket")}).toBool());
+    CHECK(lib.property("suits").call({goals.property(0), QJSValue("other")}).toBool());
     CHECK(e.io()["error"].toString().isEmpty());
     CHECK(e.status().contains("Ailerons"));
     // a document wired to controls the craft lacks says so before the run (opened files, hand edits)

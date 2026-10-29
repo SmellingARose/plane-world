@@ -531,10 +531,8 @@ void EvolveModel::setPreset(const QString& p) {
     if (p == "neural" || p == "coevolve") { if (!d.genome.mlp) d.genome.mlp = evo::MLPSpec(); if (d.controller.mode == "none" || d.controller.mode == "script") d.controller.mode = "mlp"; }
     if (p == "design") d.controller.mode = d.controller.mode == "mlp" ? "script" : d.controller.mode;
     if (p == "script") d.controller.mode = "script";
-    if ((p == "design" || p == "coevolve") && d.genome.design.empty() && m_craft && !m_craft->parts.empty()) {
-        evo::DesignGene g; g.part = m_craft->parts[0].name; g.field = "mass"; g.min = 0.5; g.max = 5;
-        d.genome.design.push_back(g);
-    }
+    if ((p == "design" || p == "coevolve") && d.genome.design.empty() && m_craft && !m_craft->parts.empty())
+        d.genome.design.push_back(evo::defaultDesignGene(*m_craft));
     // Swap the script for the matching preset when the current one is an untouched preset.
     const std::string kind = evo::scripts::presetKind(d.scripts.source);
     if (!kind.empty() || d.scripts.source.empty()) {
@@ -571,8 +569,8 @@ void EvolveModel::setInputScale(const QString& name, double scale) {
 
 void EvolveModel::addDesignGene() {
     evo::ExperimentDocument d = m_doc;
-    evo::DesignGene g; g.part = m_craft && !m_craft->parts.empty() ? m_craft->parts[0].name : "wing"; g.field = "mass"; g.min = 0.5; g.max = 5;
-    d.genome.design.push_back(g);
+    if (m_craft && !m_craft->parts.empty()) d.genome.design.push_back(evo::defaultDesignGene(*m_craft));
+    else { evo::DesignGene g; g.part = "wing"; g.field = "mass"; g.min = 0.5; g.max = 5; d.genome.design.push_back(g); }
     setDoc(d, true);
 }
 void EvolveModel::removeDesignGene(int i) {
@@ -671,8 +669,18 @@ void EvolveModel::refreshIO() {
             err = tr("%1 has no %2, but the controller is wired to them.").arg(QString::fromStdString(m_craft->name), (mo + mi).join(", ")).toStdString();
         miswired = !err.empty();
     }
+    if (m_craft && (m_doc.genome.preset == "design" || m_doc.genome.preset == "coevolve")) {
+        QStringList gone;
+        for (auto& g : m_doc.genome.design)
+            if (std::none_of(m_craft->parts.begin(), m_craft->parts.end(), [&](auto& p) { return evo::design::partMatches(p, g.part); })) gone << QString::fromStdString(g.part);
+        if (!gone.isEmpty()) {
+            err += (err.empty() ? "" : " ") + tr("%1 has no part “%2” for the dimensions that evolve.").arg(QString::fromStdString(m_craft->name), gone.join("”, “")).toStdString();
+            miswired = true;
+        }
+    }
     QVariantMap io; io["inputs"] = ins; io["outputs"] = outs; io["error"] = m_craft && err.empty() ? QString() : QString::fromStdString(err);
     io["miswired"] = miswired;
+    io["craftKind"] = m_craft ? QString::fromStdString(evo::craftKind(*m_craft)) : QString();
     io["craft"] = m_craft ? QString::fromStdString(m_craft->name) : QString();
     m_io = io;
     emit ioChanged();

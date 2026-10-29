@@ -178,6 +178,13 @@ std::optional<craft::CraftDocument> resolveCraft(const CraftRef* ref, const std:
 /// left = all); if any selected output is missing the list becomes "all outputs" (a plane's Ailerons mean nothing to a
 /// rocket, and a partial list would silently leave controls undriven). A name that ends in the old craft's name
 /// ("… (Trainer)", "… — Trainer") follows the new one. Returns one plain-language note per change.
+/// Design genes are re-fitted too: genes whose part the craft lacks are dropped (mirror names it lacks are removed),
+/// and a design / co-evolve experiment left with none gets defaultDesignGene.
 std::vector<std::string> switchCraft(ExperimentDocument& e, const std::string& craftName, const craft::CraftDocument& prepared);
+/// What kind of craft it is, for picking goals that suit it: "rocket" (rocket / solid motor), "plane" (wings),
+/// "rotor" (3+ propellers, no wings), "ground" (wheels, no wings or propellers), else "other".
+std::string craftKind(const craft::CraftDocument& craft);
+/// A first design gene that fits the craft: the mass of its heaviest part, from half to one and a half times as built.
+DesignGene defaultDesignGene(const craft::CraftDocument& craft);
 
 } // namespace pw::evo

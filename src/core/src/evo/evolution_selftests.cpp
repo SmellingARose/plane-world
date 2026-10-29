@@ -15,6 +15,7 @@
 #include <thread>
 #include "pw/craft/library.h"
 #include "pw/evo/run.h"
+#include "pw/json.h"
 #include "pw/evo/selftests.h"
 #include "pw/selftest.h"
 #include "pw/world/presets.h"
@@ -514,6 +515,63 @@ void registerRunTests() {
         // and back: an "all outputs" list stays valid on any craft, nothing to note
         ref.name = "Trainer"; auto trainer = resolveCraft(&ref, "", err);
         ok &= expect(c, trainer && switchCraft(e, "Trainer", *trainer).empty() && e.name == "Quick start — hold altitude (Trainer)", "switching back is clean");
+        return ok;
+    });
+
+    selftest::add("evolution.switch-craft-design-genes", [](Context& c) -> bool {
+        // "Craft design" evolves the Trainer's wings and stabilator by part name; New Shepard has none of them. The switch
+        // drops those genes and evolves a part the rocket has, sized to it, and the genes apply to the rocket.
+        ExperimentDocument e = presets::make("Craft design", "Trainer");
+        const std::size_t before = e.genome.design.size();
+        CraftRef ref; ref.name = "New Shepard";
+        std::string err; auto rocket = resolveCraft(&ref, "", err);
+        bool ok = expect(c, rocket.has_value() && before > 0, "New Shepard resolves, Trainer design has genes: " + err);
+        if (!rocket) return false;
+        const auto notes = switchCraft(e, "New Shepard", *rocket);
+        ok &= expect(c, e.genome.design.size() == 1 && e.genome.design[0].field == "mass", "one mass gene for the rocket");
+        const DesignGene g = e.genome.design[0];
+        const craft::CraftPart* part = nullptr;
+        for (auto& p : rocket->parts) if (design::partMatches(p, g.part)) { part = &p; break; }
+        double heaviest = 0; for (auto& p : rocket->parts) heaviest = std::max(heaviest, p.mass);
+        ok &= expect(c, part && part->mass == heaviest && g.min == heaviest * 0.5 && g.max == heaviest * 1.5, "heaviest part, ±50 % of its mass (" + g.part + ")");
+        ok &= expect(c, notes.size() == 1 && notes[0].find("Wing") != std::string::npos, "note names the dropped wing genes");
+        const double v = *g.initial;
+        try { auto applied = design::apply(e.genome.design, &v, *rocket); ok &= expect(c, applied.parts.size() == rocket->parts.size(), ""); }
+        catch (const std::exception& ex) { ok &= expect(c, false, std::string("design gene applies: ") + ex.what()); }
+        // back on the Trainer the rocket gene has no part either: replaced again, by the Trainer's heaviest part
+        ref.name = "Trainer"; auto trainer = resolveCraft(&ref, "", err);
+        ok &= expect(c, trainer && !switchCraft(e, "Trainer", *trainer).empty() && e.genome.design.size() == 1 && e.genome.design[0].part != g.part, "switching back re-fits again");
+        return ok;
+    });
+
+    selftest::add("evolution.algorithm-entry-refused", [](Context& c) -> bool {
+        // An "algorithm" entry the reader can't use is an error that says what to fix (it used to become Simple ES).
+        auto load = [](const char* text) -> std::string {
+            auto r = json::parse(text);
+            if (!r.ok) return "parse: " + r.error;
+            try { auto e = ExperimentDocument::fromJson(r.value); return "ok:" + e.algorithm.kind; }
+            catch (const EvoError& x) { return x.what(); }
+        };
+        bool ok = expect(c, load(R"({"algorithm": {"kind": "cmaes", "values": {}}})") == "ok:cmaes", "complete entry loads");
+        const std::string noValues = load(R"({"algorithm": {"kind": "cmaes"}})");
+        ok &= expect(c, noValues.find("has no \"values\"") != std::string::npos && noValues.find("Fix the file") != std::string::npos, "no values: " + noValues);
+        const std::string noKind = load(R"({"algorithm": {"values": {"sigma0": 1}}})");
+        ok &= expect(c, noKind.find("no \"kind\"") != std::string::npos, "no kind: " + noKind);
+        ok &= expect(c, load(R"({"algorithm": "ga"})").find("must be an object") != std::string::npos, "not an object");
+        ok &= expect(c, load(R"({"name": "x"})") == "ok:" + ExperimentDocument().algorithm.kind, "no entry at all = the default method");
+        return ok;
+    });
+
+    selftest::add("evolution.craft-kind", [](Context& c) -> bool {
+        // goal presets are offered by craft kind (rockets first: New Shepard's ring fin is made of wing panels)
+        const std::vector<std::pair<const char*, const char*>> want = {{"Trainer", "plane"}, {"Jet trainer", "plane"}, {"Rover", "ground"},
+            {"Sounding rocket", "rocket"}, {"New Shepard", "rocket"}, {"Racer quad", "rotor"}, {"Ducted rocket", "rotor"}, {"Heavy hex", "rotor"}};
+        bool ok = true;
+        for (auto& [name, kind] : want) {
+            auto d = craft::presets::load(name);
+            ok &= expect(c, d && craftKind(*d) == kind, std::string(name) + " is " + (d ? craftKind(*d) : "missing") + ", want " + kind);
+        }
+        for (auto& d : craft::presets::bundled()) c.note("  " + d.name + ": " + craftKind(d));
         return ok;
     });
 

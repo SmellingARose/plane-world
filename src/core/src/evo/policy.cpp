@@ -198,7 +198,7 @@ GenomeLayout layout(const std::vector<DesignGene>& genes) {
     for (auto& g : genes) { GeneSpec s; s.name = g.geneName(); s.kind = g.kind; s.min = g.min; s.max = g.max; s.initial = g.initial; s.group = "design"; l.genes.push_back(s); }
     return l;
 }
-static bool matches(const craft::CraftPart& p, const std::string& sel) {
+bool partMatches(const craft::CraftPart& p, const std::string& sel) {
     if (!sel.empty() && sel.back() == '*') {
         std::string pre = sel.substr(0, sel.size() - 1);
         return p.id.rfind(pre, 0) == 0 || p.name.rfind(pre, 0) == 0;
@@ -228,7 +228,7 @@ craft::CraftDocument apply(const std::vector<DesignGene>& genes, const double* v
         double v = values[k];
         bool hit = false;
         for (auto& p : d.parts) {
-            bool direct = matches(p, g.part);
+            bool direct = partMatches(p, g.part);
             bool mirrored = std::find(g.mirror.begin(), g.mirror.end(), p.name) != g.mirror.end() || std::find(g.mirror.begin(), g.mirror.end(), p.id) != g.mirror.end();
             if (!direct && !mirrored) continue;
             hit = true;

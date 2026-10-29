@@ -52,6 +52,19 @@ Rectangle {
     readonly property var goalDef: blockState === "blocks" ? Blocks.goalOf(program) : null
     function commitBlocks(p) { ev.setBlocks(p, Blocks.compile(p, neuralPreset), Blocks.terms(p)) }
     function applyGoal(id) { const g = Blocks.goalById(id); if (g) replaceGoal(g.program()) }
+    // presets, the ones that suit this craft first (Blocks.goalsFor); the others say what they are for
+    readonly property string craftKind: ev.io.craftKind || ""
+    readonly property var goalList: Blocks.goalsFor(craftKind)
+    // after a craft switch: a preset goal that doesn't suit the new craft becomes that kind's preset (the start is
+    // kept; Hover takes the air-start height). Own blocks and hand-written scripts are never replaced.
+    function fitGoalToCraft() {
+        if (!goalDef || Blocks.suits(goalDef, craftKind)) return
+        const g = Blocks.defaultGoal(craftKind)
+        if (!g || g === goalDef) return
+        const h = g.id === "hover" && num("episode.spawn.mode", "runway") === "air" ? num("episode.spawn.altitudeAGL", 0) : 0
+        commitBlocks(g.program(h > 0 ? h : undefined))
+        ev.appendStatus(qsTr("Goal is now “%1”, which suits %2").arg(g.title, Blocks.kindWords[craftKind]))
+    }
     // replacing a hand-written or hand-edited script asks first (there is no undo in EVOLVE)
     function replaceGoal(p) { if (blockState === "blocks") commitBlocks(p); else { replaceDlg.program = p; replaceDlg.open() } }
     MessageDialog {
@@ -227,11 +240,11 @@ Rectangle {
                                 Layout.fillWidth: true
                                 model: ev.crafts
                                 currentIndex: ev.crafts.indexOf(ev.io.craft)
-                                onActivated: ev.setCraft(currentText)
+                                onActivated: { ev.setCraft(currentText); root.fitGoalToCraft() }
                             }
                         }
                         Label { visible: ev.io.error !== undefined && ev.io.error !== ""; text: ev.io.error || ""; color: Theme.bad; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: Theme.caption }
-                        Button { visible: !!ev.io.miswired; text: qsTr("Re-wire for %1").arg(ev.io.craft); onClicked: ev.setCraft(ev.io.craft)
+                        Button { visible: !!ev.io.miswired; text: qsTr("Re-wire for %1").arg(ev.io.craft); onClicked: { ev.setCraft(ev.io.craft); root.fitGoalToCraft() }
                             ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Drop the missing sensors and controls; the controller moves every control this craft has") }
                         Label { text: qsTr("Training worlds"); color: Theme.textMuted; font.pixelSize: Theme.small; Layout.topMargin: Theme.s1 }
                         TrainingWorlds { Layout.fillWidth: true }
@@ -412,9 +425,18 @@ Rectangle {
                             ComboBox {
                                 Layout.fillWidth: true
                                 readonly property bool own: !root.goalDef
-                                model: Blocks.goals.map(g => g.title).concat(own ? [root.blockState === "script" ? qsTr("Hand-written script") : qsTr("Your own blocks")] : [])
-                                currentIndex: root.goalDef ? Blocks.goals.indexOf(root.goalDef) : Blocks.goals.length
-                                onActivated: (i) => { if (i < Blocks.goals.length) root.applyGoal(Blocks.goals[i].id) }
+                                model: root.goalList.map(g => Blocks.goalLabel(g, root.craftKind)).concat(own ? [root.blockState === "script" ? qsTr("Hand-written script") : qsTr("Your own blocks")] : [])
+                                currentIndex: root.goalDef ? root.goalList.indexOf(root.goalDef) : root.goalList.length
+                                onActivated: (i) => { if (i < root.goalList.length) root.applyGoal(root.goalList[i].id) }
+                                delegate: ItemDelegate {
+                                    required property int index
+                                    required property var modelData
+                                    width: ListView.view ? ListView.view.width : implicitWidth
+                                    text: modelData
+                                    highlighted: ListView.view ? ListView.view.currentIndex === index : false
+                                    // presets for other kinds of craft stay pickable, just quieter
+                                    opacity: index < root.goalList.length && !Blocks.suits(root.goalList[index], root.craftKind) ? 0.55 : 1
+                                }
                             }
                         }
                         PwPropertyRow { visible: !!root.goalDef && !!root.goalDef.param; label: root.goalDef && root.goalDef.param ? root.goalDef.param.label : ""; Layout.fillWidth: true
@@ -776,7 +798,8 @@ Rectangle {
                                 Button { text: qsTr("Start from…"); onClicked: startMenu.popup(); visible: root.goalsApply || root.blockState !== "script"
                                     ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: qsTr("Replace the goal with a preset (its blocks are a good starting point)")
                                     Menu { id: startMenu
-                                        Repeater { model: Blocks.goals; MenuItem { required property var modelData; text: modelData.title; onTriggered: root.applyGoal(modelData.id) } }
+                                        Repeater { model: root.goalList; MenuItem { required property var modelData; text: Blocks.goalLabel(modelData, root.craftKind)
+                                            opacity: Blocks.suits(modelData, root.craftKind) ? 1 : 0.55; onTriggered: root.applyGoal(modelData.id) } }
                                         MenuSeparator {}
                                         MenuItem { text: qsTr("Empty goal"); onTriggered: root.replaceGoal(Blocks.newProgram()) } } }
                             }
@@ -817,7 +840,7 @@ Rectangle {
                                 brain: root.brainText()
                                 onEdited: (p) => root.commitBlocks(p)
                                 onWiringRequested: root.showWiring()
-                                onRewireRequested: ev.setCraft(ev.io.craft)
+                                onRewireRequested: { ev.setCraft(ev.io.craft); root.fitGoalToCraft() }
                             }
                             Item { height: Theme.s4 }
                         }
@@ -874,7 +897,8 @@ Rectangle {
                                 ToolTip.visible: hovered; ToolTip.delay: Theme.tooltipDelay; ToolTip.text: Theme.shortcutText("Ctrl+Return") + qsTr(" in the editor") }
                             Button { text: qsTr("Start from…"); onClicked: tplMenu.popup()
                                 Menu { id: tplMenu
-                                    Repeater { model: Blocks.goals; MenuItem { required property var modelData; text: qsTr("Goal: %1").arg(modelData.title); onTriggered: root.applyGoal(modelData.id) } }
+                                    Repeater { model: root.goalList; MenuItem { required property var modelData; text: qsTr("Goal: %1").arg(Blocks.goalLabel(modelData, root.craftKind))
+                                        opacity: Blocks.suits(modelData, root.craftKind) ? 1 : 0.55; onTriggered: root.applyGoal(modelData.id) } }
                                     MenuSeparator {}
                                     MenuItem { text: qsTr("Craft design preset (autopilot)"); onTriggered: ev.setScript(ev.presetScript("design")) } } }
                             Item { Layout.fillWidth: true }
