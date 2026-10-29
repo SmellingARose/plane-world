@@ -38,6 +38,14 @@ The layout is built once per run:
    then MLP genes) or `script` (empty). With algorithm `neat` or `controller.mode == "neat"`, the NEAT layout comes
    from `genome.neat`, or every craft input and output when absent.
 2. The script hook `genome(base)` may append genes or replace the layout (§3.3).
+3. **Hover trim** (rotor and rocket crafts, MLP controllers): the output biases of throttle outputs (motor, jet,
+   rocket) start at the hover throttle instead of 0, so the first generation can hold height (a network with all
+   weights 0 outputs its biases, and 0 is mid-range: 50 % throttle, below New Shepard's ~76 %, so every first
+   candidate fell or never left the pad). The hover throttle is measured in the sim at the start height: the craft
+   is held still and the throttle bisected until total thrust equals weight (props: power ∝ throttle and static
+   thrust ∝ power^(2/3), so the Racer quad at T/W 9.5 trims to ≈ 3.4 %). Only genes still at 0 change (a
+   `genome()` that set a value wins); planes and the parity references are unchanged
+   (`ExperimentContext::hoverTrimGenes`, `evolution.hover-trim`).
 
 Rules:
 - Legalising clamps to `[min, max]`, rounds `int` genes and thresholds `bool` genes at 0.5. Algorithms legalise
@@ -140,7 +148,9 @@ the native MLP, so a script can use a slice of `ctx.genome.values`), `nn.dense`,
 
 `pwcli --make-experiment "<name>"` or the EVOLVE presets menu (`data/experiments/`):
 - **Neural controller:** Trainer, MLP 9 → 12 → `Ailerons, Elevator, Rudder, Engine`, scored on holding 150 m AGL,
-  speed and wings level, with a crash penalty. `sep-cmaes`.
+  speed and wings level, with a crash penalty of −20 plus 2 per second not flown (so crashing early never pays).
+  `sep-cmaes`. The native preset runtime recognises the script; the pre-2026-10 version (flat −20, e.g. the parity
+  experiments and older saved files) is the preset kind `neural-v1`, kept bit-identical.
 - **Craft design:** wing span and chord (mirrored), wing x and stabilator span, flown by a JS PID autopilot. `ga`.
 - **Co-evolve design + controller:** wing span and chord plus MLP weights. `sep-cmaes`.
 
@@ -225,8 +235,9 @@ controls, from the craft), an optional target point (ahead / to the side of the 
 near", "More is better, up to", "Earn for every", "Penalise while below / above", "Get closer to the target", "Stay
 over the start", each with a weight), reasons to end the flight early (crash, target reached, tipped over, too low,
 too high), one-off points when the flight ends (optionally plus a bonus for time left, or "charge the seconds it didn't fly":
-the sum of the per-second weights for every second left, so crashing early never beats flying on; the presets
-except Hold use it — without it, New Shepard learned to cut the engine and dive), and a custom-code block for
+the sum of the per-second weights for every second left, so crashing early never beats flying on; every preset
+uses it, and the Neural preset script (= Hold) does the same natively — without it, New Shepard learned to cut the
+engine and dive. Experiments saved with the older flat −20 open as Hold, "edited", with an update offer), and a custom-code block for
 anything else (helpers, `control()`, `descriptor()`). Set up › ③ Goal picks a preset (hold a height, hover, fly to a
 target, fly far, drive to a point; each is a block program), shows its one main setting (hover height, target
 distance…) and lists in plain language how it scores and when a flight ends. "Hold" at 150 m compiles

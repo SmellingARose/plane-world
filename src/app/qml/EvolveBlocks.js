@@ -125,7 +125,7 @@ const goals = [
                    { name: "speed", kind: "upTo", signal: "airspeed", cap: 45, weight: 0.5 },
                    { name: "level", kind: "near", signal: "roll", target: 0, range: 90, weight: 0.5 } ],
           stops: [ { kind: "crashed" } ],
-          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0 } ], code: "" }) },
+          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
     { id: "hover", suits: ["rotor", "rocket"], title: "Hover at a height", param: { label: "Height", unit: "m", def: 20, min: 1, get: p => p.terms && p.terms[0] ? p.terms[0].target : undefined },
       blurb: "Stay at the chosen height above the ground, stay over the start point and stay upright. Best with drones or rotorcraft.",
       program: (h) => ({ v: 1, target: null,
@@ -291,15 +291,19 @@ function describe(p) {
 function programFor(scripts, neuralPreset) {
     if (scripts && scripts.blocks) return scripts.blocks
     const src = scripts ? scripts.source || "" : ""
-    if (neuralPreset && src.trim() === neuralPreset.trim()) return goals[0].program()
+    if (neuralPreset && (src.trim() === neuralPreset.trim() || src.trim() === legacyNeural(neuralPreset).trim())) return goals[0].program()
     const m = /^\/\/ Goal: (\w+)(?: (-?[\d.]+))?/.exec(src)   // scripts written by the earlier goal picker
     const g = m ? goalById(m[1]) : null
     return g ? g.program(m[2] !== undefined ? Number(m[2]) : undefined) : null
 }
-// "blocks": the script is the program's output; "edited": it was changed by hand since; "script": hand-written.
+// The Neural preset before crashes charged the seconds not flown (experiments saved until 2026-10): Hold, "edited".
+function legacyNeural(neuralPreset) {
+    return neuralPreset.replace(/\/\/ A crash also costs[^\n]*\n/, "").replace("-20 - 2 * Math.max(0, ctx.info.duration - ctx.t)", "-20")
+}
+// "blocks": the script is the program's output; "edited": it differs (changed by hand, or written by an older version
+// of the blocks / presets, so the banner offers to update it); "script": hand-written.
 function state(scripts, neuralPreset) {
     const p = programFor(scripts, neuralPreset)
     if (!p) return "script"
-    if (!scripts.blocks) return "blocks"   // recognised preset text: the blocks reproduce it
     return compile(p, neuralPreset) === (scripts.source || "") ? "blocks" : "edited"
 }

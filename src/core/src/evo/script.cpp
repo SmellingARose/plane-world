@@ -43,23 +43,25 @@ void checkLanguage(const ScriptBundle& b) {
 /// The preset scripts (Presets.swift neuralJS / designJS) executed natively with JavaScriptCore's arithmetic.
 class PresetScriptRuntime final : public ScriptRuntime {
 public:
-    explicit PresetScriptRuntime(std::string kind) : kind_(std::move(kind)) {}
+    // "neural-v1": the Neural preset as saved until 2026-10 (flat -20 crash), kept bit-identical for old files and the
+    // Swift parity references
+    explicit PresetScriptRuntime(std::string kind) : kind_(std::move(kind)), neural_(kind_ == "neural" || kind_ == "neural-v1"), legacy_(kind_ == "neural-v1") {}
     void compile(const ScriptBundle& b, const ExperimentDocument&) override { checkLanguage(b); }
     HookSet definedHooks() const override {
         HookSet s;
         s.insert(ScriptHook::Terms); s.insert(ScriptHook::Control); s.insert(ScriptHook::Reward); s.insert(ScriptHook::Terminate); s.insert(ScriptHook::Fitness);
-        if (kind_ == "neural") { s.insert(ScriptHook::Genome); s.insert(ScriptHook::Descriptor); }
+        if (neural_) { s.insert(ScriptHook::Genome); s.insert(ScriptHook::Descriptor); }
         else s.insert(ScriptHook::Init);
         return s;
     }
     GenomeLayout genome(const GenomeLayout& base) override {
-        if (kind_ != "neural") return base;
+        if (!neural_) return base;
         GenomeLayout out = base;   // genome(base): every MLP weight starts at 0 with a 0.5 step
         for (auto& g : out.genes) if (g.group == "mlp") { g.initial = 0.0; g.sigma = 0.5; }
         return out;
     }
     std::vector<std::string> termNames(const std::vector<std::string>&) override {
-        if (kind_ == "neural") return {"altitude", "speed", "level", "crash"};
+        if (neural_) return {"altitude", "speed", "level", "crash"};
         return {"climb", "efficiency", "crash"};
     }
     void bind(const ControlFrame& f) {
@@ -69,7 +71,7 @@ public:
             if (i < 0) throw scriptError("reward", std::string("unknown reward term '") + n + "'");
             return i;
         };
-        if (kind_ == "neural") { t0_ = ti("altitude"); t1_ = ti("speed"); t2_ = ti("level"); }
+        if (neural_) { t0_ = ti("altitude"); t1_ = ti("speed"); t2_ = ti("level"); }
         else {
             t0_ = ti("climb");
             auto oi = [&](const char* n) {
@@ -85,14 +87,14 @@ public:
         bound_ = &f;
     }
     void beginEpisode(const Genome&, ControlFrame&) override {
-        if (kind_ == "neural") return;
+        if (neural_) return;
         pitch_ = PID{0.08, 0.01, 0.5}; roll_ = PID{0.03, 0.0, 0.2};   // init(ctx)
     }
     void tick(ControlFrame& f) override {
         bind(f);
         const CraftStateSnapshot& s = f.state;
         double dt = f.info.controlDt;
-        if (kind_ == "neural") {
+        if (neural_) {
             f.terms[std::size_t(t0_)] += -jsMin(std::fabs(s.agl - 150) / 150, 1) * dt;
             f.terms[std::size_t(t1_)] += jsMin(s.airspeed, 45) / 45 * dt * 0.5;
             f.terms[std::size_t(t2_)] += -jsMin(std::fabs(s.roll) / 90, 1) * dt * 0.5;
@@ -110,8 +112,8 @@ public:
         bind(f);
         const CraftStateSnapshot& s = f.state;
         EpisodeOutcome o;
-        if (kind_ == "neural") {
-            double crash = s.crashed ? -20 : 0;
+        if (neural_) {
+            double crash = !s.crashed ? 0 : legacy_ ? -20 : -20 - 2 * jsMax(0, f.info.duration - s.t);   // = presets::kNeuralJS
             o.fitness = f.termSums[std::size_t(t0_)] + f.termSums[std::size_t(t1_)] + f.termSums[std::size_t(t2_)] + crash;
             o.terms["crash"] = crash;
             o.descriptor = std::vector<double>{s.x / 1000, s.agl / 300};
@@ -126,6 +128,7 @@ public:
     const char* engine() const override { return "native preset"; }
 private:
     std::string kind_;
+    bool neural_ = false, legacy_ = false;
     const ControlFrame* bound_ = nullptr;
     int t0_ = 0, t1_ = 0, t2_ = 0, oEngine_ = 0, oElev_ = 0, oAil_ = 0, oRud_ = 0;
     PID pitch_, roll_;
@@ -327,10 +330,19 @@ struct ScriptedRegistration {
 void registerScriptedAlgorithm() { static ScriptedRegistration once; }
 
 namespace scripts {
+// The Neural preset as saved until 2026-10: the same script without the charge for seconds not flown.
+static std::string legacyNeuralJS() {
+    std::string s = presets::kNeuralJS;
+    auto cut = [&](const std::string& from, const std::string& to) { auto i = s.find(from); if (i != std::string::npos) s.replace(i, from.size(), to); };
+    auto c = s.find("// A crash also costs"); if (c != std::string::npos) s.erase(c, s.find('\n', c) - c + 1);
+    cut("-20 - 2 * Math.max(0, ctx.info.duration - ctx.t)", "-20");
+    return s;
+}
 std::string presetKind(const std::string& source) {
-    static const std::string n = normalise(presets::kNeuralJS), d = normalise(presets::kDesignJS);
+    static const std::string n = normalise(presets::kNeuralJS), d = normalise(presets::kDesignJS), n1 = normalise(legacyNeuralJS());
     std::string s = normalise(source);
     if (s == n) return "neural";
+    if (s == n1) return "neural-v1";
     if (s == d) return "design";
     return "";
 }

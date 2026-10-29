@@ -603,6 +603,84 @@ void registerRunTests() {
         return ok;
     });
 
+    selftest::add("evolution.neural-preset-crash-charge", [](Context& c) -> bool {
+        // The Neural preset charges a crash 2 points per second not flown, natively and in kNeuralJS alike. New Shepard
+        // from an air start crashes in generation 0, so the charge is exercised; the native and JS runs must agree.
+        ExperimentDocument e = presets::make("Neural controller", "New Shepard");
+        CraftRef ref; ref.name = "New Shepard";
+        std::string err; auto rocket = resolveCraft(&ref, "", err);
+        if (!expect(c, rocket.has_value(), "New Shepard resolves: " + err)) return false;
+        switchCraft(e, "New Shepard", *rocket);
+        e.population = 6; e.generations = 1; e.workers = 1;
+        e.episode.duration = 8; e.episode.episodesPerCandidate = 1; e.episode.wind = {};
+        e.episode.spawn.mode = "air"; e.episode.spawn.altitudeAGL = 40; e.episode.spawn.speed = 0;
+        bool ok = expect(c, scripts::presetKind(e.scripts.source) == "neural", "the preset script is recognised");
+        auto run = [&](ScriptRuntimeFactory f) {
+            EvolutionRun r(e, *rocket, {EvoWorld::flat()}, EvolutionRun::newRunID(), {}, std::move(f));
+            return r.runGeneration();
+        };
+        const ScriptBundle b = e.scripts;
+        const GenerationRecord nat = run([] { return scripts::makePreset("neural"); });
+        const GenerationRecord js = run([b] { return scripts::make(b, scripts::Mode::JavaScript, script::Engine::Auto); });
+        ok &= expect(c, nat.termsBest.count("crash") && nat.termsMean.at("crash") < -20, "flights crash and pay more than -20 (mean crash " + fmt(nat.termsMean.at("crash")) + ")");
+        ok &= expect(c, nat.best == js.best && nat.mean == js.mean && nat.worst == js.worst, "native = JavaScript (best " + fmt(nat.best) + " / " + fmt(js.best) + ")");
+        return ok;
+    });
+
+    selftest::add("evolution.hover-trim", [](Context& c) -> bool {
+        // Rotor / rocket crafts start their throttle outputs at the hover throttle (all weights 0 -> output = bias);
+        // planes keep 0 (their histories and the parity references are unchanged).
+        auto context = [&](const char* craftName, ExperimentDocument& e) {
+            CraftRef ref; ref.name = craftName;
+            std::string err; auto craft = resolveCraft(&ref, "", err);
+            if (!craft) throw EvoError(err);
+            e = presets::make("Neural controller", craftName);
+            switchCraft(e, craftName, *craft);
+            e.episode.spawn.mode = "air"; e.episode.spawn.altitudeAGL = 150; e.episode.spawn.speed = 0;
+            auto ctx = std::make_shared<ExperimentContext>(e, *craft, std::vector<std::shared_ptr<const EvoWorld>>{EvoWorld::flat()});
+            auto rt = scripts::make(e.scripts); rt->compile(e.scripts, e); ctx->buildLayout(*rt);
+            return ctx;
+        };
+        bool ok = true;
+        ExperimentDocument e;
+        const auto t0 = std::chrono::steady_clock::now();
+        auto shepard = context("New Shepard", e);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        const auto v = shepard->hoverThrottle(shepard->mlpOutputs, 150);
+        c.note("New Shepard hover throttle " + (v ? fmt(*v) : std::string("none")) + ", context + trim " + fmt(ms) + " ms");
+        ok &= expect(c, v && *v > 0.6 && *v < 0.9, "New Shepard hovers at ~3/4 throttle");
+        const auto trim = shepard->hoverTrimGenes();
+        ok &= expect(c, trim.size() == 1, "one trimmed bias (the engine; gimbals stay centred)");
+        double b = 0;
+        for (auto& g : shepard->layout.genes) if (!trim.empty() && g.name == trim[0].first) b = g.initial.value_or(0);
+        ok &= expect(c, !trim.empty() && b == trim[0].second && b > 0, "the layout starts that bias at the trim (" + fmt(b) + ")");
+        // the starting network (every gene at its initial value) flies 10 s without crashing; untrimmed it falls
+        {
+            Genome g; g.id = 1;
+            for (auto& gs : shepard->layout.genes) g.values.push_back(gs.initial.value_or(0));
+            auto fly = [&](const std::vector<double>& values) {
+                Genome x = g; x.values = values;
+                SimEvaluator ev(shepard, 1, [b = e.scripts] { return scripts::make(b); });
+                return ev.evaluate({x}, 0)[0];
+            };
+            std::vector<double> untrimmed = g.values;
+            for (std::size_t i = 0; i < shepard->layout.genes.size(); ++i) if (!trim.empty() && shepard->layout.genes[i].name == trim[0].first) untrimmed[i] = 0;
+            const Fitness withTrim = fly(g.values), without = fly(untrimmed);
+            c.note("start network: trimmed crash " + fmt(withTrim.terms.count("crash") ? withTrim.terms.at("crash") : 0) + ", untrimmed crash " +
+                   fmt(without.terms.count("crash") ? without.terms.at("crash") : 0));
+            ok &= expect(c, withTrim.terms.count("crash") && withTrim.terms.at("crash") == 0, "trimmed start network does not crash");
+            ok &= expect(c, without.terms.count("crash") && without.terms.at("crash") < 0, "the untrimmed one does (the problem this fixes)");
+        }
+        ExperimentDocument eq; auto quad = context("Racer quad", eq);
+        const auto qv = quad->hoverThrottle(quad->mlpOutputs, 150);
+        c.note("Racer quad hover throttle " + (qv ? fmt(*qv) : std::string("none")));
+        // prop power ∝ throttle and static thrust ∝ power^(2/3): hover = (1 / (T/W))^1.5 = (1/9.5)^1.5 ≈ 0.034
+        ok &= expect(c, qv && std::fabs(*qv - std::pow(1 / 9.5, 1.5)) < 0.01 && !quad->hoverTrimGenes().empty(), "Racer quad (T/W 9.5) trims to (1/9.5)^1.5");
+        ExperimentDocument et; auto trainer = context("Trainer", et);
+        ok &= expect(c, trainer->hoverTrimGenes().empty(), "the Trainer (a plane) keeps 0");
+        return ok;
+    });
+
     selftest::add("evolution.rng-determinism", [](Context& c) -> bool {
         EvoRNG a(42), b(42), cc(43);
         bool ok = true, same = true, diff = false;
@@ -714,7 +792,7 @@ void registerRunTests() {
         std::string dir = c.parityDir + "/evolution";
         auto e = ExperimentDocument::load(dir + "/parity-neural.json");
         ok &= expect(c, e.name == "parity-neural" && e.genome.mlp && e.genome.mlp->hidden == std::vector<int>{12} && e.population == 12 &&
-                        scripts::presetKind(e.scripts.source) == "neural" && e.algorithm.kind == "sep-cmaes", "Swift experiment file decodes");
+                        scripts::presetKind(e.scripts.source) == "neural-v1" && e.algorithm.kind == "sep-cmaes", "Swift experiment file decodes (its script is the pre-2026-10 Neural preset)");
         auto d = ExperimentDocument::load(dir + "/parity-design.json");
         ok &= expect(c, d.genome.design.size() == 4 && d.genome.design[2].mirror.size() == 3 && !d.genome.mlp && scripts::presetKind(d.scripts.source) == "design",
                      "Swift design experiment decodes (design genes, mirrors, no MLP)");

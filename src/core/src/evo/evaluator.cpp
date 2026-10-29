@@ -141,6 +141,60 @@ ExperimentContext::ExperimentContext(ExperimentDocument e, craft::CraftDocument 
     for (auto& o : probe.outputs()) { outputNames.push_back(o.name); outputRanges.push_back({o.lo, o.hi}); }
 }
 
+std::optional<double> ExperimentContext::hoverThrottle(const std::vector<int>& outputs, double altitude) const {
+    sim::CraftSim s;
+    if (!s.load(craftSpec)) return std::nullopt;
+    std::vector<int> thr;
+    for (int o : outputs) {
+        const auto k = s.outputs()[static_cast<std::size_t>(o)].kind;
+        if (k == sim::OutputKind::Motor || k == sim::OutputKind::Jet || k == sim::OutputKind::Rocket) thr.push_back(o);
+    }
+    if (thr.empty()) return std::nullopt;
+    // thrust minus weight (N) with every throttle at v, after the engines spool up, at the hover condition: the craft
+    // is held still (no inflow, no tumbling: an open-loop multirotor would flip within a second). Rotor and rocket
+    // crafts thrust along their up axis, so total thrust against weight is the hover test.
+    auto climb = [&](double v) {
+        s.load(craftSpec);
+        s.groundEnabled = false;
+        sim::SimEnvironment env;
+        s.reset(s.restingSpawn() + Vec3d{0, smax(0, altitude), 0});
+        for (int o : thr) s.setOutput(o, v);
+        for (int i = 0; i < 100; ++i) { s.step(0.01, env); s.setVelocity(Vec3d{}, Vec3d{}); }
+        double thrust = 0;
+        for (auto& p : s.parts()) thrust += p.thrustNow;
+        return thrust - s.mass() * kGravity;
+    };
+    double hi = 1;
+    for (int o : thr) hi = smin(hi, s.outputs()[static_cast<std::size_t>(o)].hi);
+    if (climb(hi) <= 0) return std::nullopt;
+    double lo = 0;
+    for (int it = 0; it < 12; ++it) { const double m = 0.5 * (lo + hi); (climb(m) > 0 ? hi : lo) = m; }
+    return 0.5 * (lo + hi);
+}
+
+std::vector<std::pair<std::string, double>> ExperimentContext::hoverTrimGenes() const {
+    std::vector<std::pair<std::string, double>> r;
+    const ExperimentDocument& e = experiment;
+    const bool mlp = (e.genome.preset == "neural" || e.genome.preset == "coevolve") && e.controller.mode == "mlp";
+    if (!mlp || mlpSizes.size() < 2 || mlpOutputs.empty()) return r;
+    const std::string kind = craftKind(craft);
+    if (kind != "rotor" && kind != "rocket") return r;
+    const std::string act = e.genome.mlp ? e.genome.mlp->outputActivation : "tanh";
+    if (act != "tanh" && act != "linear") return r;
+    const double alt = e.episode.spawn.mode == "runway" ? 0 : e.episode.spawn.altitudeAGL;
+    const auto v = hoverThrottle(mlpOutputs, alt);
+    if (!v) return r;
+    sim::CraftSim s; s.load(craftSpec);
+    const std::string L = std::to_string(mlpSizes.size() - 2);
+    for (std::size_t j = 0; j < mlpOutputs.size(); ++j) {
+        const auto& o = s.outputs()[static_cast<std::size_t>(mlpOutputs[j])];
+        if (o.kind != sim::OutputKind::Motor && o.kind != sim::OutputKind::Jet && o.kind != sim::OutputKind::Rocket) continue;
+        const double y = smax(-0.995, smin(0.995, 2 * (*v - o.lo) / smax(1e-9, o.hi - o.lo) - 1));   // network output for v
+        r.push_back({"mlp." + L + ".b." + std::to_string(j), act == "tanh" ? std::atanh(y) : y});
+    }
+    return r;
+}
+
 std::vector<int> ExperimentContext::generationWorlds(int generation) const {
     const int n = int(worlds.size());
     const auto& s = experiment.worldSchedule;
@@ -220,6 +274,13 @@ void ExperimentContext::buildLayout(ScriptRuntime& rt) {
         }
         for (int i : neatInputs) neatInputScale.push_back(1 / smax(1e-9, e.genome.mlp ? e.genome.mlp->scaleFor(inputNames[static_cast<std::size_t>(i)]) : 1.0));
     }
+    // Start a hovering craft's throttles at the hover throttle: a network with all weights 0 outputs its biases, and
+    // a bias of 0 is mid-range (50 %) — below hover for New Shepard (~76 %), so every first-generation candidate fell
+    // or never left the pad. Only genes still at 0 change (a genome() that chose a value wins), and only rotor and
+    // rocket crafts (planes and their parity references are untouched).
+    for (auto& [name, b] : hoverTrimGenes())
+        for (auto& g : layout.genes)
+            if (g.name == name && (!g.initial || *g.initial == 0)) g.initial = b;
     mlpRange = layout.range("mlp");
     designRange = layout.range("design");
     needsPerCandidateCraft = wantsDesign || rt.definedHooks().contains(ScriptHook::Decode);

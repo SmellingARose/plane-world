@@ -28,8 +28,9 @@ function reward(ctx) {
 
 function terminate(ctx) { return ctx.state.crashed; }
 
+// A crash also costs 2 points (the per-second weights) for every second not flown, so crashing early never pays.
 function fitness(ctx) {
-  const crash = ctx.state.crashed ? -20 : 0;
+  const crash = ctx.state.crashed ? -20 - 2 * Math.max(0, ctx.info.duration - ctx.t) : 0;
   return { fitness: ctx.sum.altitude + ctx.sum.speed + ctx.sum.level + crash, terms: { crash: crash } };
 }
 

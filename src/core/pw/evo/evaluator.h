@@ -68,6 +68,12 @@ public:
         : ExperimentContext(std::move(e), std::move(flightCraft), std::vector<std::shared_ptr<const EvoWorld>>{std::move(world)}) {}
     /// Native layout (preset) + script genome(base) hook. Called once by the run.
     void buildLayout(ScriptRuntime& orchestrator);
+    /// The throttle-output value (each of `outputs`, in its own range) at which the craft holds its height in still air
+    /// at `altitude` m, measured in the sim by bisection; nullopt when full throttle can't lift it or `outputs` has no
+    /// motor / jet / rocket.
+    std::optional<double> hoverThrottle(const std::vector<int>& outputs, double altitude) const;
+    /// MLP output biases that start throttle outputs at the hover throttle (rotor / rocket crafts), by gene name
+    std::vector<std::pair<std::string, double>> hoverTrimGenes() const;
     ExperimentDocument experiment;
     craft::CraftDocument craft;
     sim::CraftSpec craftSpec;
