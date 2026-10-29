@@ -191,11 +191,11 @@ static void testBlocks() {
         if (!e.scriptOk()) std::printf("  goal %s: %s\n", id.toUtf8().constData(), e.scriptMessage().toUtf8().constData());
         CHECK(e.scriptOk());
     }
-    // crashing early must not beat flying on: hover's crash points charge the seconds not flown (2 a second)
+    // crashing early must not beat flying on: hover's crash points charge the seconds not flown (2.25 a second)
     {
         QJSValue hv = goals.property(1).property("program").call();
         const QString code = lib.property("compile").call({hv, neural}).toString();
-        CHECK(code.contains("s.crashed ? -20 - 2 * Math.max(0, ctx.info.duration - ctx.t) : 0"));
+        CHECK(code.contains("s.crashed ? -20 - 2.25 * Math.max(0, ctx.info.duration - ctx.t) : 0"));
     }
     // a preset at another parameter value is still that preset (Set up shows its one setting)
     QJSValue hover = goals.property(1).property("program").call({QJSValue(35)});

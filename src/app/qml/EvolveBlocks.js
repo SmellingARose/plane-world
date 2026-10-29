@@ -21,6 +21,7 @@ const signals = [
     { id: "pitch", label: "pitch", unit: "°", expr: "s.pitch" },
     { id: "tilt", label: "tilt (roll + pitch)", unit: "°", expr: "(Math.abs(s.roll) + Math.abs(s.pitch))" },
     { id: "distance", label: "distance from start", unit: "m", expr: "s.distance" },
+    { id: "sideways", label: "sideways speed", unit: "m/s", expr: "Math.hypot(s.vx, s.vz)" },
     { id: "target", label: "distance to target", unit: "m", expr: "dist(ctx)", needsTarget: true }
 ]
 function signal(id) { for (const x of signals) if (x.id === id) return x; return signals[0] }
@@ -82,6 +83,8 @@ const stopKinds = [
     { id: "tipped", hint: "Stop when it rolls or pitches past an angle", title: "it tips over", endTitle: "it ends tipped over", fields: [ { key: "limit", label: "past", type: "number", unit: "°", min: 1 } ], defaults: { limit: 70 } },
     { id: "tooLow", hint: "Stop when it is still low after some time (never took off)", title: "it is still low", endTitle: "it ends too low", fields: [ { key: "height", label: "below", type: "number", unit: "m" },
                                                     { key: "after", label: "after", type: "number", unit: "s", min: 0 } ], defaults: { height: 5, after: 10 } },
+    { id: "grounded", hint: "Stop when it is still on the ground after some time (never took off)", title: "it hasn't taken off", endTitle: "it never took off",
+      fields: [ { key: "after", label: "by", type: "number", unit: "s", min: 0 } ], defaults: { after: 3 } },
     { id: "tooHigh", hint: "Stop when it climbs above a height", title: "it is too high", endTitle: "it ends too high", fields: [ { key: "height", label: "above", type: "number", unit: "m" } ], defaults: { height: 300 } }
 ]
 function stopKind(id) { for (const k of stopKinds) if (k.id === id) return k; return null }
@@ -127,13 +130,17 @@ const goals = [
           stops: [ { kind: "crashed" } ],
           bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
     { id: "hover", suits: ["rotor", "rocket"], title: "Hover at a height", param: { label: "Height", unit: "m", def: 20, min: 1, get: p => p.terms && p.terms[0] ? p.terms[0].target : undefined },
-      blurb: "Stay at the chosen height above the ground, stay over the start point and stay upright. Best with drones or rotorcraft.",
+      blurb: "Take off if needed, then stay at the chosen height above the ground, hold still over the start point and stay upright. Best with drones and rockets.",
+      // "still" (sideways speed) gives a gradient everywhere; "drift" alone maxed out within a second for a fast start
+      // (New Shepard wandered 200–550 m). "liftoff" makes sitting on the pad as bad as crashing.
       program: (h) => ({ v: 1, target: null,
           terms: [ { name: "height", kind: "near", signal: "agl", target: h === undefined ? 20 : h, range: h === undefined ? 20 : h, weight: 1 },
-                   { name: "drift", kind: "stayOver", range: 20, weight: 0.5 },
+                   { name: "still", kind: "near", signal: "sideways", target: 0, range: 10, weight: 0.5 },
+                   { name: "drift", kind: "stayOver", range: 100, weight: 0.25 },
                    { name: "upright", kind: "near", signal: "tilt", target: 0, range: 90, weight: 0.5 } ],
-          stops: [ { kind: "crashed" } ],
-          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
+          stops: [ { kind: "crashed" }, { kind: "grounded", after: 3 } ],
+          bonuses: [ { name: "crash", when: "crashed", points: -20, timeBonus: 0, chargeRest: true },
+                     { name: "liftoff", when: "grounded", points: -20, timeBonus: 0, chargeRest: true } ], code: "" }) },
     { id: "target", suits: ["plane", "rotor"], title: "Fly to a target", param: { label: "Distance", unit: "m", def: 800, min: 10, get: p => p.target ? p.target.ahead : undefined },
       blurb: "Reach a point straight ahead of the start, staying clear of the ground. Arriving early scores more.",
       program: (d) => ({ v: 1, target: { ahead: d === undefined ? 800 : d, side: 0 },
@@ -190,6 +197,7 @@ function cond(kind, args) {
     case "tipped": return "(Math.abs(s.roll) > " + num(args.limit) + " || Math.abs(s.pitch) > " + num(args.limit) + ")"
     case "tooLow": return "(ctx.t > " + num(args.after) + " && s.agl < " + num(args.height) + ")"
     case "tooHigh": return "s.agl > " + num(args.height)
+    case "grounded": return "(!s.crashed && s.contact && ctx.t > " + num(args.after) + ")"   // a crash is scored as a crash, not twice
     }
     return "false"
 }

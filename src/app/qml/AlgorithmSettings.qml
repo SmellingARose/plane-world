@@ -83,6 +83,7 @@ ColumnLayout {
         readonly property bool current: modelData === algo.kind
         readonly property bool open: algo.detailsKind === modelData
         readonly property string issue: Algos.problem(modelData, algo.xp, algo.ev.geneCount)
+        readonly property var issueFix: Algos.fix(modelData, algo.xp, algo.ev.geneCount)
         visible: algo.browsing || current
         Layout.fillWidth: true
         implicitHeight: col.implicitHeight + Theme.s3 * 2
@@ -126,6 +127,19 @@ ColumnLayout {
             }
             Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.textMuted; text: card.info.tagline }
             Label { visible: card.issue !== ""; Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: Theme.caption; color: Theme.warn; text: "⚠ " + card.issue }
+            // the one-click fix for that problem (it also picks this method)
+            Button {
+                visible: !!card.issueFix
+                text: card.issueFix ? card.issueFix.label : ""
+                font.pixelSize: Theme.caption
+                onClicked: {
+                    const a = card.issueFix.action
+                    if (a === "sep-cmaes") { algo.ev.set("algorithm.kind", "sep-cmaes"); return }
+                    if (a === "neat-controller") algo.ev.set("controller.mode", "neat")
+                    else if (a === "add-axis") algo.ev.addAxis()
+                    if (algo.xp.algorithm.kind !== card.modelData) algo.ev.set("algorithm.kind", card.modelData)
+                }
+            }
 
             ColumnLayout {
                 visible: card.open

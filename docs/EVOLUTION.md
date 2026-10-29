@@ -234,7 +234,7 @@ read as sentences, compiled to JavaScript on every edit. Top to bottom: the wiri
 controls, from the craft), an optional target point (ahead / to the side of the start), scores every second ("Stay
 near", "More is better, up to", "Earn for every", "Penalise while below / above", "Get closer to the target", "Stay
 over the start", each with a weight), reasons to end the flight early (crash, target reached, tipped over, too low,
-too high), one-off points when the flight ends (optionally plus a bonus for time left, or "charge the seconds it didn't fly":
+too high, hasn't taken off by N s — ground contact, so a rocket standing on its legs counts), one-off points when the flight ends (optionally plus a bonus for time left, or "charge the seconds it didn't fly":
 the sum of the per-second weights for every second left, so crashing early never beats flying on; every preset
 uses it, and the Neural preset script (= Hold) does the same natively — without it, New Shepard learned to cut the
 engine and dive. Experiments saved with the older flat −20 open as Hold, "edited", with an update offer), and a custom-code block for
@@ -247,6 +247,11 @@ are shown faded until you "Discard my edits" (back to the blocks) or "Keep my ed
 replaces it with a preset or an empty goal. Scripts written by the earlier goal picker (`// Goal: <id> <param>`) open
 as their preset's blocks.
 
+Hover is tuned for drones and rockets from either start: "still" (sideways speed near 0, full penalty at 10 m/s)
+keeps it over the start with a gradient everywhere, "drift" (distance from the start, full at 100 m) is a light
+backstop, and "hasn't taken off by 3 s" ends the flight with −20 plus the per-second charge, so sitting on the pad
+is as bad as crashing (before it, New Shepard from a runway start sat still for 40 generations).
+
 **Training worlds** (`TrainingWorlds.qml`, ① Craft & worlds): a list of the worlds every candidate is tested in.
 "+ Add a world" and each row's "Change" offer flat ground, the open world (as it is in WORLD when training starts),
 any saved world, an embedded copy of the open world, or a world file elsewhere. With several worlds, "Each
@@ -257,7 +262,8 @@ many flights that makes per candidate. The replay caption names the world the re
 what it does and a "Recommended" badge (sep-CMA-ES; GA for craft-design genomes; NEAT for NEAT controllers); "Choose
 a different method" lists every registered kind as cards, each with ⓘ (how it works, good at / watch out / best for /
 genes / step size / needs) and a warning when the experiment cannot run it (cmaes over 400 genes, NEAT without the NEAT
-controller, MAP-Elites without axes). "Compare all" (`AlgorithmCompare.qml`) shows them in one table. The folded
+controller, MAP-Elites without axes), with a one-click fix under it ("Use sep-CMA-ES", "Switch the controller to
+NEAT", "Add a behaviour axis"; the fix also picks that method). "Compare all" (`AlgorithmCompare.qml`) shows them in one table. The folded
 "Tune …" section starts with how the step size changes, with this experiment's numbers (CMA-ES: at most halves every
 ln 2 · damps / c_σ generations; the 1/5 rules; fixed), then each parameter of `EvolveModel.algorithmSchema` with a
 plain label (raw key on hover), unit, explanation, higher / lower effect and ↺ default; settings another setting

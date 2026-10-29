@@ -130,6 +130,13 @@ function recommended(xp) {
     if (xp && xp.genome && xp.genome.preset === "design") return "ga"
     return "sep-cmaes"
 }
+// The one-click fix for problem(): { label, action } with action "sep-cmaes" | "neat-controller" | "add-axis", or null.
+function fix(kind, xp, genes) {
+    if (kind === "cmaes" && genes > 400) return { label: qsTr("Use sep-CMA-ES"), action: "sep-cmaes" }
+    if (kind === "neat" && !(xp && xp.controller && xp.controller.mode === "neat")) return { label: qsTr("Switch the controller to NEAT"), action: "neat-controller" }
+    if ((kind === "map-elites") && !((xp && xp.descriptorAxes) || []).length) return { label: qsTr("Add a behaviour axis"), action: "add-axis" }
+    return null
+}
 // "" when the experiment can run this algorithm, else why not (shown on the card).
 function problem(kind, xp, genes) {
     if (kind === "cmaes" && genes > 400) return qsTr("%1 genes is too many for full CMA-ES (max 400); use sep-CMA-ES.").arg(genes)
