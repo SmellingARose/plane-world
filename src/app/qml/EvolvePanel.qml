@@ -5,7 +5,7 @@ import QtQuick.Layouts
 import "EvolveBlocks.js" as Blocks
 import "EvolveGoals.js" as Goals
 
-// EVOLVE inspector as a guided flow. Page "Set up": ① craft & world, ② what evolves (diagram + I/O table),
+// EVOLVE inspector as a guided flow. Page "Set up": ① craft & world, ② what evolves (diagram + wiring canvas),
 // ③ goal (a preset or your own blocks, summarised in plain language), ④ algorithm (sensible defaults, advanced
 // folded away). Page "Train": ⑤ big Train button with live progress (generation, best score, ETA, chart) and
 // ⑥ results (replay, fly with the autopilot, export). Page "Goal": the goal as blocks (EvolveBlockEditor) or as the
@@ -29,8 +29,8 @@ Rectangle {
 
     // read through xp (not ev.get) so bindings follow the document, e.g. after Open
     function num(path, def) { let v = root.xp; for (const k of path.split(".")) { if (v === undefined || v === null) break; v = v[k] } return v === undefined || v === null ? def : v }
-    // palette "EVOLVE: show controller wiring": Set up page, sensors -> controls table open and scrolled into view
-    function showWiring() { root.page = 0; ioSection.expanded = true; Qt.callLater(() => { const f = setupScroll.contentItem; f.contentY = Math.max(0, driveLabel.mapToItem(f.contentItem, 0, 0).y - 120) }) }
+    // palette "EVOLVE: show controller wiring" / Goal › Wiring › Change: Set up page, the wiring canvas open and scrolled into view
+    function showWiring() { root.page = 0; ioSection.expanded = true; Qt.callLater(() => { const f = setupScroll.contentItem; f.contentY = Math.max(0, ioSection.mapToItem(f.contentItem, 0, 0).y - Theme.s4) }) }
     // palette "EVOLVE: show algorithm settings" / "EVOLVE: compare algorithms": Set up page, step ④ explained and in view
     function showAlgorithm(compare) { root.page = 0; algoSettings.reveal(); Qt.callLater(() => { const f = setupScroll.contentItem; f.contentY = Math.max(0, algoTitle.mapToItem(f.contentItem, 0, 0).y - Theme.s4); if (compare) algoSettings.compare() }) }
     // palette "EVOLVE: edit the goal …": Goal page, Blocks (0) or JavaScript (1)
@@ -310,39 +310,21 @@ Rectangle {
                             outputs: (ev.io.outputs || []).filter(x => x.used).length
                         }
 
-                        // controller I/O table
+                        // controller wiring: sensors → controller → controls as a node canvas
                         PwSection {
                             id: ioSection
                             visible: xp.genome && xp.genome.preset !== "design"
                             title: qsTr("Sensors → controls  (%1 in · %2 out)").arg((ev.io.inputs || []).filter(x => x.used).length).arg((ev.io.outputs || []).filter(x => x.used).length)
-                            hint: qsTr("Tick what the controller can read and what it may move")
+                            hint: qsTr("Which sensors the controller reads and which controls it moves")
                             expanded: false
-                            Label { text: qsTr("WHAT THE CONTROLLER SEES"); color: Theme.textFaint; font.pixelSize: Theme.micro; font.letterSpacing: Theme.sectionTracking }
-                            Repeater {
-                                model: ev.io.inputs || []
-                                delegate: RowLayout {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    spacing: Theme.s1
-                                    CheckBox { checked: modelData.used; onToggled: ev.toggleIO("inputs", modelData.name, checked); padding: 0 }
-                                    Label { text: modelData.name; Layout.fillWidth: true; elide: Text.ElideRight; color: modelData.used ? Theme.text : Theme.textFaint; font.pixelSize: Theme.small }
-                                    Label { text: modelData.unit; color: Theme.textFaint; font.pixelSize: Theme.micro }
-                                    PwNumberField { Layout.preferredWidth: 56; value: modelData.scale; decimals: 2; step: 0.5; minimum: 0.001; tip: qsTr("Input is divided by this scale")
-                                        onCommitted: (v) => ev.setInputScale(modelData.name, v) }
-                                }
-                            }
-                            Label { visible: (ev.io.inputs || []).length === 0; text: qsTr("This craft has no sensors: standard flight sensors are added when the run starts."); color: Theme.textFaint; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: Theme.caption }
-                            Label { id: driveLabel; text: qsTr("WHAT IT DRIVES"); color: Theme.textFaint; font.pixelSize: Theme.micro; font.letterSpacing: Theme.sectionTracking; Layout.topMargin: Theme.s2 }
-                            Repeater {
-                                model: ev.io.outputs || []
-                                delegate: RowLayout {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    CheckBox { checked: modelData.used; onToggled: ev.toggleIO("outputs", modelData.name, checked); padding: 0 }
-                                    Label { text: modelData.name; Layout.fillWidth: true; elide: Text.ElideRight; color: modelData.used ? Theme.text : Theme.textFaint; font.pixelSize: Theme.small }
-                                    Label { text: modelData.where ? "→ " + modelData.where : modelData.kind + "  " + modelData.lo + "…" + modelData.hi
-                                            color: modelData.where ? Theme.text : Theme.textFaint; font.pixelSize: Theme.micro; font.family: Theme.mono }
-                                }
+                            WiringCanvas {
+                                Layout.fillWidth: true
+                                io: ev.io
+                                mode: xp.controller ? xp.controller.mode : "mlp"
+                                hidden: xp.genome && xp.genome.mlp ? xp.genome.mlp.hidden : []
+                                onToggled: (which, name, on) => ev.toggleIO(which, name, on)
+                                onScaleEdited: (name, v) => ev.setInputScale(name, v)
+                                onRewireRequested: { ev.setCraft(ev.io.craft); root.fitGoalToCraft() }
                             }
                         }
 

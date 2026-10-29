@@ -222,6 +222,16 @@ Hover at the air-start height, ground vehicles: Drive); your own blocks and hand
 is how each flight starts. A name ending in the old craft's name follows the new one, and the status bar lists what
 changed.
 
+**Wiring canvas** (② What evolves › Sensors → controls, `src/app/qml/WiringCanvas.qml`): the controller's inputs
+and outputs as an n8n-style node graph — the craft's sensors (plain name, raw channel id, unit, a ÷ scale field) on
+the left, the controller (MLP neurons and hidden layers, or NEAT / script) in the middle, the craft's controls (kind
+and range, or rotor position and spin for multirotors) on the right, with a curved wire for each one in use. Click a
+node or its port (or Tab to it and press Space) to wire it in or out (`EvolveModel::toggleIO`); drag a port onto the
+controller to connect, or a wired port away to disconnect. Columns lay themselves out to the inspector width and
+scroll inside the section; the controller stays in view while you scroll the sensors. No controls or no sensors
+turns the controller red with a message, and a mis-wired document shows its error with "Re-wire for <craft>". The
+Goal page's wiring card ("Change") and the palette entry "EVOLVE: show controller wiring" open it.
+
 **Craft kinds** (`evo::craftKind`, `evolution.craft-kind`): rocket (rocket or solid motor), rotor (propellers
 pushing up that can lift it, e.g. multirotors and the ducted tail-sitter), plane (wings), ground (wheels), else
 other. Goal lists show the presets that suit the craft first; the rest stay pickable, faded, with who they are for. A document that still names controls or sensors the craft lacks
