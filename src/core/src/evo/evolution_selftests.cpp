@@ -534,7 +534,8 @@ void registerRunTests() {
         const auto notes = switchCraft(e, "New Shepard", *rocket);
         ok &= expect(c, e.crafts.size() == 1 && e.crafts[0].name == std::optional<std::string>("New Shepard"), "craft switched");
         ok &= expect(c, e.genome.mlp && e.genome.mlp->outputs.empty(), "outputs fall back to every rocket control");
-        ok &= expect(c, e.genome.mlp && e.genome.mlp->inputs.size() == 9, "flight sensor inputs kept (the rocket gets the standard sensors)");
+        ok &= expect(c, e.genome.mlp && e.genome.mlp->inputs.size() == 11 && e.genome.mlp->inputs[9] == "vel.forward" && e.genome.mlp->inputs[10] == "vel.right",
+                     "flight sensor inputs kept, plus the drift sensor vel.forward / vel.right (the rocket gets the standard sensors)");
         ok &= expect(c, e.name == "Quick start — hold altitude (New Shepard)", "name follows the craft: " + e.name);
         ok &= expect(c, notes.size() == 2 && notes[0].find("Ailerons") != std::string::npos, "a note naming the dropped outputs");
         ok &= expect(c, notes.size() == 2 && notes[1].find("angle mode") != std::string::npos && e.controller.assist == "angle", "and one for angle mode");
@@ -752,6 +753,32 @@ void registerRunTests() {
             c.note("New Shepard, starting network: tilt " + fmt(rTilt) + "°, height change " + fmt(rdh) + " m");
             ok &= expect(c, !rCrashed && rTilt < 5 && std::fabs(rdh) < 3, "the starting network holds height upright for 10 s");
         } catch (const std::exception& ex) { ok &= expect(c, false, ex.what()); }
+        return ok;
+    });
+
+    selftest::add("evolution.velocity-sensor", [](Context& c) -> bool {
+        // The standard "vel" sensor reads horizontal drift in the heading frame (vel.forward / vel.right); it is massless,
+        // so crafts that get the standard set keep their mass (reference histories).
+        auto trainer = craft::presets::load("Trainer");
+        if (!expect(c, trainer.has_value(), "Trainer loads")) return false;
+        const auto plain = sim::CraftSpec::fromDocument(craft::outputs::prepareForFlight(presets::addStandardSensors(*trainer)));
+        sim::CraftSim s; bool ok = expect(c, s.load(plain), "loads with the standard sensors");
+        int fwd = -1, right = -1;
+        for (std::size_t i = 0; i < s.inputs().size(); ++i) { if (s.inputs()[i].name == "vel.forward") fwd = int(i); if (s.inputs()[i].name == "vel.right") right = int(i); }
+        ok &= expect(c, fwd >= 0 && right == fwd + 1, "vel.forward and vel.right are standard inputs");
+        double mVel = -1;
+        for (auto& p : presets::addStandardSensors(*trainer).parts) if (p.id == "sn-vel") mVel = p.mass;
+        ok &= expect(c, mVel == 0, "the vel sensor is massless");
+        if (fwd < 0) return false;
+        // turned 90° about +Y, moving 7 m/s along its nose and 3 m/s to its left: the channels follow the heading
+        sim::SimEnvironment env;
+        s.groundEnabled = false;
+        s.reset(Vec3d{0, 100, 0}, Quatd::angleAxis(kPi / 2, {0, 1, 0}));
+        const Vec3d fwdW = s.orientation().act({1, 0, 0}), rightW = s.orientation().act({0, 0, 1});
+        s.setVelocity(fwdW * 7 + rightW * -3, Vec3d{});
+        s.updateInputValues(env);
+        ok &= expect(c, std::fabs(s.inputs()[std::size_t(fwd)].value - 7) < 1e-6 && std::fabs(s.inputs()[std::size_t(right)].value + 3) < 1e-6,
+                     "7 m/s ahead and 3 m/s to the left read (" + fmt(s.inputs()[std::size_t(fwd)].value) + ", " + fmt(s.inputs()[std::size_t(right)].value) + ")");
         return ok;
     });
 

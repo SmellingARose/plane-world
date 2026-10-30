@@ -214,8 +214,15 @@ FLY shows live values. Frames: +X forward, +Y up, +Z right; positive roll = righ
 | `fuel` | – (0…1) | across all tanks and solids |
 | `water` | `contact` (0/1), `depth` (m) | |
 | `contact` | `ground`, `crashed` (0/1; crashed latches until reset) | |
+| `velocity` | `forward right` (m/s) | horizontal ground velocity along / across the heading (drift; like GPS or optical flow) |
 
 `p.noise` adds deterministic uniform noise (σ) to non-boolean channels, seeded at reset.
+
+**Standard sensors** (`presets::addStandardSensors`, every EVOLVE craft): `alt` (altitudeAGL), `att`, `rate`, `air`,
+`vs`, `aero` and `vel` (velocity), each added only if the craft has none of that kind. `vel` is always massless, so a
+craft that gets the whole set keeps the mass its reference histories were recorded with. Switching to a drone or rocket
+(angle mode) adds `vel.forward` / `vel.right` to the network's inputs, scaled so 10 m/s reads as 1: without them a
+hover cannot see, and so cannot stop, a sideways drift (`evolution.velocity-sensor`).
 
 ## 6. EVOLVE tab
 

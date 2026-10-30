@@ -378,7 +378,8 @@ craft::CraftDocument addStandardSensors(const craft::CraftDocument& craft) {
     bool hasAny = false;
     for (auto& p : craft.parts) hasAny |= p.partType() == craft::PartType::Sensor;
     static const char* kStd[][3] = {{"sn-alt", "alt", "altitudeAGL"}, {"sn-att", "att", "attitude"}, {"sn-rate", "rate", "angularRate"},
-                                    {"sn-air", "air", "airspeed"},    {"sn-vs", "vs", "verticalSpeed"}, {"sn-aero", "aero", "aero"}};
+                                    {"sn-air", "air", "airspeed"},    {"sn-vs", "vs", "verticalSpeed"}, {"sn-aero", "aero", "aero"},
+                                    {"sn-vel", "vel", "velocity"}};
     craft::CraftDocument c = craft;
     for (auto& s : kStd) {
         bool have = false;
@@ -387,7 +388,8 @@ craft::CraftDocument addStandardSensors(const craft::CraftDocument& craft) {
         if (have || c.part(std::string_view(s[0]))) continue;
         auto p = craft::CraftPart::make(s[0], craft::PartType::Sensor, s[1]);
         p.setParam("kind", std::string(s[2]));
-        if (hasAny) p.mass = 0;
+        // "vel" (sideways drift, added later) is always massless: crafts with no sensors keep their reference mass
+        if (hasAny || std::string_view(s[0]) == "sn-vel") p.mass = 0;
         c.parts.push_back(std::move(p));
     }
     return c;
@@ -535,6 +537,14 @@ std::vector<std::string> switchCraft(ExperimentDocument& e, const std::string& c
             notes.push_back("the network flies " + craftName + " in angle mode (the built-in flight controller keeps it level; Set up › Advanced)");
         e.controller.assist = hovers ? "angle" : "none";
         if (kind == "rotor" && e.controller.hz < kRotorControlHz) e.controller.hz = kRotorControlHz;
+        // ...and it reads its drift over the ground: without vel.* a hover can't stop a sideways drift it can't see
+        if (hovers && e.genome.mlp && !e.genome.mlp->inputs.empty()) {
+            for (const char* n : {"vel.forward", "vel.right"}) {
+                if (!has(ins, n) || has(e.genome.mlp->inputs, n)) continue;
+                e.genome.mlp->inputs.push_back(n);
+                if (!e.genome.mlp->hasScale(n)) e.genome.mlp->inputScale.push_back({n, 10});   // 10 m/s of drift reads as 1
+            }
+        }
     }
 
     if (!oldName.empty() && oldName != craftName) {
