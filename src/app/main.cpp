@@ -3,7 +3,7 @@
 //   pwapp [--quit-after <s>] [--screenshot <file.png>] [--tab build|fly|world|evolve] [--color-scheme dark|light]
 //         [--craft <craft.json>] [--size <w>x<h>] [--command "<palette entry>" | "wait <s>" | "open <craft.json>" | "key-down <key>" | "key-up <key>"]...   (commands run 1 s after launch, in order)
 //         [--open-run <dir> [--replay g<gen>|best] [--replay-speed <x>]]
-//         scripted commands: "evolve-resume <run dir>", "evolve-load <run dir>" (no training), "evolve-replay best|g<N>", "evolve-speed <x>", "world-open <file>", "autopilot on"
+//         scripted commands: "evolve-resume <run dir>", "evolve-load <run dir>" (no training), "evolve-replay best|g<N>", "evolve-speed <x>", "world-open <file>", "autopilot on", "behaviour <n>"
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
@@ -131,6 +131,8 @@ int main(int argc, char** argv) {
                 if (c.startsWith("world-open ")) { WorldModel::instance()->open(c.mid(11)); continue; }
                 // "autopilot on" (re)starts the evolved autopilot from the spawn
                 if (c == "autopilot on" && AppController::instance()) { AppController::instance()->setAutopilot(false); AppController::instance()->setAutopilot(true); continue; }
+                // "behaviour <n>" engages the craft's behaviour n (0-based) where the craft is, like pressing its key
+                if (c.startsWith("behaviour ") && AppController::instance()) { AppController::instance()->engageBehaviour(c.mid(10).toInt()); continue; }
                 QVariant ok;
                 QMetaObject::invokeMethod(win, "runCommand", Q_RETURN_ARG(QVariant, ok), Q_ARG(QVariant, c));
                 if (!ok.toBool()) qWarning("--command: no palette entry named \"%s\"", qPrintable(c));

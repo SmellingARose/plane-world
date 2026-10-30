@@ -8,6 +8,57 @@ list of parts (`box`, `cylinder`, `cone`, `wing`, `prop`, `motor`, `jet`, `solid
 `sensor`, CAD meshes) with a position, rotation, mass and type parameters. Servos and motors are linked by id.
 Every servo, motor, jet and solid becomes an output (a FLY slider, or a controller output in EVOLVE).
 
+## Craft library (BUILD)
+
+BUILD › *Craft library…* (Ctrl+L, also in the command palette) opens a page of picture cards: the built-in crafts
+(presets, then examples) and every `.json` in `<library root>/crafts`, including saved crafts that share a built-in's
+name. Each card shows the craft's kind (`evo::craftKind`: plane, multirotor, rocket, ground vehicle), part count and
+mass with fuel, a *Built-in* or *Yours* badge, and *Open now* on the craft being edited.
+
+| Key | Action |
+|---|---|
+| ← ↑ → ↓ | Move between cards |
+| Return / click | Open the craft (undoable, like any load) |
+| typing | Search by name, kind or "yours" / "built-in" |
+| F2 | Rename (yours only): the file becomes `<new name>.json`, clashes with your crafts or a built-in name are refused |
+| Ctrl+D | Duplicate into your crafts as "<name> copy" (works on built-ins too: the way to start from a preset) |
+| Delete / Backspace | Move to the Trash after an in-app confirmation (yours only; built-ins can't be deleted) |
+
+Deleting the open craft keeps it open but marks it unsaved; renaming it keeps it open under the new name and file.
+*Save to library* now also makes the library file the open craft's file, so Ctrl+S keeps saving there.
+
+**Pictures.** `pw::render::ThumbnailRenderer` (`src/render/src/thumbnail.cpp`) renders the craft offscreen with the
+normal renderer: BUILD's ground and lighting, BUILD's default orbit direction (a little higher), the camera distance
+fitted to the craft's bounds, 12 frames so TAA settles, at 960×600, scaled to 480×300. The app renders on a worker
+thread with its own GPU device (`src/app/craftthumbnails.cpp`), only for missing pictures and only once the library is
+first opened. Pictures are cached as `<library root>/thumbnails/<key>-<hash>.png`: key is the file name for your crafts
+and `built-in/<name>` for built-ins; hash is `library::shapeHash` (FNV-1a over the parts and a picture-style version,
+not the name), so a rename moves the picture, an edit makes a new one and the stale one is removed.
+`pwcli --craft-thumbnail "<preset>|<craft.json>" out.png [--width W --height H]` renders the same picture headless.
+
+## Behaviours (evolved controllers a craft carries)
+
+A craft can carry several evolved controllers, each with a name and a FLY key: Hover on H, Race to a point on G.
+They are an optional top-level array (`src/core/pw/evo/run.h:64`, `pw::evo::behaviours`):
+
+```json
+"behaviours": [
+  { "name": "Hover", "key": "h", "controller": { "experimentName": "…", "runID": "…", "mode": "script", "hz": 100,
+      "script": {…}, "layout": {…}, "genome": {…}, "inputNames": […], "outputNames": […], "termNames": […],
+      "mlp": {…}, "fitness": 12.5, "experiment": { training experiment, crafts dropped, world flat } } }
+]
+```
+
+- `key` is a FLY key name (`"h"`, `"1"`, `"up"`); missing = none (start it from FLY › Behaviours). Keys FLY uses
+  (R, P, Space, C, E and the craft's flight keys) are refused when you pick one; two behaviours never share a key.
+- `controller.experiment` lets FLY rebuild the exact training context on the craft (`LivePilot`); without it (older
+  exports) a standalone controller flies it (`EvolvedAutopilot`), which can differ slightly.
+- Older crafts with one `"evolvedController"` on their first part read as one behaviour named after its experiment
+  on key O; saving any behaviour change writes `"behaviours"` and drops the old key.
+- Add behaviours from EVOLVE › Train › Results › "Add to craft as a behaviour…"; rename, rebind or remove them in
+  FLY › Behaviours (undoable, saved with the craft). A craft with behaviours flies with the standard sensors added
+  where it has none (massless), as in EVOLVE.
+
 ## Bundled presets
 
 | Craft | Parts | What it is for |

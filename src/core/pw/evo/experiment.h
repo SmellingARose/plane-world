@@ -64,7 +64,12 @@ struct GenomeSource {
     std::optional<NEATLayout> neat;
 };
 
-struct ControllerSpec { std::string mode = "mlp"; double hz = 50; };   // "mlp" | "neat" | "script" | "none"
+/// hoverTrim: rotor / rocket MLP controllers start their throttles at the hover throttle (§2); pwcli --swift-legacy
+/// turns it off to reproduce the Swift reference histories.
+/// assist: "none" (the network drives the controls directly) or "angle" (MLP only: the network flies the craft like a
+/// FLY pilot in angle mode — its outputs are the sticks of the built-in multirotor / rocket flight controller, which
+/// self-levels and turns them into motor / engine and gimbal commands; §2). Ignored on crafts without one.
+struct ControllerSpec { std::string mode = "mlp"; double hz = 50; bool hoverTrim = true; std::string assist = "none"; };   // "mlp" | "neat" | "script" | "none"
 
 struct SpawnSettings {
     std::string mode = "runway";      // "runway" | "air" | "custom"
@@ -89,7 +94,9 @@ struct EpisodeSettings {
     double crashSpeed = 8;
 };
 
-struct ScriptBundle { std::string language = "javascript", source; double callBudgetMs = 5; };
+/// `source` is what runs. `blocks` is the EVOLVE block program it was generated from (opaque to the core; the app's
+/// EvolveBlocks.js compiles it to `source`); absent for hand-written scripts.
+struct ScriptBundle { std::string language = "javascript", source; double callBudgetMs = 5; std::optional<Value> blocks; };
 
 struct AeroRunSettings {
     std::string model = "fast";       // always "fast" (kept in the file format; older files may say "full", read as fast)
@@ -170,5 +177,22 @@ craft::CraftDocument addStandardSensors(const craft::CraftDocument& c);
 
 /// Library craft by name (bundled presets, then the user's crafts), with standard sensors, flight-prepared.
 std::optional<craft::CraftDocument> resolveCraft(const CraftRef* ref, const std::string& experimentPath, std::string& err);
+
+/// Switch an experiment to another craft (the EVOLVE craft picker) and re-fit its controller wiring to that craft:
+/// `prepared` is the new craft as resolveCraft returns it. Selected MLP / NEAT inputs the craft lacks are dropped (none
+/// left = all); if any selected output is missing the list becomes "all outputs" (a plane's Ailerons mean nothing to a
+/// rocket, and a partial list would silently leave controls undriven). A name that ends in the old craft's name
+/// ("… (Trainer)", "… — Trainer") follows the new one. Returns one plain-language note per change.
+/// Design genes are re-fitted too: genes whose part the craft lacks are dropped (mirror names it lacks are removed),
+/// and a design / co-evolve experiment left with none gets defaultDesignGene.
+/// An MLP controller on a drone or rocket flies in angle mode (controller.assist "angle", noted when it turns on), on
+/// any other craft directly ("none"); drones control at kRotorControlHz at least.
+inline constexpr double kRotorControlHz = 200;
+std::vector<std::string> switchCraft(ExperimentDocument& e, const std::string& craftName, const craft::CraftDocument& prepared);
+/// What kind of craft it is, for picking goals that suit it: "rocket" (rocket / solid motor), "plane" (wings),
+/// "rotor" (3+ propellers, no wings), "ground" (wheels, no wings or propellers), else "other".
+std::string craftKind(const craft::CraftDocument& craft);
+/// A first design gene that fits the craft: the mass of its heaviest part, from half to one and a half times as built.
+DesignGene defaultDesignGene(const craft::CraftDocument& craft);
 
 } // namespace pw::evo

@@ -14,7 +14,7 @@ const char* outputKindName(OutputKind k) {
 
 static const char* kSensorNames[kSensorKindCount] = {"altitudeMSL", "altitudeAGL", "airspeed", "groundSpeed", "verticalSpeed", "attitude",
                                                      "angularRate", "acceleration", "aero", "target", "raycast", "servoAngle",
-                                                     "wheelSpeed", "fuel", "water", "contact"};
+                                                     "wheelSpeed", "fuel", "water", "contact", "velocity"};
 const char* sensorKindName(SensorKind k) { return kSensorNames[int(k)]; }
 bool sensorKindFrom(std::string_view s, SensorKind& out) {
     for (int i = 0; i < kSensorKindCount; ++i) if (s == kSensorNames[i]) { out = SensorKind(i); return true; }
@@ -31,6 +31,7 @@ const std::vector<SensorChannel>& sensorChannels(SensorKind k) {
         {{"", "m"}}, {{"", "-1..1"}}, {{"", "m/s"}}, {{"", "0..1"}},
         {{"contact", "bool"}, {"depth", "m"}},
         {{"ground", "bool"}, {"crashed", "bool"}},
+        {{"forward", "m/s"}, {"right", "m/s"}},
     };
     return t[std::size_t(k)];
 }
@@ -40,7 +41,7 @@ const char* sensorSummary(SensorKind k) {
         "climb rate", "pitch / roll / heading", "body roll / pitch / yaw rates", "body specific force + load factor",
         "angle of attack + sideslip", "offset / distance / bearing to p.tx,ty,tz", "distance along p.dir to terrain/water (max p.range)",
         "deflection of servo p.ref, normalised", "rim speed of wheel p.ref", "remaining fuel fraction", "sensor point under water + depth",
-        "touching ground / crashed (latched)"};
+        "touching ground / crashed (latched)", "drift over the ground: forward / right of the heading"};
     return s[int(k)];
 }
 Vec3d sensorDirection(std::string_view s0) {

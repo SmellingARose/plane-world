@@ -4,7 +4,7 @@ import QtQuick.Layouts
 
 // EVOLVE tab: the world viewport (replays fly in it) with a replay transport + live output bars, and the EVOLVE
 // inspector. Keys while shown: Ctrl+Return train / pause, Space play / pause replay, ←/→ scrub (with the replay
-// focused), Esc closes the replay, panel pages Set up / Train / Script via Alt+1..3, Ctrl+Shift+E large editor.
+// focused), Esc closes the replay, panel pages Set up / Train / Goal via Alt+1..3, Ctrl+Shift+E large editor.
 SplitView {
     id: page
     property bool inspectorVisible: true
@@ -17,6 +17,9 @@ SplitView {
 
     function train() { panel.train() }
     function showWiring() { panel.showWiring() }
+    function showAlgorithm(compare) { panel.showAlgorithm(compare) }
+    function showGoal(view) { panel.showGoal(view) }
+    function addBehaviour() { panel.addBehaviour() }
     Shortcut { sequence: "Ctrl+Return"; enabled: page.visible; onActivated: panel.train() }
     Shortcut { sequences: [StandardKey.Save]; enabled: page.visible; onActivated: ev.save() }
     Shortcut { sequence: "Ctrl+Shift+S"; enabled: page.visible; onActivated: panel.saveFileAs() }

@@ -1,5 +1,7 @@
 #include <algorithm>
 #include "pw/evo/run.h"
+#include "pw/craft/outputs.h"
+#include "pw/sim/controls.h"
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -76,6 +78,7 @@ Value EmbeddedController::toJson() const {
     o.set("inputNames", js::arrStr(inputNames)); o.set("outputNames", js::arrStr(outputNames)); o.set("termNames", js::arrStr(termNames));
     if (mlp) o.set("mlp", evo::toJson(*mlp));
     if (fitness) o.set("fitness", Value::number(*fitness));
+    if (experiment) o.set("experiment", *experiment);
     return o;
 }
 EmbeddedController EmbeddedController::fromJson(const Value& v) {
@@ -87,16 +90,106 @@ EmbeddedController EmbeddedController::fromJson(const Value& v) {
     c.inputNames = js::strs(v["inputNames"]); c.outputNames = js::strs(v["outputNames"]); c.termNames = js::strs(v["termNames"]);
     if (v["mlp"].isObject()) c.mlp = mlpFromJson(v["mlp"]);
     c.fitness = js::optNum(v, "fitness");
+    if (v["experiment"].isObject()) c.experiment = v["experiment"];
     return c;
 }
 std::optional<EmbeddedController> EmbeddedController::find(const craft::CraftDocument& craft) {
-    for (auto& p : craft.parts) {
-        const Value* v = p.extra.find(key);
-        if (!v) continue;
-        try { return fromJson(*v); } catch (const std::exception&) {}
-    }
-    return std::nullopt;
+    auto l = behaviours::list(craft);
+    if (l.empty()) return std::nullopt;
+    return l.front().controller;
 }
+
+// MARK: - behaviours
+namespace behaviours {
+namespace {
+std::string lower(std::string s) { for (auto& ch : s) ch = char(std::tolower((unsigned char)ch)); return s; }
+}
+Value toJson(const Behaviour& b) {
+    Value o = Value::object();
+    o.set("name", Value::string(b.name));
+    if (!b.key.empty()) o.set("key", Value::string(b.key));
+    o.set("controller", b.controller.toJson());
+    return o;
+}
+Behaviour fromJson(const Value& v) {
+    Behaviour b;
+    b.controller = EmbeddedController::fromJson(v["controller"]);
+    b.name = v["name"].isString() ? v["name"].str() : "";
+    if (b.name.empty()) b.name = b.controller.experimentName.empty() ? "Autopilot" : b.controller.experimentName;
+    b.key = v["key"].isString() ? lower(v["key"].str()) : "";
+    return b;
+}
+std::vector<Behaviour> list(const craft::CraftDocument& craft) {
+    std::vector<Behaviour> r;
+    if (const Value* a = craft.extra.find(key); a && a->isArray()) {
+        for (auto& x : a->items()) try { r.push_back(fromJson(x)); } catch (const std::exception&) {}
+        return r;
+    }
+    for (auto& p : craft.parts) {
+        const Value* v = p.extra.find(EmbeddedController::key);
+        if (!v) continue;
+        try {
+            Behaviour b;
+            b.controller = EmbeddedController::fromJson(*v);
+            b.name = b.controller.experimentName.empty() ? "Autopilot" : b.controller.experimentName;
+            b.key = "o";   // the old FLY autopilot key
+            r.push_back(std::move(b));
+            break;
+        } catch (const std::exception&) {}
+    }
+    return r;
+}
+void store(craft::CraftDocument& craft, const std::vector<Behaviour>& l) {
+    for (auto& p : craft.parts) p.extra.erase(EmbeddedController::key);
+    if (l.empty()) { craft.extra.erase(key); return; }
+    Value a = Value::array();
+    for (auto& b : l) a.push(toJson(b));
+    craft.extra.set(key, std::move(a));
+}
+void add(craft::CraftDocument& craft, const Behaviour& b) {
+    auto l = list(craft);
+    const std::string n = lower(b.name);
+    bool replaced = false;
+    for (auto& x : l) {
+        if (lower(x.name) == n) { x = b; replaced = true; }
+        else if (!b.key.empty() && x.key == b.key) x.key.clear();
+    }
+    if (!replaced) l.push_back(b);
+    store(craft, l);
+}
+std::vector<KeyUse> flyKeys(const craft::CraftDocument& craft) {
+    // O is free for a behaviour: older crafts' single autopilot is on O, and O toggles the last behaviour only when
+    // no behaviour has it.
+    std::vector<KeyUse> r = {{"r", "reset"}, {"p", "pause"}, {"space", "pause"}, {"c", "camera"}, {"e", "equations"}};
+    craft::CraftDocument flight = craft::outputs::prepareForFlight(craft);
+    for (auto& a : sim::ControlScheme::fromDocument(flight).axes) {
+        if (a.keys.pos) r.push_back({lower(*a.keys.pos), a.name + " +"});
+        if (a.keys.neg) r.push_back({lower(*a.keys.neg), a.name + " \xE2\x88\x92"});
+    }
+    return r;
+}
+std::string keyConflict(const craft::CraftDocument& craft, const std::string& k, const std::string& name) {
+    const std::string kk = lower(k);
+    if (kk.empty()) return {};
+    for (auto& u : flyKeys(craft)) if (u.key == kk) return "FLY uses " + craft::keyDisplayName(kk) + " for " + u.what;
+    const std::string n = lower(name);
+    for (auto& b : list(craft)) if (b.key == kk && lower(b.name) != n) return craft::keyDisplayName(kk) + " is " + b.name + "'s key";
+    return {};
+}
+std::string suggestKey(const craft::CraftDocument& craft, const std::string& name) {
+    std::vector<std::string> taken;
+    for (auto& u : flyKeys(craft)) taken.push_back(u.key);
+    const std::string n = lower(name);
+    for (auto& b : list(craft)) if (!b.key.empty() && lower(b.name) != n) taken.push_back(b.key);
+    auto free = [&](const std::string& k) { return std::find(taken.begin(), taken.end(), k) == taken.end(); };
+    std::vector<std::string> order;
+    for (char ch : n) if (ch >= 'a' && ch <= 'z') order.push_back(std::string(1, ch));
+    for (char ch = '1'; ch <= '9'; ++ch) order.push_back(std::string(1, ch));
+    for (char ch = 'a'; ch <= 'z'; ++ch) order.push_back(std::string(1, ch));
+    for (auto& k : order) if (free(k)) return k;
+    return {};
+}
+} // namespace behaviours
 
 // MARK: - run
 std::string EvolutionRun::newRunID() {
@@ -261,17 +354,34 @@ std::unique_ptr<EvolutionRun> EvolutionRun::resume(const std::string& dir, std::
     return run;
 }
 
-craft::CraftDocument EvolutionRun::exportCraft(const Genome& genome, const Fitness* fitness) {
-    EvalWorker w(ctx_, factory_());
-    craft::CraftDocument doc = w.prepare(genome);
+Behaviour EvolutionRun::behaviour(const Genome& genome, const Fitness* fitness, const std::string& name, const std::string& key) const {
     const auto& e = ctx_->experiment;
     EmbeddedController ec;
     ec.experimentName = e.name; ec.runID = runID; ec.mode = e.controller.mode; ec.hz = e.controller.hz; ec.script = e.scripts;
     ec.layout = ctx_->layout; ec.genome = genome; ec.inputNames = ctx_->inputNames; ec.outputNames = ctx_->outputNames;
     ec.termNames = ctx_->termNames; ec.mlp = e.genome.mlp;
     if (fitness) ec.fitness = fitness->total;
+    ExperimentDocument x = e;   // what FLY needs to rebuild the context: no craft refs (it flies its own), flat world
+    x.crafts.clear();
+    x.worlds = {WorldRef{"flat"}};
+    x.worldSchedule = WorldSchedule{};
+    ec.experiment = x.toJson();
+    Behaviour b;
+    b.name = name.empty() ? (e.name.empty() ? std::string("Autopilot") : e.name) : name;
+    b.key = key;
+    b.controller = std::move(ec);
+    return b;
+}
+
+craft::CraftDocument EvolutionRun::exportCraft(const Genome& genome, const Fitness* fitness, const std::string& name,
+                                               const std::optional<std::string>& key) {
+    EvalWorker w(ctx_, factory_());
+    craft::CraftDocument doc = w.prepare(genome);
     doc.name = ctx_->craft.name + " (evolved g" + std::to_string(genome.generation) + ")";
-    if (!doc.parts.empty()) doc.parts[0].extra.set(EmbeddedController::key, ec.toJson());
+    // behaviours the run's craft already carries stay (one with the same name is replaced)
+    Behaviour b = behaviour(genome, fitness, name, {});
+    b.key = key ? *key : behaviours::suggestKey(doc, b.name);
+    behaviours::add(doc, b);
     return doc;
 }
 
@@ -349,10 +459,21 @@ Trajectory record(std::shared_ptr<const ExperimentContext> ctx, const Genome& ge
 }
 
 // MARK: - autopilot
-EvolvedAutopilot::EvolvedAutopilot(const craft::CraftDocument& craft, sim::CraftSim& sim) {
-    auto c = EmbeddedController::find(craft);
+static const EmbeddedController& requireController(const std::optional<EmbeddedController>& c) {
     if (!c) throw EvoError("invalid experiment: craft has no evolved controller");
-    controller_ = *c;
+    return *c;
+}
+EvolvedAutopilot::EvolvedAutopilot(const craft::CraftDocument& craft, sim::CraftSim& sim)
+    : EvolvedAutopilot(requireController(EmbeddedController::find(craft)), sim) {}
+EvolvedAutopilot::EvolvedAutopilot(const EmbeddedController& controller, sim::CraftSim& sim) {
+    controller_ = controller;
+    const EmbeddedController* c = &controller_;
+    // angle mode needs the training context (EvalWorker drives the flight controller); this fallback has none
+    if (c->experiment && c->experiment->isObject() && c->experiment->has("controller")) {
+        const Value& ctl = (*c->experiment)["controller"];
+        if (ctl.isObject() && ctl.has("assist") && ctl["assist"].isString() && ctl["assist"].str() != "none")
+            throw EvoError("this controller flies in angle mode and needs its training experiment, which no longer fits the craft");
+    }
     ExperimentDocument exp; exp.scripts = c->script; exp.rewardTerms = c->termNames;
     runtime_ = scripts::make(c->script);
     runtime_->compile(c->script, exp);
@@ -420,6 +541,55 @@ void EvolvedAutopilot::update(sim::CraftSim& sim, const sim::SimEnvironment& env
     try { runtime_->tick(f); lastError_.clear(); } catch (const std::exception& e) { lastError_ = e.what(); }
     f.tick += 1;
     for (std::size_t i = 0; i < outMap_.size(); ++i) if (outMap_[i] >= 0) sim.setOutput(outMap_[i], f.outputs[i]);
+}
+
+// MARK: - live pilot
+LivePilot::LivePilot(const EmbeddedController& c, const craft::CraftDocument& flightCraft, sim::CraftSim& sim, const sim::SimEnvironment& env)
+    : sim_(&sim) {
+    if (c.experiment) {
+        try {
+            ExperimentDocument e = ExperimentDocument::fromJson(*c.experiment);
+            e.crafts.clear();
+            auto ctx = std::make_shared<ExperimentContext>(e, flightCraft, EvoWorld::flat());
+            const ScriptBundle bundle = e.scripts;
+            auto orchestrator = scripts::make(bundle);
+            orchestrator->compile(e.scripts, e);
+            ctx->buildLayout(*orchestrator);
+            bool same = ctx->layout.count() == c.layout.count() && int(c.genome.values.size()) >= c.layout.count();
+            for (int i = 0; same && i < c.layout.count(); ++i) same = ctx->layout.genes[std::size_t(i)].name == c.layout.genes[std::size_t(i)].name;
+            if (!same) throw EvoError("the craft no longer matches the trained controller's genes");
+            auto w = std::make_unique<EvalWorker>(ctx, scripts::make(bundle));
+            w->bindLive(c.genome, sim, env);
+            ctx_ = std::move(ctx);
+            worker_ = std::move(w);
+            hz_ = worker_->controlHz();
+            return;
+        } catch (const std::exception& x) {
+            note_ = x.what();
+        }
+    } else {
+        note_ = "saved without its training experiment";
+    }
+    legacy_ = std::make_unique<EvolvedAutopilot>(c, sim);
+    hz_ = smax(1, c.hz);
+}
+LivePilot::LivePilot(std::shared_ptr<const ExperimentContext> ctx, const Genome& genome, const ScriptRuntimeFactory& factory, sim::CraftSim& sim,
+                     const sim::SimEnvironment& env)
+    : sim_(&sim), ctx_(std::move(ctx)) {
+    worker_ = std::make_unique<EvalWorker>(ctx_, factory ? factory() : scripts::make(ctx_->experiment.scripts));
+    worker_->bindLive(genome, sim, env);
+    hz_ = worker_->controlHz();
+}
+LivePilot::~LivePilot() = default;
+void LivePilot::update(const sim::SimEnvironment& env, double dt) {
+    if (legacy_) {   // keeps its own control clock
+        legacy_->update(*sim_, env, dt);
+        if (!legacy_->lastError().empty()) throw EvoError(legacy_->lastError());
+        return;
+    }
+    const double period = 1 / hz_;
+    acc_ += dt;
+    while (acc_ >= period) { acc_ -= period; worker_->liveTick(env); }
 }
 
 } // namespace pw::evo

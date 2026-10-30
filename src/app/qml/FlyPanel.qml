@@ -15,14 +15,8 @@ ColumnLayout {
         PwIconButton { text: App.paused ? "▶" : "❚❚"; tip: App.paused ? "Resume" : "Pause"; shortcut: "P"; onClicked: App.paused = !App.paused }
         PwIconButton { text: "↺"; tip: "Reset flight"; shortcut: "R"; onClicked: App.resetFlight() }
     }
-    // Evolved autopilot (handed over by EVOLVE's "Fly it with the evolved autopilot")
-    Button {
-        visible: App.autopilotAvailable
-        Layout.fillWidth: true
-        highlighted: App.autopilot
-        text: App.autopilot ? "✈︎  Autopilot ON — click or press O to take over" : "✈︎  Start evolved autopilot (O)"
-        onClicked: App.autopilot = !App.autopilot
-    }
+    // Evolved controllers the craft carries, each on its own key (EVOLVE › Results › "Add to craft as a behaviour")
+    BehaviourList {}
     PwSegmented {
         model: [{ text: "Chase", tip: "Swings behind the flight path" }, { text: "Orbit", tip: "Free orbit around the craft" }, { text: "Cockpit", tip: "Pilot's eye; drag to look around" }]
         currentIndex: ["chase", "orbit", "cockpit"].indexOf(App.cameraMode)

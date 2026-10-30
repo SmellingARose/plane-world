@@ -16,11 +16,18 @@ class RocketFC {
 public:
     /// Find the first rocket engine and its throttle / gimbal outputs. False if the craft has none.
     bool attach(const CraftSim& sim);
-    void reset() { iPitch_ = iRoll_ = 0; }
+    void reset() { iPitch_ = iRoll_ = 0; hover_ = hoverStart; }
     void update(CraftSim& sim, const RocketSticks& s, double dt);
+    /// Climb-rate mode (EVOLVE's angle-mode assist): `climb` (-1..1) commands a climb rate of up to maxClimb m/s like
+    /// MultirotorFC's throttle stick (centred = hold height, landed and not climbing = engine off), around a hover
+    /// throttle learned in flight from hoverStart; pitch / yaw as in update().
+    void updateClimb(CraftSim& sim, double climb, double pitch, double yaw, double dt);
     std::vector<int> outputs() const { return {throttle_, gPitch_, gYaw_}; }
     double maxTiltDeg = 20, wn = 1.2, zeta = 0.9, ki = 0.25;
+    double maxClimb = 5, hoverStart = 0.75;
+    double brake = 0;   // > 0: also lean against horizontal velocity (tilt sine per m/s), so centred sticks hold still (EVOLVE)
 private:
+    double hover_ = 0.75;
     int engine_ = -1, throttle_ = -1, gPitch_ = -1, gYaw_ = -1;
     double torquePerN_ = 0;                 // body torque per newton of thrust at full deflection (largest axis)
     double inv_[2][2] = {{0, 0}, {0, 0}};   // gimbal command (pitch, yaw) per unit normalised body torque (z, x)

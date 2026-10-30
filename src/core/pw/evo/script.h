@@ -115,7 +115,7 @@ enum class Mode : uint8_t { Auto, Native, JavaScript };
 std::unique_ptr<ScriptRuntime> make(const ScriptBundle& bundle, Mode mode, script::Engine engine);
 /// make() with the process-wide defaults (setDefaults; PW_SCRIPT_MODE=native|js overrides Auto).
 std::unique_ptr<ScriptRuntime> make(const ScriptBundle& bundle);
-std::unique_ptr<ScriptRuntime> makePreset(const std::string& kind);   // "neural" | "design"
+std::unique_ptr<ScriptRuntime> makePreset(const std::string& kind);   // "neural" | "neural-v1" (pre-2026-10 crash scoring) | "design"
 /// Adapter over a pw::script runtime (JavaScriptCore / QuickJS).
 std::unique_ptr<ScriptRuntime> makeJS(script::Engine engine = script::Engine::Auto);
 /// Process-wide defaults used by make() when called without arguments (pwcli --script-engine / PW_SCRIPT_MODE).

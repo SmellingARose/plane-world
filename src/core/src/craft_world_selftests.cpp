@@ -447,6 +447,56 @@ bool worldLibrary(selftest::Context& c) {
     return k.ok;
 }
 
+// BUILD's craft library: thumbnail keys, delete / rename / duplicate round-trips (files and pictures move together).
+bool libraryManage(selftest::Context& c) {
+    Checker k{c};
+    const std::string dir = tempDir("craftlib"), thumbs = dir + "/thumbnails";
+    std::string err, path, out;
+    auto rover = *presets::load("Rover");
+    rover.name = "My rover";
+    k.expect(library::saveCraft(rover, path, err, dir + "/" + library::fileName(rover.name)), "save " + err);
+    auto touch = [](const std::string& p) { std::ofstream(p, std::ios::binary) << "png"; };
+    // keys and hashes: the name does not change the picture, the parts do
+    const std::string t1 = library::thumbnailPath("My rover", rover, thumbs);
+    CraftDocument renamed = rover; renamed.name = "Other";
+    k.expect(library::shapeHash(rover) == library::shapeHash(renamed) && library::shapeHash(rover).size() == 16, "hash ignores the name");
+    CraftDocument moved = rover; moved.parts[0].pos[1] += 0.5;
+    k.expect(library::shapeHash(moved) != library::shapeHash(rover), "hash follows the parts");
+    k.expect(fs::path(t1).filename().string() == "My rover-" + library::shapeHash(rover) + ".png", "thumbnail name " + t1);
+    k.expect(fs::path(library::thumbnailPath("built-in/Trainer", rover, thumbs)).parent_path().filename() == "built-in", "built-in sub-folder");
+    touch(t1);
+    const std::string stale = library::thumbnailPath("My rover", moved, thumbs);
+    touch(stale);
+    touch(thumbs + "/My rover 2-0123456789abcdef.png");   // another craft's picture with a longer name
+    k.expect(library::removeThumbnails("My rover", t1, thumbs) == 1 && fs::exists(t1) && !fs::exists(stale), "stale picture removed, current kept");
+    k.expect(fs::exists(thumbs + "/My rover 2-0123456789abcdef.png"), "prefix match does not touch other crafts");
+    // rename: file, document name and picture move; clashes are refused
+    k.expect(library::renameCraft(path, "  Moon buggy ", out, err, thumbs), "rename " + err);
+    CraftDocument back;
+    k.expect(fs::path(out).filename() == "Moon buggy.json" && !fs::exists(path), "renamed file " + out);
+    k.expect(loadCraftFile(out, back, err) && back.name == "Moon buggy" && back.parts == rover.parts, "renamed document");
+    k.expect(!fs::exists(t1) && fs::exists(library::thumbnailPath("Moon buggy", back, thumbs)), "picture follows the rename");
+    std::string other;
+    k.expect(library::saveCraft(renamed, other, err, dir + "/Other.json"), "save other");
+    k.expect(!library::renameCraft(out, "other", path, err, thumbs) && fs::exists(out), "rename onto another craft refused: " + err);
+    k.expect(!library::renameCraft(out, "   ", path, err, thumbs), "empty name refused");
+    k.expect(library::renameCraft(out, "moon Buggy", path, err, thumbs) && loadCraftFile(path, back, err) && back.name == "moon Buggy", "case-only rename " + err);
+    // duplicate: unique names, also against names that are taken elsewhere (bundled crafts)
+    std::string d1, d2;
+    k.expect(library::duplicateCraft(back, d1, err, dir) && fs::path(d1).filename() == "moon Buggy copy.json", "duplicate " + d1);
+    k.expect(library::duplicateCraft(back, d2, err, dir) && fs::path(d2).filename() == "moon Buggy copy 2.json", "second duplicate " + d2);
+    k.expect(library::uniqueName("Trainer", dir, {"trainer"}) == "Trainer 2", "unique against taken names");
+    // delete: file and pictures go, other crafts stay
+    touch(library::thumbnailPath("moon Buggy copy", back, thumbs));
+    k.expect(library::deleteCraft(d1, err, thumbs) && !fs::exists(d1), "delete " + err);
+    k.expect(!fs::exists(library::thumbnailPath("moon Buggy copy", back, thumbs)), "delete removes the picture");
+    k.expect(!library::deleteCraft(d1, err, thumbs), "deleting twice fails");
+    auto left = library::listCrafts(dir);
+    k.expect(left.size() == 3, fmt("three crafts left (%zu)", left.size()));
+    fs::remove_all(dir);
+    return k.ok;
+}
+
 // ---------------------------------------------------------------- world bake
 
 bool worldBake(selftest::Context& c) {
@@ -780,6 +830,7 @@ void registerCraftWorldCollisionTests() {
     add("craft.autorig-gltf", autorigGltf);
     add("craft.meshcut-watertight", meshcutWatertight);
     add("craft.world-library", worldLibrary);
+    add("craft.library-manage", libraryManage);
     add("world.bake", worldBake);
     add("collision.hull+gjk+epa", hullGjkEpa);
     add("collision.box-stack-10s", boxStack);

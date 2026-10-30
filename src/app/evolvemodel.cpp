@@ -2,8 +2,10 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QJSValue>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -57,41 +59,59 @@ QVariantMap rowOf(const evo::GenerationRecord& r) {
 }
 
 struct ParamSpec { const char* key; const char* type; double def; const char* options; const char* help; };
-// Swift AlgoParamSchemas (App/Evolve/EvolveModel.swift) plus one-line help for every field.
+// Swift AlgoParamSchemas (App/Evolve/EvolveModel.swift) plus one-line help for every field. Keys and defaults are the
+// ones the algorithms in src/core/src/evo/algos_*.cpp actually read (an absent key = that default); "0 = …" numbers
+// are automatic (the algorithms treat a stored 0 exactly like an absent key; the panel also removes the key when 0 is
+// entered, so files stay tidy). Step sizes are in units of each gene's own step
+// (GeneSpec::mutationScale: the gene's sigma, else a tenth of its range). Plain-language labels, explanations and
+// effects for the panel live in qml/EvolveAlgorithms.js, keyed by these keys.
 const std::vector<ParamSpec>& schemaFor(const std::string& k) {
     static const std::vector<ParamSpec> ga = {
         {"selection", "choice", 0, "tournament,roulette,rank", "How parents are picked"},
-        {"tournamentSize", "number", 3, "", "Candidates per tournament"},
+        {"tournamentSize", "number", 3, "", "Candidates per tournament (tournament selection)"},
         {"elitism", "number", 2, "", "Best candidates copied unchanged"},
         {"crossover", "choice", 3, "uniform,one-point,blend,sbx", "How two parents mix"},
-        {"crossoverRate", "number", 0.9, "", "Probability of crossover"},
-        {"blendAlpha", "number", 0.5, "", "Blend crossover spread"},
+        {"crossoverRate", "number", 0.9, "", "Probability a child mixes two parents"},
+        {"blendAlpha", "number", 0.5, "", "Blend crossover spread beyond the parents"},
         {"sbxEta", "number", 15, "", "SBX distribution index (higher = closer to parents)"},
         {"mutation", "choice", 0, "gaussian,polynomial", "Mutation operator"},
-        {"mutationRate", "number", 0, "", "Per-gene probability (0 = 1/n)"},
-        {"mutationSigma", "number", 1, "", "Mutation scale multiplier"},
-        {"polyEta", "number", 20, "", "Polynomial mutation index"},
-        {"adaptive", "flag", 0, "", "Adapt sigma from success rate"}};
+        {"mutationRate", "number", 0, "", "Per-gene mutation probability (0 = 1/genes)"},
+        {"mutationSigma", "number", 1, "", "Gaussian mutation size (x gene step)"},
+        {"polyEta", "number", 20, "", "Polynomial mutation index (higher = smaller steps)"},
+        {"adaptive", "flag", 0, "", "1/5 success rule: grow mutation when >20% of children beat their parents, else shrink"}};
     static const std::vector<ParamSpec> cma = {
-        {"sigma0", "number", 0.5, "", "Initial step size (fraction of gene range)"},
-        {"lambda", "number", 0, "", "Offspring per generation (0 = population)"},
-        {"mu", "number", 0, "", "Parents (0 = λ/2)"},
-        {"restarts", "choice", 0, "none,ipop,bipop", "Restart strategy on stagnation"}};
+        {"sigma0", "number", 1, "", "Initial step size (x gene step); adapted automatically afterwards"},
+        {"lambda", "number", 0, "", "Candidates per generation (0 = population)"},
+        {"mu", "number", 0, "", "Parents (0 = half the candidates)"},
+        {"restarts", "choice", 0, "none,ipop,bipop", "Restart from a new random point when the search stalls"}};
     static const std::vector<ParamSpec> oes = {
-        {"lr", "number", 0.02, "", "Learning rate"}, {"sigma", "number", 0.1, "", "Noise scale"},
-        {"antithetic", "flag", 1, "", "Mirrored sampling (±ε)"}, {"weightDecay", "number", 0.005, "", "L2 decay on the mean"},
+        {"lr", "number", 0.05, "", "Learning rate (how far the mean moves per generation)"},
+        {"sigma", "number", 0.5, "", "Noise scale (x gene step; fixed)"},
+        {"antithetic", "flag", 1, "", "Mirrored sampling (+/- each noise vector)"}, {"weightDecay", "number", 0, "", "L2 decay on the mean"},
         {"optimizer", "choice", 0, "adam,sgd", "Update rule"}, {"fitnessShaping", "choice", 0, "rank,none", "Rank-normalise fitness"}};
-    static const std::vector<ParamSpec> ses = {{"sigma", "number", 0.1, "", "Noise scale"}, {"elite", "number", 0.2, "", "Fraction kept as parents"}};
+    static const std::vector<ParamSpec> ses = {
+        {"sigma", "number", 1, "", "Initial step size (x gene step); 1/5 success rule afterwards"},
+        {"mu", "number", 0, "", "Best candidates averaged into the new mean (0 = a quarter)"},
+        {"elite", "flag", 1, "", "Re-test the best-ever candidate every generation"}};
     static const std::vector<ParamSpec> neat = {
-        {"compatThreshold", "number", 3, "", "Species distance threshold"}, {"addNodeRate", "number", 0.03, "", "Split-connection rate"},
-        {"addConnRate", "number", 0.05, "", "New-connection rate"}, {"weightMutRate", "number", 0.8, "", "Weight perturbation rate"},
-        {"survival", "number", 0.2, "", "Fraction of each species that breeds"}, {"stagnation", "number", 15, "", "Generations before a stale species dies"}};
+        {"compatThreshold", "number", 3, "", "Species distance threshold"},
+        {"targetSpecies", "number", 0, "", "Steer the threshold towards this many species (0 = off)"},
+        {"addNodeRate", "number", 0.03, "", "Chance per child to split a connection with a new node"},
+        {"addConnRate", "number", 0.05, "", "Chance per child to add a connection"},
+        {"weightMutateRate", "number", 0.8, "", "Chance per child that its weights are perturbed"},
+        {"weightPerturbSigma", "number", 0.5, "", "Weight perturbation size"},
+        {"survivalThreshold", "number", 0.2, "", "Fraction of each species that breeds"},
+        {"stagnation", "number", 15, "", "Generations before a stale species dies"}};
     static const std::vector<ParamSpec> me = {
-        {"initialRandom", "number", 0, "", "Random candidates before mutation (0 = population)"},
-        {"sigma", "number", 0.1, "", "Mutation scale"}, {"isoLineSigma", "number", 0, "", "Iso+line directional variation (0 = off)"}};
+        {"initialRandom", "number", 0, "", "Random candidates before breeding starts (0 = population)"},
+        {"isoSigma", "number", 0.5, "", "Random variation size (x gene step)"},
+        {"lineSigma", "number", 0.2, "", "Step along the line between two elites (0 = off)"},
+        {"cvt", "number", 0, "", "Use this many evenly spread cells instead of the grid (0 = grid)"}};
     static const std::vector<ParamSpec> nov = {
-        {"k", "number", 15, "", "Nearest neighbours for novelty"}, {"archiveProb", "number", 0.05, "", "Chance a candidate enters the archive"},
-        {"fitnessWeight", "number", 0, "", "Blend of fitness into the novelty score"}};
+        {"k", "number", 15, "", "Nearest neighbours for novelty"},
+        {"fitnessWeight", "number", 0, "", "Blend of fitness into the novelty score (0..1)"},
+        {"archiveAddProbability", "number", 0, "", "Extra random chance a candidate enters the archive"},
+        {"mutationSigma", "number", 1, "", "Gaussian mutation size (x gene step)"}};
     static const std::vector<ParamSpec> none;
     if (k == "ga") return ga;
     if (k == "cmaes" || k == "sep-cmaes") return cma;
@@ -267,6 +287,52 @@ void EvolveModel::refreshLibrary() {
     for (auto& c : craft::library::loadUserCrafts()) if (!crafts.contains(QString::fromStdString(c.name))) crafts << QString::fromStdString(c.name);
     m_crafts = crafts;
     emit libraryChanged();
+    refreshGoalPresets();
+}
+
+QString EvolveModel::goalPresetsDir() const { return QDir(libraryDir()).filePath("goal-presets"); }
+
+void EvolveModel::refreshGoalPresets() {
+    QVariantList list;
+    for (auto& fi : QDir(goalPresetsDir()).entryInfoList({"*.json"}, QDir::Files, QDir::Name | QDir::IgnoreCase)) {
+        QFile f(fi.absoluteFilePath());
+        if (!f.open(QIODevice::ReadOnly)) continue;
+        const QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+        if (!o["program"].isObject()) continue;   // not a preset (or damaged): skip it
+        QVariantMap m;
+        m["name"] = o["name"].toString(fi.completeBaseName());
+        m["file"] = fi.fileName();
+        m["suits"] = o["suits"].toArray().toVariantList();
+        m["program"] = o["program"].toObject().toVariantMap();
+        list << m;
+    }
+    m_goalPresets = list;
+    emit goalPresetsChanged();
+}
+
+QString EvolveModel::saveGoalPreset(const QString& name, const QVariant& program, const QStringList& suits) {
+    const QString n = name.trimmed();
+    const QVariant p = program.canConvert<QJSValue>() ? program.value<QJSValue>().toVariant() : program;
+    const QJsonObject prog = QJsonDocument::fromVariant(p).object();
+    if (n.isEmpty() || prog.isEmpty()) return {};
+    QDir().mkpath(goalPresetsDir());
+    const QString file = fileName(n.toStdString());
+    QJsonObject o;
+    o["name"] = n;
+    o["suits"] = QJsonArray::fromStringList(suits);
+    o["program"] = prog;
+    QFile f(QDir(goalPresetsDir()).filePath(file));
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate) || f.write(QJsonDocument(o).toJson()) < 0) return {};
+    f.close();
+    refreshGoalPresets();
+    return file;
+}
+
+bool EvolveModel::removeGoalPreset(const QString& file) {
+    const QString n = QFileInfo(file).fileName();   // only files in the presets folder
+    const bool ok = !n.isEmpty() && QFile::remove(QDir(goalPresetsDir()).filePath(n));
+    refreshGoalPresets();
+    return ok;
 }
 
 void EvolveModel::setDoc(const evo::ExperimentDocument& d, bool dirty) {
@@ -495,16 +561,26 @@ QVariantList EvolveModel::algorithmSchema(const QString& kind) const {
     return l;
 }
 
+void EvolveModel::setCraft(const QString& name) {
+    evo::CraftRef ref; ref.name = name.toStdString();
+    std::string err;
+    auto craft = evo::resolveCraft(&ref, m_path.toStdString(), err);
+    if (!craft) { set("crafts", QVariantList{QVariantMap{{"name", name}}}); return; }   // refreshIO reports the error
+    evo::ExperimentDocument d = m_doc;
+    const auto notes = evo::switchCraft(d, name.toStdString(), *craft);
+    setDoc(d, true);
+    QStringList n; for (auto& x : notes) n << QString::fromStdString(x);
+    setStatus(n.isEmpty() ? tr("Craft: %1").arg(name) : tr("Craft: %1 — %2").arg(name, n.join("; ")));
+}
+
 void EvolveModel::setPreset(const QString& p) {
     evo::ExperimentDocument d = m_doc;
     d.genome.preset = p.toStdString();
     if (p == "neural" || p == "coevolve") { if (!d.genome.mlp) d.genome.mlp = evo::MLPSpec(); if (d.controller.mode == "none" || d.controller.mode == "script") d.controller.mode = "mlp"; }
     if (p == "design") d.controller.mode = d.controller.mode == "mlp" ? "script" : d.controller.mode;
     if (p == "script") d.controller.mode = "script";
-    if ((p == "design" || p == "coevolve") && d.genome.design.empty() && m_craft && !m_craft->parts.empty()) {
-        evo::DesignGene g; g.part = m_craft->parts[0].name; g.field = "mass"; g.min = 0.5; g.max = 5;
-        d.genome.design.push_back(g);
-    }
+    if ((p == "design" || p == "coevolve") && d.genome.design.empty() && m_craft && !m_craft->parts.empty())
+        d.genome.design.push_back(evo::defaultDesignGene(*m_craft));
     // Swap the script for the matching preset when the current one is an untouched preset.
     const std::string kind = evo::scripts::presetKind(d.scripts.source);
     if (!kind.empty() || d.scripts.source.empty()) {
@@ -541,8 +617,8 @@ void EvolveModel::setInputScale(const QString& name, double scale) {
 
 void EvolveModel::addDesignGene() {
     evo::ExperimentDocument d = m_doc;
-    evo::DesignGene g; g.part = m_craft && !m_craft->parts.empty() ? m_craft->parts[0].name : "wing"; g.field = "mass"; g.min = 0.5; g.max = 5;
-    d.genome.design.push_back(g);
+    if (m_craft && !m_craft->parts.empty()) d.genome.design.push_back(evo::defaultDesignGene(*m_craft));
+    else { evo::DesignGene g; g.part = "wing"; g.field = "mass"; g.min = 0.5; g.max = 5; d.genome.design.push_back(g); }
     setDoc(d, true);
 }
 void EvolveModel::removeDesignGene(int i) {
@@ -628,13 +704,46 @@ void EvolveModel::refreshIO() {
         }
         if (pre == "design" || pre == "coevolve") m_geneCount += int(m_doc.genome.design.size());
     }
-    QVariantMap io; io["inputs"] = ins; io["outputs"] = outs; io["error"] = m_craft ? QString() : QString::fromStdString(err);
+    bool miswired = false;
+    // wiring that names controls / sensors this craft lacks: the run would refuse to start, so say it here
+    if (m_craft && m_doc.genome.mlp && m_doc.genome.preset != "design") {
+        auto missing = [](const std::vector<std::string>& sel, const QVariantList& have) {
+            QStringList r;
+            for (auto& n : sel) if (std::none_of(have.begin(), have.end(), [&](const QVariant& h) { return h.toMap()["name"].toString().toStdString() == n; })) r << QString::fromStdString(n);
+            return r;
+        };
+        const QStringList mi = missing(m_doc.genome.mlp->inputs, ins), mo = missing(m_doc.genome.mlp->outputs, outs);
+        if (!mi.isEmpty() || !mo.isEmpty())
+            err = tr("%1 has no %2, but the controller is wired to them.").arg(QString::fromStdString(m_craft->name), (mo + mi).join(", ")).toStdString();
+        miswired = !err.empty();
+    }
+    if (m_craft && (m_doc.genome.preset == "design" || m_doc.genome.preset == "coevolve")) {
+        QStringList gone;
+        for (auto& g : m_doc.genome.design)
+            if (std::none_of(m_craft->parts.begin(), m_craft->parts.end(), [&](auto& p) { return evo::design::partMatches(p, g.part); })) gone << QString::fromStdString(g.part);
+        if (!gone.isEmpty()) {
+            err += (err.empty() ? "" : " ") + tr("%1 has no part “%2” for the dimensions that evolve.").arg(QString::fromStdString(m_craft->name), gone.join("”, “")).toStdString();
+            miswired = true;
+        }
+    }
+    QVariantMap io; io["inputs"] = ins; io["outputs"] = outs; io["error"] = m_craft && err.empty() ? QString() : QString::fromStdString(err);
+    io["miswired"] = miswired;
+    io["craftKind"] = m_craft ? QString::fromStdString(evo::craftKind(*m_craft)) : QString();
     io["craft"] = m_craft ? QString::fromStdString(m_craft->name) : QString();
     m_io = io;
     emit ioChanged();
 }
 
 // ---------------------------------------------------------------- script
+
+void EvolveModel::setBlocks(const QVariant& program, const QString& source, const QStringList& terms) {
+    evo::ExperimentDocument d = m_doc;
+    const QVariant p = program.canConvert<QJSValue>() ? program.value<QJSValue>().toVariant() : program;
+    if (p.isValid() && !p.isNull()) d.scripts.blocks = fromVariant(p); else d.scripts.blocks.reset();
+    d.scripts.source = source.toStdString();
+    d.rewardTerms.clear(); for (auto& t : terms) d.rewardTerms.push_back(t.toStdString());
+    setDoc(d, true);
+}
 
 void EvolveModel::setScript(const QString& source) {
     if (source.toStdString() == m_doc.scripts.source) return;
@@ -1072,12 +1181,118 @@ void EvolveModel::frame() {
 
 // ---------------------------------------------------------------- export
 
-QString EvolveModel::exportBest() {
+namespace {
+bool isBuiltIn(const std::string& name) {
+    for (auto& c : craft::presets::bundled()) if (c.name == name) return true;
+    return false;
+}
+// Saved library crafts a behaviour can go into (a saved craft named like a built-in is hidden by it, so not those).
+std::vector<std::pair<std::string, craft::CraftDocument>> savedCrafts() {
+    std::vector<std::pair<std::string, craft::CraftDocument>> r;
+    for (const auto& f : craft::library::listCrafts()) {
+        craft::CraftDocument d; std::string err;
+        if (craft::loadCraftFile(f, d, err) && !isBuiltIn(d.name)) r.push_back({f, std::move(d)});
+    }
+    return r;
+}
+}
+
+QVariantMap EvolveModel::behaviourTargets() const {
+    QVariantMap m;
+    QVariantList crafts;
+    for (auto& [path, d] : savedCrafts())
+        crafts << QVariantMap{{"name", QString::fromStdString(d.name)}, {"path", QString::fromStdString(path)},
+                              {"behaviours", int(evo::behaviours::list(d).size())}};
+    m["crafts"] = crafts;
+    if (!m_run) return m;
+    const auto& e = m_run->context()->experiment;
+    const std::string craftName = m_run->context()->craft.name;
+    m["craftName"] = QString::fromStdString(craftName);
+    m["designChanges"] = e.genome.preset == "design" || e.genome.preset == "coevolve";
+    QString path;
+    if (!e.crafts.empty() && !e.crafts[0].inlineDoc) {
+        if (e.crafts[0].path) {
+            std::filesystem::path p(*e.crafts[0].path);
+            if (p.is_relative() && !m_path.isEmpty()) p = std::filesystem::path(m_path.toStdString()).parent_path() / p;
+            if (std::filesystem::exists(p)) path = QString::fromStdString(p.string());
+        } else if (e.crafts[0].name && !isBuiltIn(*e.crafts[0].name)) {
+            for (auto& [f, d] : savedCrafts()) if (d.name == *e.crafts[0].name) { path = QString::fromStdString(f); break; }
+        }
+    }
+    m["craftPath"] = path;
+    m["newName"] = QString::fromStdString(craftName + " (evolved)");
+    return m;
+}
+
+QVariantMap EvolveModel::behaviourKeys(const QString& path, const QString& name, const QString& key) const {
+    QVariantMap m;
+    craft::CraftDocument doc;
+    if (path.isEmpty()) { if (m_run) doc = m_run->context()->craft; }
+    else { std::string err; craft::loadCraftFile(path.toStdString(), doc, err); }
+    const std::string n = name.trimmed().toStdString();
+    m["suggested"] = QString::fromStdString(evo::behaviours::suggestKey(doc, n));
+    m["conflict"] = QString::fromStdString(evo::behaviours::keyConflict(doc, key.toStdString(), n));
+    QVariantList used;
+    for (auto& u : evo::behaviours::flyKeys(doc))
+        used << QVariantMap{{"key", QString::fromStdString(u.key)}, {"label", QString::fromUtf8(craft::keyDisplayName(u.key))}, {"what", QString::fromStdString(u.what)}};
+    for (auto& b : evo::behaviours::list(doc))
+        if (!b.key.empty() && QString::fromStdString(b.name).compare(name.trimmed(), Qt::CaseInsensitive) != 0)
+            used << QVariantMap{{"key", QString::fromStdString(b.key)}, {"label", QString::fromUtf8(craft::keyDisplayName(b.key))}, {"what", QString::fromStdString(b.name)}};
+    m["used"] = used;
+    return m;
+}
+
+std::function<void(const QString&, const pw::evo::Behaviour&)> EvolveModel::behaviourSink;
+
+QString EvolveModel::addBehaviour(const QString& name, const QString& key, const QString& path, const QString& newName, bool fly) {
+    if (!m_run) { setStatus(tr("Train first, then add the result to a craft")); return {}; }
+    auto c = candidate(m_selected.isEmpty() ? QStringLiteral("best") : m_selected);
+    if (!c) { setStatus(tr("Nothing to add yet")); return {}; }
+    const std::string n = name.trimmed().isEmpty() ? m_run->context()->experiment.name : name.trimmed().toStdString();
+    const std::string k = key.toStdString();
+    try {
+        craft::CraftDocument doc;
+        std::string target = path.toStdString();
+        if (target.empty()) {   // a new copy: the run's craft as decoded for the candidate (keeps its other behaviours)
+            const std::string copyName = newName.trimmed().isEmpty() ? m_run->context()->craft.name + " (evolved)" : newName.trimmed().toStdString();
+            for (auto& [f, d] : savedCrafts()) if (d.name == copyName) { target = f; doc = d; break; }   // that name exists: add to it
+            if (target.empty()) {
+                doc = m_run->exportCraft(c->genome, &c->fitness, n, std::string());
+                doc.name = copyName;
+                evo::behaviours::store(doc, {});   // re-added below, after the key check
+                for (auto& b : evo::behaviours::list(m_run->context()->craft)) evo::behaviours::add(doc, b);
+            }
+        } else {
+            std::string err;
+            if (!craft::loadCraftFile(target, doc, err)) throw evo::EvoError(err);
+        }
+        if (const std::string why = evo::behaviours::keyConflict(doc, k, n); !why.empty()) throw evo::EvoError(why + ": pick another key");
+        const evo::Behaviour b = m_run->behaviour(c->genome, &c->fitness, n, k);
+        evo::behaviours::add(doc, b);
+        std::string out, err;
+        if (!craft::library::saveCraft(doc, out, err, target)) throw evo::EvoError(err);
+        refreshLibrary();
+        if (behaviourSink) behaviourSink(QString::fromStdString(out), b);
+        const QString keyText = k.empty() ? QString() : tr(" on %1").arg(QString::fromUtf8(craft::keyDisplayName(k)));
+        setStatus(tr("Added “%1”%2 to “%3”").arg(QString::fromStdString(n), keyText, QString::fromStdString(doc.name)));
+        if (fly) {
+            stopReplay();
+            if (autopilotSink) autopilotSink(m_run->context(), c->genome, m_run->runtimeFactory());
+            emit flyRequested(QUrl::fromLocalFile(QString::fromStdString(out)).toString());
+        }
+        return QString::fromStdString(out);
+    } catch (const std::exception& e) {
+        setStatus(tr("Couldn't add the behaviour: %1").arg(QString::fromUtf8(e.what())));
+        return {};
+    }
+}
+
+QString EvolveModel::exportBest(const QString& name) {
     if (!m_run) { setStatus(tr("Nothing to export")); return {}; }
     auto c = candidate(m_selected.isEmpty() ? QStringLiteral("best") : m_selected);
     if (!c) { setStatus(tr("Nothing to export")); return {}; }
     try {
-        craft::CraftDocument doc = m_run->exportCraft(c->genome, &c->fitness);
+        craft::CraftDocument doc = m_run->exportCraft(c->genome, &c->fitness, name.trimmed().toStdString());
         std::string out, err;
         if (!craft::library::saveCraft(doc, out, err)) throw evo::EvoError(err);
         refreshLibrary();
@@ -1091,8 +1306,8 @@ QString EvolveModel::exportBest() {
 
 std::function<void(std::shared_ptr<const pw::evo::ExperimentContext>, pw::evo::Genome, pw::evo::ScriptRuntimeFactory)> EvolveModel::autopilotSink;
 
-void EvolveModel::flyWithAutopilot() {
-    QString p = exportBest();
+void EvolveModel::flyWithAutopilot(const QString& name) {
+    QString p = exportBest(name);
     if (p.isEmpty()) return;
     stopReplay();
     if (auto c = candidate(m_selected.isEmpty() ? QStringLiteral("best") : m_selected); c && autopilotSink)

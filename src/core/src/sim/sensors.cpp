@@ -26,6 +26,8 @@ const std::vector<KindInfo>& kinds() {
         {"fuel", {{"", "0..1"}}},
         {"water", {{"contact", "bool"}, {"depth", "m"}}},
         {"contact", {{"ground", "bool"}, {"crashed", "bool"}}},
+        // horizontal ground velocity in the heading frame: forward along the craft's nose direction, right across it
+        {"velocity", {{"forward", "m/s"}, {"right", "m/s"}}},
     };
     return k;
 }
@@ -138,6 +140,17 @@ void CraftSim::readSensors(const SimEnvironment& env, double* out) {
         case SensorKind::Airspeed: out[o] = length(vAir + cross(wW, pw - position_)); break;
         case SensorKind::GroundSpeed: out[o] = std::sqrt(velocity_.x * velocity_.x + velocity_.z * velocity_.z); break;
         case SensorKind::VerticalSpeed: out[o] = velocity_.y; break;
+        case SensorKind::Velocity: {   // drift over the ground: what a hover has to null (GPS / optical-flow style)
+            // heading axes = the craft's +X / +Z flattened onto the ground; a tail-sitter's +X can point straight up, so
+            // fall back to the other axis
+            Vec3d hf{fwd.x, 0, fwd.z}, hr{right.x, 0, right.z};
+            if (length(hf) < 1e-3) hf = Vec3d{hr.z, 0, -hr.x};
+            if (length(hr) < 1e-3) hr = Vec3d{-hf.z, 0, hf.x};
+            hf = normalize(hf); hr = normalize(hr);
+            out[o] = velocity_.x * hf.x + velocity_.z * hf.z;
+            out[o + 1] = velocity_.x * hr.x + velocity_.z * hr.z;
+            break;
+        }
         case SensorKind::Attitude:
             out[o] = std::asin(clamp(fwd.y, -1, 1)) / kDeg;
             out[o + 1] = std::atan2(-right.y, up.y) / kDeg;

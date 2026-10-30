@@ -50,7 +50,7 @@ struct CraftTelemetry {
 };
 
 enum class SensorKind { AltitudeMSL, AltitudeAGL, Airspeed, GroundSpeed, VerticalSpeed, Attitude, AngularRate, Acceleration, Aero,
-                        Target, Raycast, ServoAngle, WheelSpeed, Fuel, Water, Contact };
+                        Target, Raycast, ServoAngle, WheelSpeed, Fuel, Water, Contact, Velocity };
 struct SensorChannel { const char* name; const char* unit; };
 std::optional<SensorKind> sensorKindFromName(const std::string& s);
 const char* sensorKindName(SensorKind k);

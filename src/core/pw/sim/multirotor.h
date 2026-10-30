@@ -16,11 +16,13 @@ public:
     bool attach(const CraftSim& sim);
     bool active() const { return !rotors_.empty(); }
     std::vector<int> outputs() const { std::vector<int> o; for (auto& r : rotors_) o.push_back(r.output); return o; }
-    void reset() { hover_ = 0.1; pitchI_ = rollI_ = 0; }
+    void reset() { hover_ = hoverStart; pitchI_ = rollI_ = 0; }
     /// Compute and apply motor outputs for this step.
     void update(CraftSim& sim, const MultirotorSticks& s, double dt);
     double maxTiltDeg = 35, maxClimb = 6, maxYawRate = 3;
     double kp = 1.6, ki = 1.0, kd = 0.22;   // attitude gains, in throttle units per unit tilt (sin) / rad/s
+    double hoverStart = 0.1;                // hover thrust fraction the climb loop starts from (it learns the real one)
+    double brake = 0;   // > 0: also lean against horizontal velocity (tilt sine per m/s), so centred sticks hold still (EVOLVE)
 private:
     struct Rotor { int output; double x, z, spin; };
     std::vector<Rotor> rotors_;

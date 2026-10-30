@@ -149,6 +149,11 @@ int runTrain(const std::vector<std::string>& args) {
         Value t = aero["toggles"].isObject() ? aero["toggles"] : Value::object();
         for (const char* k : {"hingeAtAC", "staticFriction", "spinReaction", "finiteWingStall", "exactMass", "rotorSpeedLaw"}) t = with(t, k, Value::fromBool(false));
         aero = with(aero, "toggles", t);
+        // and no hover trim (rotor / rocket throttles start at 0 output, as in Swift)
+        Value ctl = e["controller"].isObject() ? e["controller"] : Value::object();
+        if (!ctl.has("mode")) ctl = with(ctl, "mode", Value::string(e["controller"].isObject() && e["controller"].has("mode") ? e["controller"]["mode"].str() : "mlp"));
+        if (!ctl.has("hz")) ctl = with(ctl, "hz", Value::number(50));
+        e = with(e, "controller", with(ctl, "hoverTrim", Value::fromBool(false)));
     }
     if (has(args, "--aero") || has(args, "--swift-legacy")) e = with(e, "aero", aero);
 

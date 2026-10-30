@@ -38,6 +38,8 @@ class EvolveModel : public QObject, public ReplayProvider {
     Q_PROPERTY(QVariantList library READ library NOTIFY libraryChanged)
     Q_PROPERTY(QString libraryDir READ libraryDir CONSTANT)
     Q_PROPERTY(QStringList crafts READ crafts NOTIFY libraryChanged)
+    /// Your saved goal presets (Goal page "Save as preset…"): [{ name, file, suits, program }], sorted by name.
+    Q_PROPERTY(QVariantList goalPresets READ goalPresets NOTIFY goalPresetsChanged)
     Q_PROPERTY(QStringList algorithmKinds READ algorithmKinds CONSTANT)
     Q_PROPERTY(QVariantMap io READ io NOTIFY ioChanged)
     Q_PROPERTY(int geneCount READ geneCount NOTIFY ioChanged)
@@ -91,6 +93,7 @@ public:
     QVariantList library() const { return m_library; }
     QString libraryDir() const;
     QStringList crafts() const { return m_crafts; }
+    QVariantList goalPresets() const { return m_goalPresets; }
     QStringList algorithmKinds() const;
     QVariantMap io() const { return m_io; }
     int geneCount() const { return m_geneCount; }
@@ -138,6 +141,12 @@ public:
     Q_INVOKABLE bool saveAs(const QString& pathOrUrl);
     Q_INVOKABLE void duplicate();
     Q_INVOKABLE void refreshLibrary();
+    /// Saved goal presets: JSON files { name, suits, program } in <experiment library>/goal-presets. save writes the
+    /// block program under a name (the same name replaces it; suits = craft kinds, [] = every craft) and returns the
+    /// file name ("" on failure); remove takes that file name.
+    Q_INVOKABLE QString goalPresetsDir() const;
+    Q_INVOKABLE QString saveGoalPreset(const QString& name, const QVariant& program, const QStringList& suits);
+    Q_INVOKABLE bool removeGoalPreset(const QString& file);
     Q_INVOKABLE QVariantList algorithmSchema(const QString& kind) const;
     Q_INVOKABLE void setAero(const QString& id);   // AeroModelPicker id: fast profile or "custom"
     /// Training worlds. kind: "open" (the WORLD tab's world when training starts), "flat", "saved" (arg = library name),
@@ -146,6 +155,8 @@ public:
     Q_INVOKABLE void replaceWorld(int index, const QString& kind, const QString& arg = {});
     Q_INVOKABLE void removeWorld(int index);
     Q_INVOKABLE void setWorldSchedule(const QString& mode, int perGeneration);
+    Q_INVOKABLE void setCraft(const QString& name);
+    Q_INVOKABLE void appendStatus(const QString& s) { setStatus(m_status.isEmpty() ? s : m_status + "; " + s); }           // switch craft and re-fit the controller wiring to it
     Q_INVOKABLE void setPreset(const QString& genomePreset);   // what evolves; adjusts controller mode + script
     Q_INVOKABLE void toggleIO(const QString& which, const QString& name, bool on);   // "inputs" | "outputs"
     Q_INVOKABLE void setInputScale(const QString& name, double scale);
@@ -157,7 +168,10 @@ public:
     Q_INVOKABLE void removeAxis(int index);
     // script
     Q_INVOKABLE void checkScript();
-    Q_INVOKABLE void setScript(const QString& source);
+    Q_INVOKABLE void setScript(const QString& source);         // hand edit: keeps any block program (the page shows it as edited)
+    /// The goal as EVOLVE blocks: the program (null = hand-written script), the JavaScript EvolveBlocks.js generated
+    /// from it and its reward terms, set together in one document change.
+    Q_INVOKABLE void setBlocks(const QVariant& program, const QString& source, const QStringList& terms);
     Q_INVOKABLE QString presetScript(const QString& kind) const;   // "neural" | "design"
     // run
     Q_INVOKABLE void start();
@@ -169,10 +183,26 @@ public:
     // replay / export
     Q_INVOKABLE void replay(const QString& candidate);   // "g<gen>" | "cell<k>" | "best"
     Q_INVOKABLE void stopReplay();
-    Q_INVOKABLE QString exportBest();                     // path of the exported craft ("" on failure)
-    Q_INVOKABLE void flyWithAutopilot();
+    /// A new craft copy carrying the selected candidate as a behaviour called `name` (default: the experiment's name)
+    /// on a suggested key; returns its path ("" on failure).
+    Q_INVOKABLE QString exportBest(const QString& name = {});
+    Q_INVOKABLE void flyWithAutopilot(const QString& name = {});
+    // "Add to craft as a behaviour…" (Train › Results)
+    /// Where the behaviour can go: { craftName, craftPath (the experiment's craft when it is a saved one, else ""),
+    /// newName (default name for a new copy), designChanges (the run reshapes the craft: new copy only),
+    /// crafts: [{ name, path, behaviours }] saved library crafts }.
+    Q_INVOKABLE QVariantMap behaviourTargets() const;
+    /// Keys for a behaviour `name` on target `path` ("" = a new copy of the run's craft): { suggested, conflict
+    /// (why `key` can't be used, "" = fine), used: [{ key, label, what }] (FLY keys + the craft's other behaviours) }.
+    Q_INVOKABLE QVariantMap behaviourKeys(const QString& path, const QString& name, const QString& key) const;
+    /// Adds the selected candidate as behaviour `name` on `key` to the saved craft at `path` (updated in the library),
+    /// or to a new copy called `newName` when `path` is "". `fly`: then open it in FLY with the behaviour flying.
+    /// Returns the craft's path ("" on failure; the status says why).
+    Q_INVOKABLE QString addBehaviour(const QString& name, const QString& key, const QString& path, const QString& newName, bool fly);
     /// Set by the FLY controller: receives the trained controller that flyWithAutopilot hands over.
     static std::function<void(std::shared_ptr<const pw::evo::ExperimentContext>, pw::evo::Genome, pw::evo::ScriptRuntimeFactory)> autopilotSink;
+    /// Set by the FLY controller: a behaviour was added to the saved craft at this path (BUILD / FLY may have it open).
+    static std::function<void(const QString& path, const pw::evo::Behaviour&)> behaviourSink;
 
     // ReplayProvider
     const pw::craft::CraftDocument* replayCraft(uint64_t& version) const override;
@@ -188,6 +218,7 @@ public:
 signals:
     void experimentChanged();
     void libraryChanged();
+    void goalPresetsChanged();
     void ioChanged();
     void scriptChanged();
     void runChanged();
@@ -202,6 +233,7 @@ private:
     void setStatus(const QString& s) { if (s != m_status) { m_status = s; emit statusChanged(); } }
     void refreshIO();
     void refreshRunDirs();
+    void refreshGoalPresets();
     void attach(std::unique_ptr<pw::evo::EvolutionRun> run, bool fresh, bool start = true);
     void drain();
     void rebuildDerived();
@@ -214,6 +246,7 @@ private:
     bool m_dirty = false;
     QVariantList m_library;
     QStringList m_crafts;
+    QVariantList m_goalPresets;
     QVariantMap m_io;
     int m_geneCount = 0;
     std::optional<pw::craft::CraftDocument> m_craft;   // resolved flight craft (for IO, design genes)

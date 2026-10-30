@@ -2,6 +2,7 @@
 //   pwcli --selftest <name|prefix.|all|list> [--parity-dir d] [--verbose]
 //   pwcli --gpu-smoke [--warp]              render + read back one frame on Metal / D3D12 (WARP software adapter)
 //   pwcli --render-shot <out.png> [--warp] [--width W] [--height H] [--frames N]   offscreen renderer screenshot
+//   pwcli --craft-thumbnail "<preset>|<craft.json>" <out.png> [--width W] [--height H]   BUILD library picture of a craft
 //   pwcli --bench <name|all|list> [--reps N] [--json file]
 //   pwcli --train <experiment.json> [--generations N] [--out dir] [--resume] [--current-as-flat] [--aero m]
 //   pwcli --make-experiment "<preset>" <out.json> [--craft name]
@@ -13,7 +14,9 @@
 #include <vector>
 #include "pw/cpu.h"
 #include "pw/gpu.h"
+#include "pw/craft/library.h"
 #include "pw/render/testscene.h"
+#include "pw/render/thumbnail.h"
 #include "pw/parity.h"
 #include "pw/evo/train.h"
 #include "pw/selftest.h"
@@ -84,9 +87,30 @@ int main(int argc, char** argv) {
         for (auto& t : r.passes) std::printf("  %-12s %.3f ms\n", t.name.c_str(), t.ms);
         return saved && sky ? 0 : 1;
     }
+    if (has(args, "--craft-thumbnail")) {
+        const char* src = value(args, "--craft-thumbnail");
+        const char* out = nullptr;
+        for (std::size_t i = 0; i + 2 < args.size(); ++i) if (args[i] == "--craft-thumbnail") out = args[i + 2].c_str();
+        if (!src || !out) { std::printf("usage: pwcli --craft-thumbnail \"<preset>|<craft.json>\" <out.png> [--width W] [--height H]\n"); return 2; }
+        pw::craft::CraftDocument doc; std::string err;
+        if (auto p = pw::craft::presets::load(src)) doc = *p;
+        else if (!pw::craft::loadCraftFile(src, doc, err)) { std::printf("craft-thumbnail: %s\n", err.c_str()); return 1; }
+        auto dev = pw::gpu::createDevice({}, &err);
+        if (!dev) { std::printf("craft-thumbnail: no GPU device: %s\n", err.c_str()); return 1; }
+        auto thumbs = pw::render::ThumbnailRenderer::create(*dev, &err);
+        if (!thumbs) { std::printf("craft-thumbnail: %s\n", err.c_str()); return 1; }
+        int w = 640, h = 400;
+        if (const char* v = value(args, "--width")) w = std::atoi(v);
+        if (const char* v = value(args, "--height")) h = std::atoi(v);
+        std::vector<uint8_t> rgba;
+        if (!thumbs->render(doc, w, h, rgba, &err)) { std::printf("craft-thumbnail FAILED: %s\n", err.c_str()); return 1; }
+        const bool saved = pw::gpu::writePNG(out, rgba.data(), w, h);
+        std::printf("craft-thumbnail %s: %s (%dx%d, %zu parts)\n", saved ? "saved" : "NOT saved", out, w, h, doc.parts.size());
+        return saved ? 0 : 1;
+    }
     if (has(args, "--bench")) return runBench(args);
     if (has(args, "--train")) { pw::evo::installTrainHandler(); return runTrain(args); }
     if (has(args, "--make-experiment")) return runMakeExperiment(args);
-    std::printf("usage: pwcli --selftest <name|all|list> | --gpu-smoke [--warp] | --bench <name|all|list> | --train <exp.json> | --make-experiment \"<preset>\" <out.json> | --info | --version\n");
+    std::printf("usage: pwcli --selftest <name|all|list> | --gpu-smoke [--warp] | --craft-thumbnail \"<preset>|<craft.json>\" <out.png> | --bench <name|all|list> | --train <exp.json> | --make-experiment \"<preset>\" <out.json> | --info | --version\n");
     return 2;
 }

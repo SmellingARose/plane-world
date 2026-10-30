@@ -6,7 +6,11 @@
 //   * World library: save by name, clash detection, newest-first list; EVOLVE training worlds (add / change / schedule).
 //   * JsHighlighter helpers (indent, comment toggle, hook detection).
 // Runs with QT_QPA_PLATFORM=offscreen; PW_DATA_DIR points the libraries at a temp folder.
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
+#include <QJSEngine>
 #include <QTemporaryDir>
 #include <QTextDocument>
 #include <cstdio>
@@ -15,6 +19,7 @@
 #include "jshighlighter.h"
 #include "pw/craft/library.h"
 #include "pw/evo/run.h"
+#include "pw/json.h"
 #include "worldmodel.h"
 
 static int g_fail = 0, g_pass = 0;
@@ -149,6 +154,168 @@ static void testTrainingWorlds() {
     CHECK(!e.document().toJson().has("worlds"));
 }
 
+// EVOLVE goal blocks: EvolveBlocks.js (loaded from the source tree, as the panel imports it) compiles every goal preset
+// to a script the engine accepts, "hold" to the Neural preset verbatim (native fast path), and the program + script
+// round-trip through the document. Also: picking another craft re-fits the controller wiring.
+static void testBlocks() {
+    EvolveModel& e = *EvolveModel::instance();
+    QFile f(QStringLiteral(PW_QML_DIR "/EvolveBlocks.js"));
+    CHECK(f.open(QIODevice::ReadOnly));
+    QString src = QString::fromUtf8(f.readAll());
+    src.replace(".pragma library", "");
+    QJSEngine js;
+    QJSValue lib = js.evaluate("(function () {\n" + src + "\nreturn { goals, goalOf, goalsFor, otherCount, goalLabel, userGoals, defaultGoal, suits, compile, terms, problems, programFor, state, newProgram, newTerm, termKinds, stopKinds, newStop, newBonus };\n})()");
+    CHECK(!lib.isError());
+    if (lib.isError()) { std::printf("  EvolveBlocks.js: %s\n", lib.toString().toUtf8().constData()); return; }
+    e.newFromPreset("Neural controller");
+    const QString neural = e.presetScript("neural");
+    QJSValue goals = lib.property("goals");
+    const int n = goals.property("length").toInt();
+    CHECK(n == 10);
+    for (int i = 0; i < n; ++i) {
+        QJSValue g = goals.property(quint32(i));
+        QJSValue program = g.property("program").call();
+        const QString id = g.property("id").toString();
+        const QString code = lib.property("compile").call({program, neural}).toString();
+        const int nProblems = lib.property("problems").call({program}).property("length").toInt();
+        if (nProblems) std::printf("  goal %s: %d problems\n", id.toUtf8().constData(), nProblems);
+        CHECK(nProblems == 0);
+        CHECK(g.property("suits").property("length").toInt() > 0 && !g.property("blurb").toString().isEmpty());
+        // every preset has its one setting, and it reads back from its own program
+        CHECK(g.property("param").property("get").call({program}).toNumber() == g.property("param").property("def").toNumber());
+        // flights that can end early charge the seconds not flown (EVOLUTION.md §10)
+        QJSValue bs = program.property("bonuses");
+        for (int k = 0; k < bs.property("length").toInt(); ++k)
+            if (bs.property(quint32(k)).property("points").toNumber() < 0) CHECK(bs.property(quint32(k)).property("chargeRest").toBool());
+        if (id == "hold") CHECK(code == neural);
+        QStringList terms; QJSValue t = lib.property("terms").call({program});
+        for (int k = 0; k < t.property("length").toInt(); ++k) terms << t.property(quint32(k)).toString();
+        e.setBlocks(program.toVariant(), code, terms);
+        CHECK(e.document().scripts.blocks.has_value() && e.document().scripts.source == code.toStdString());
+        CHECK(int(e.document().rewardTerms.size()) == terms.size());
+        // read back through the document (keys come back sorted): still this preset, not "edited"
+        QJSValue back = js.toScriptValue(e.experiment()["scripts"]);
+        CHECK(lib.property("state").call({back, neural}).toString() == "blocks");
+        CHECK(lib.property("goalOf").call({lib.property("programFor").call({back, neural})}).property("id").toString() == id);
+        e.checkScript();
+        CHECK(e.waitForCheck(30000));
+        if (!e.scriptOk()) std::printf("  goal %s: %s\n", id.toUtf8().constData(), e.scriptMessage().toUtf8().constData());
+        CHECK(e.scriptOk());
+    }
+    // crashing early must not beat flying on: hover's crash points charge the seconds not flown (2.25 a second)
+    {
+        QJSValue hv = goals.property(1).property("program").call();
+        const QString code = lib.property("compile").call({hv, neural}).toString();
+        CHECK(code.contains("s.crashed ? -20 - 2.25 * Math.max(0, ctx.info.duration - ctx.t) : 0"));
+        // "still" is soft: never flat, so an air start at 35 m/s still has a slope (half the penalty at 10 m/s)
+        CHECK(code.contains("still: -Math.abs(Math.hypot(s.vx, s.vz)) / (Math.abs(Math.hypot(s.vx, s.vz)) + 10) * dt * 0.5,"));
+        CHECK(code.contains("height: -Math.min(Math.abs(s.agl - 20) / 20, 1) * dt,"));   // a hard "Stay near" is unchanged
+    }
+    // a preset at another parameter value is still that preset (Set up shows its one setting)
+    QJSValue hover = goals.property(1).property("program").call({QJSValue(35)});
+    CHECK(lib.property("goalOf").call({js.toScriptValue(hover.toVariant())}).property("id").toString() == "hover");
+    for (int i = 0; i < n; ++i) {
+        QJSValue g = goals.property(quint32(i));
+        QJSValue p = g.property("program").call({QJSValue(g.property("param").property("def").toNumber() * 2 + 1)});
+        CHECK(lib.property("goalOf").call({js.toScriptValue(p.toVariant())}).property("id").toString() == g.property("id").toString());
+    }
+    // memory signals: the hop's "highest height so far" and the cruise's heading change are kept in init / reward
+    {
+        QJSValue hop = js.evaluate("(function (B) { for (const g of B.goals) if (g.id === 'hop') return g.program(); })").call({lib});
+        const QString code = lib.property("compile").call({hop, neural}).toString();
+        CHECK(code.contains("m.peak = s.agl;") && code.contains("m.peak = Math.max(m.peak, s.agl);") && code.contains("Math.min(m.peak, 30) / 30"));
+    }
+    // presets are listed by craft: only those that suit it, the goal in use (even for another craft), or all on request
+    {
+        auto ids = [&](const QJSValue& list) { QStringList r; for (int k = 0; k < list.property("length").toInt(); ++k) r << list.property(quint32(k)).property("id").toString(); return r; };
+        const QStringList plane = ids(lib.property("goalsFor").call({QJSValue("plane")}));
+        CHECK(plane == QStringList({"hold", "target", "distance", "climb", "cruise"}));
+        CHECK(ids(lib.property("goalsFor").call({QJSValue("rocket")})) == QStringList({"hover", "hop"}));
+        CHECK(ids(lib.property("goalsFor").call({QJSValue("rotor")})) == QStringList({"hover", "target", "station"}));
+        CHECK(ids(lib.property("goalsFor").call({QJSValue("ground")})) == QStringList({"drive", "speed"}));
+        CHECK(lib.property("goalsFor").call({QJSValue("other")}).property("length").toInt() == n);
+        CHECK(lib.property("goalsFor").call({QJSValue("rocket"), QJSValue(true)}).property("length").toInt() == n);
+        CHECK(lib.property("otherCount").call({QJSValue("rocket")}).toInt() == n - 2);
+        CHECK(ids(lib.property("goalsFor").call({QJSValue("rocket"), QJSValue(false), QJSValue(QJSValue::NullValue), goals.property(0)})).last() == "hold");
+        CHECK(lib.property("goalLabel").call({goals.property(0), QJSValue("rocket")}).toString() == "Hold a height, wings level  (for planes)");
+    }
+    // your own presets: saved to <experiments>/goal-presets, listed for the craft kind they were saved for, removable
+    {
+        QJSValue mine = goals.property(1).property("program").call({QJSValue(12)});
+        mine.property("terms").property(0).setProperty("weight", 2);   // edited: no longer the Hover preset
+        const QString file = e.saveGoalPreset("My hover", mine.toVariant(), {"rotor"});
+        CHECK(file == "My hover.json" && QFileInfo::exists(QDir(e.goalPresetsDir()).filePath(file)));
+        CHECK(e.goalPresets().size() == 1 && e.goalPresets()[0].toMap()["name"].toString() == "My hover");
+        CHECK(e.saveGoalPreset("My hover", mine.toVariant(), {"rotor"}) == file && e.goalPresets().size() == 1);   // same name: replaced
+        CHECK(e.saveGoalPreset("  ", mine.toVariant(), {}).isEmpty());
+        QJSValue user = lib.property("userGoals").call({js.toScriptValue(e.goalPresets())});
+        CHECK(user.property("length").toInt() == 1 && user.property(0).property("user").toBool());
+        QJSValue rotorList = lib.property("goalsFor").call({QJSValue("rotor"), QJSValue(false), user});
+        CHECK(rotorList.property(rotorList.property("length").toInt() - 1).property("title").toString() == "My hover");
+        CHECK(lib.property("goalsFor").call({QJSValue("plane"), QJSValue(false), user}).property("length").toInt() == 5);
+        CHECK(lib.property("goalLabel").call({user.property(0), QJSValue("plane")}).toString() == "My hover  (yours, for drones and hovering craft)");
+        // the saved program, read back from disk, is recognised as that preset and compiles
+        QJSValue back = user.property(0).property("program").call();
+        CHECK(lib.property("goalOf").call({js.toScriptValue(mine.toVariant()), user}).property("title").toString() == "My hover");
+        CHECK(lib.property("compile").call({back, neural}).toString() == lib.property("compile").call({mine, neural}).toString());
+        CHECK(e.removeGoalPreset(file) && e.goalPresets().isEmpty() && !QFileInfo::exists(QDir(e.goalPresetsDir()).filePath(file)));
+        CHECK(!e.removeGoalPreset("../" + file));
+    }
+    // every block kind at once (target, stops, bonuses) is still a valid script
+    QJSValue all = js.evaluate("(function (B) { const p = B.newProgram(); p.target = { ahead: 50, side: 5 };"
+                               " for (const k of B.termKinds) p.terms.push(B.newTerm(k.id, p));"
+                               " for (const k of B.stopKinds) if (k.id !== 'crashed') p.stops.push(B.newStop(k.id));"
+                               " p.bonuses.push(B.newBonus(p)); return p; })").call({lib});
+    CHECK(lib.property("problems").call({all}).property("length").toInt() == 0);
+    e.setScript(lib.property("compile").call({all, neural}).toString());
+    e.checkScript();
+    CHECK(e.waitForCheck(30000));
+    CHECK(e.scriptOk());
+    // the program survives save / open
+    e.setBlocks(all.toVariant(), QString::fromStdString(e.document().scripts.source), {});
+    const pw::evo::ExperimentDocument back = pw::evo::ExperimentDocument::fromJson(e.document().toJson());
+    CHECK(back.scripts.blocks.has_value() && pw::json::dump(*back.scripts.blocks) == pw::json::dump(*e.document().scripts.blocks));
+    // a hand edit after the blocks reads as "edited"; dropping the blocks makes it a plain script
+    e.setScript(QString::fromStdString(e.document().scripts.source) + "\n// tweak\n");
+    QJSValue scripts = js.toScriptValue(e.experiment()["scripts"]);
+    CHECK(lib.property("state").call({scripts, neural}).toString() == "edited");
+    e.setBlocks(QVariant(), QString::fromStdString(e.document().scripts.source), {});
+    CHECK(!e.document().scripts.blocks.has_value());
+
+    // craft picker: the quick start's plane wiring is re-fitted to the rocket (it used to fail at Start)
+    e.quickStart();
+    CHECK(e.name().endsWith("(Trainer)"));
+    e.setCraft("New Shepard");
+    CHECK(e.document().crafts.size() == 1 && e.document().crafts[0].name == std::optional<std::string>("New Shepard"));
+    CHECK(e.document().genome.mlp && e.document().genome.mlp->outputs.empty());
+    CHECK(e.name().endsWith("(New Shepard)"));
+    // craft kind drives which presets come first and the goal a craft switch picks (EvolvePanel.fitGoalToCraft)
+    CHECK(e.io()["craftKind"].toString() == "rocket");
+    CHECK(lib.property("defaultGoal").call({QJSValue("rotor")}).property("id").toString() == "hover");
+    CHECK(lib.property("defaultGoal").call({QJSValue("other")}).isNull());
+    CHECK(!lib.property("suits").call({goals.property(0), QJSValue("rocket")}).toBool());
+    CHECK(lib.property("suits").call({goals.property(0), QJSValue("other")}).toBool());
+    CHECK(e.io()["error"].toString().isEmpty());
+    CHECK(e.status().contains("Ailerons"));
+    // a document wired to controls the craft lacks says so before the run (opened files, hand edits)
+    e.set("genome.mlp.outputs", QVariantList{"Ailerons"});
+    CHECK(e.io()["error"].toString().contains("Ailerons"));
+    e.setCraft("New Shepard");
+    CHECK(e.io()["error"].toString().isEmpty());
+    // and it trains: the original failure ("MLP output 'Ailerons' not found") was at Start, with a block goal that
+    // also exercises target / memory code at run time
+    QJSValue target = goals.property(2).property("program").call();
+    QStringList tt; QJSValue tv = lib.property("terms").call({target});
+    for (int k = 0; k < tv.property("length").toInt(); ++k) tt << tv.property(quint32(k)).toString();
+    e.setBlocks(target.toVariant(), lib.property("compile").call({target, neural}).toString(), tt);
+    e.set("population", 4); e.set("generations", 1); e.set("episode.duration", 2.0); e.set("workers", 2);
+    e.start();
+    CHECK(e.waitForRun(300000));
+    if (!e.runError().isEmpty()) std::printf("  rocket run: %s\n", e.runError().toUtf8().constData());
+    CHECK(e.runError().isEmpty() && e.generations().size() == 1);
+    e.newRun();
+}
+
 static void testEvolve(const QString& dir) {
     EvolveModel& e = *EvolveModel::instance();
     CHECK(e.presets().size() == 3);
@@ -174,6 +341,11 @@ static void testEvolve(const QString& dir) {
     CHECK(!e.algorithmSchema("ga").isEmpty());
     e.set("algorithm.kind", "ga");
     CHECK(e.document().algorithm.kind == "ga");
+    // parameters live in algorithm.values (step ④ writes them there); null restores the default
+    e.set("algorithm.values.mutationSigma", 0.3);
+    CHECK(std::abs(e.document().algorithm.num("mutationSigma", 0) - 0.3) < 1e-12);
+    e.set("algorithm.values.mutationSigma", QVariant());
+    CHECK(e.document().algorithm.find("mutationSigma") == nullptr);
     // IO toggle: dropping one input reduces the gene count
     const int g0 = e.geneCount();
     const QString in0 = e.io()["inputs"].toList()[0].toMap()["name"].toString();
@@ -229,6 +401,27 @@ static void testEvolve(const QString& dir) {
     pw::craft::CraftDocument doc; std::string err;
     CHECK(pw::craft::loadCraftFile(out.toStdString(), doc, err));
     CHECK(pw::evo::EmbeddedController::find(doc).has_value());
+    CHECK(pw::evo::behaviours::list(doc).size() == 1);
+    // "Add to craft as a behaviour…": a new copy, then a second behaviour into that saved craft
+    const QVariantMap targets = e.behaviourTargets();
+    CHECK(!targets["newName"].toString().isEmpty());
+    const QVariantMap k0 = e.behaviourKeys("", "Hover", "r");
+    CHECK(!k0["conflict"].toString().isEmpty());                              // R is FLY's reset
+    CHECK(!k0["suggested"].toString().isEmpty() && !k0["used"].toList().isEmpty());
+    const QString copy = e.addBehaviour("Hover", k0["suggested"].toString(), "", "Behaviour test craft", false);
+    CHECK(!copy.isEmpty());
+    CHECK(e.addBehaviour("Climb", "r", copy, "", false).isEmpty());          // refused: FLY key
+    const QString hk = e.behaviourKeys(copy, "Climb", "").value("suggested").toString();
+    CHECK(!hk.isEmpty() && hk != k0["suggested"].toString());                 // the copy's Hover key is taken
+    CHECK(e.addBehaviour("Climb", hk, copy, "", false) == copy);
+    pw::craft::CraftDocument two;
+    CHECK(pw::craft::loadCraftFile(copy.toStdString(), two, err));
+    const auto bl = pw::evo::behaviours::list(two);
+    CHECK(bl.size() == 2 && bl[0].name == "Hover" && bl[1].name == "Climb" && bl[1].key == hk.toStdString());
+    CHECK(two.name == "Behaviour test craft");
+    bool listed = false;
+    for (auto& t : e.behaviourTargets()["crafts"].toList()) if (t.toMap()["path"].toString() == copy) listed = t.toMap()["behaviours"].toInt() == 2;
+    CHECK(listed);
     CHECK(!e.runDirs().isEmpty());
 }
 
@@ -242,6 +435,7 @@ int main(int argc, char** argv) {
     std::printf("[ui] world library\n"); testWorldLibrary();
     std::printf("[ui] evolve\n"); testEvolve(tmp.path());
     std::printf("[ui] training worlds\n"); testTrainingWorlds();
+    std::printf("[ui] goal blocks\n"); testBlocks();
     std::printf("pwuitests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

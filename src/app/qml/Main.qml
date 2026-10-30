@@ -21,7 +21,7 @@ ApplicationWindow {
     property string viewportBackend: activeViewport.backendName
 
     readonly property var sectionsByTab: ({
-        "BUILD": [ { title: "Craft", rows: [["New craft", "Ctrl+N"], ["Open craft…", "Ctrl+O"], ["Save", "Ctrl+S"]] },
+        "BUILD": [ { title: "Craft", rows: [["New craft", "Ctrl+N"], ["Craft library", "Ctrl+L"], ["Open craft…", "Ctrl+O"], ["Save", "Ctrl+S"]] },
                    { title: "Edit", rows: [["Undo", "Ctrl+Z"], ["Redo", "Ctrl+Shift+Z"], ["Add part", "A"], ["Delete part", "Backspace"]] },
                    { title: "Parts", rows: [["Wings, props, jets, rockets, wheels, servos, CAD bodies", ""]] } ],
         "FLY":   [ { title: "Flight", rows: [["Launch / reset", "R"], ["Pause", "Space"], ["Camera", "C"]] },
@@ -65,14 +65,19 @@ ApplicationWindow {
         { name: "WORLD: new mountains world", shortcut: "", run: () => { selectTab(2); WorldFlow.newWorld("mountains") } },
         { name: "EVOLVE: start / pause training", shortcut: "Ctrl+Return", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.train() } },
         { name: "EVOLVE: quick start (learns to hold altitude in ~10 s)", shortcut: "", run: () => { selectTab(3); EvolveModel.quickStart() } },
+        { name: "EVOLVE: edit the goal as blocks", shortcut: "Alt+3", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.showGoal(0) } },
+        { name: "EVOLVE: edit the goal as JavaScript", shortcut: "", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.showGoal(1) } },
         { name: "EVOLVE: check script", shortcut: "", run: () => { selectTab(3); EvolveModel.checkScript() } },
         { name: "EVOLVE: fly best with the evolved autopilot", shortcut: "", run: () => EvolveModel.flyWithAutopilot() },
-        { name: "FLY: toggle evolved autopilot", shortcut: "O", run: () => { App.autopilot = !App.autopilot } },
+        { name: "EVOLVE: add best to a craft as a behaviour (on a key)", shortcut: "", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.addBehaviour() } },
+        { name: "FLY: behaviour on / off (the last one flown)", shortcut: "O", run: () => { if (App.autopilot) App.releaseBehaviour(); else App.engageBehaviour(App.lastBehaviour) } },
         { name: "EVOLVE: example: missile interception (Racer quad)", shortcut: "", run: () => { selectTab(3); EvolveModel.openExample("missile-intercept.json") } },
         { name: "EVOLVE: example: suicide-burn landing (hoverslam, ducted rocket)", shortcut: "", run: () => { selectTab(3); EvolveModel.openExample("hoverslam-ducted-rocket.json") } },
         { name: "EVOLVE: example: any multirotor, auto-wired (heavy hex)", shortcut: "", run: () => { selectTab(3); EvolveModel.openExample("any-multirotor.json") } },
         { name: "EVOLVE: example: gate course (Racer quad)", shortcut: "", run: () => { selectTab(3); EvolveModel.openExample("drone-gate-course.json") } },
         { name: "EVOLVE: show controller wiring", shortcut: "", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.showWiring() } },
+        { name: "EVOLVE: show algorithm settings (step size, mutation…)", shortcut: "", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.showAlgorithm(false) } },
+        { name: "EVOLVE: compare algorithms (CMA-ES, GA, NEAT…)", shortcut: "", run: () => { selectTab(3); if (evolveLoader.item) evolveLoader.item.showAlgorithm(true) } },
         { name: "EVOLVE: replay best", shortcut: "", run: () => { selectTab(3); EvolveModel.replay("best") } },
         { name: "Quit", shortcut: "Ctrl+Q", run: () => Qt.quit() }
     ]
@@ -170,7 +175,9 @@ ApplicationWindow {
         id: appCommands
         tab: win.tabs[win.currentTab]
         viewport: work.viewport
+        suspended: craftLibrary.opened
         onOpenRequested: openDialog.open()
+        onLibraryRequested: { win.currentTab = 0; craftLibrary.open() }
         onSaveAsRequested: saveDialog.open()
         onImportRequested: (into) => { cadDialog.intoCurrent = into; cadDialog.open() }
         onAddPartRequested: cmdPalette.openWith("add ")
@@ -181,6 +188,7 @@ ApplicationWindow {
         target: work.inspector.panel
         ignoreUnknownSignals: true
         function onOpenRequested() { openDialog.open() }
+        function onLibraryRequested() { craftLibrary.open() }
         function onSaveAsRequested() { saveDialog.open() }
         function onImportRequested(into) { cadDialog.intoCurrent = into; cadDialog.open() }
     }
@@ -242,6 +250,7 @@ ApplicationWindow {
     }
 
     CommandPalette { id: cmdPalette; parent: Overlay.overlay; commands: win.commands }
+    CraftLibrary { id: craftLibrary; parent: Overlay.overlay; onOpenFileRequested: openDialog.open() }
 
     Dialog {
         id: about

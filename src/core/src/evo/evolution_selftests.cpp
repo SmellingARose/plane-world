@@ -14,7 +14,9 @@
 #include <set>
 #include <thread>
 #include "pw/craft/library.h"
+#include "pw/craft/outputs.h"
 #include "pw/evo/run.h"
+#include "pw/json.h"
 #include "pw/evo/selftests.h"
 #include "pw/selftest.h"
 #include "pw/world/presets.h"
@@ -296,6 +298,34 @@ void registerAlgorithmTests() {
         ok &= expect(c, a->bestFitness() && a->bestFitness()->novelty.has_value(), "Fitness.novelty filled");
         return ok;
     });
+    // Parameters documented "0 = automatic" (schemaFor in src/app/evolvemodel.cpp): a stored 0 must behave exactly
+    // like the key being absent (same candidates, same state), not be taken literally.
+    selftest::add("evolution-algo.zero-means-automatic", [](Context& c) -> bool {
+        GenomeLayout flat = box(8, -2, 2);
+        struct Case { std::string kind, key; std::vector<std::pair<std::string, Value>> base; };
+        std::vector<Case> cases = {
+            {"cmaes", "lambda", {}}, {"sep-cmaes", "lambda", {}}, {"cmaes", "mu", {}}, {"sep-cmaes", "mu", {}},
+            {"simple-es", "mu", {}}, {"ga", "mutationRate", {}}, {"map-elites", "initialRandom", {{"axes", qdParams()}, {"batch", Value::number(4)}}},   // batch < population, so initialRandom matters
+        };
+        auto eval = [](const Genome& g) { Genome h; h.values.assign(g.values.begin(), g.values.begin() + 6); Fitness f = qdEval(h); f.total = -rastrigin(g.values); return f; };
+        auto step = [&](Algorithm& a) { auto p = a.ask(); std::vector<Fitness> f; for (auto& x : p) f.push_back(eval(x)); a.tell(p, f); return p; };
+        bool ok = true;
+        for (auto& cs : cases) {
+            auto zero = cs.base; zero.emplace_back(cs.key, Value::number(0));
+            auto a = make(cs.kind, flat, 24, 3, cs.base), b = make(cs.kind, flat, 24, 3, zero);
+            bool same = true;
+            for (int k = 0; k < 4; ++k) { auto pa = step(*a), pb = step(*b); if (!(pa == pb)) same = false; }
+            same = same && a->saveState() == b->saveState() && a->diagnostics() == b->diagnostics();
+            ok &= expect(c, same, cs.kind + ": " + cs.key + " = 0 behaves exactly like " + cs.key + " absent");
+        }
+        // The automatic values themselves: lambda = population, mu = half of it (CMA-ES) / a quarter (simple-es).
+        auto cma = make("cmaes", flat, 24, 3, {{"lambda", Value::number(0)}, {"mu", Value::number(0)}});
+        ok &= expect(c, cma->ask().size() == 24 && diag(*cma, "lambda") == 24, "cmaes: lambda 0 = population (24)");
+        auto lit = make("cmaes", flat, 24, 3, {{"mu", Value::number(1)}}), aut = make("cmaes", flat, 24, 3);
+        step(*lit); step(*aut);
+        ok &= expect(c, !(lit->saveState() == aut->saveState()), "cmaes: mu 1 differs from automatic (the check is sensitive)");
+        return ok;
+    });
     selftest::add("evolution-algo.checkpoint-roundtrip", [](Context& c) -> bool {
         NEATLayout nl = xorLayout();
         GenomeLayout flat = box(8, -2, 2);
@@ -489,6 +519,270 @@ void registerRunTests() {
         return ok;
     });
 
+    selftest::add("evolution.switch-craft-rewires", [](Context& c) -> bool {
+        // The quick start names a plane's controls (Ailerons, Elevator, Rudder, Engine). Picking New Shepard in the EVOLVE
+        // craft picker must re-fit that wiring (it used to keep the names: "MLP output 'Ailerons' not found").
+        ExperimentDocument e = presets::make("Neural controller", "Trainer");
+        e.name = "Quick start — hold altitude (Trainer)";
+        CraftRef ref; ref.name = "New Shepard";
+        std::string err; auto rocket = resolveCraft(&ref, "", err);
+        bool ok = expect(c, rocket.has_value(), "New Shepard resolves: " + err);
+        if (!rocket) return false;
+        auto layout = [&](ExperimentContext& ctx) { auto rt = scripts::make(e.scripts); rt->compile(e.scripts, e); ctx.buildLayout(*rt); };
+        try { ExperimentContext ctx(e, *rocket, EvoWorld::flat()); layout(ctx); ok &= expect(c, false, "plane wiring on the rocket should be refused"); }
+        catch (const std::exception&) { ok &= expect(c, true, ""); }
+        const auto notes = switchCraft(e, "New Shepard", *rocket);
+        ok &= expect(c, e.crafts.size() == 1 && e.crafts[0].name == std::optional<std::string>("New Shepard"), "craft switched");
+        ok &= expect(c, e.genome.mlp && e.genome.mlp->outputs.empty(), "outputs fall back to every rocket control");
+        ok &= expect(c, e.genome.mlp && e.genome.mlp->inputs.size() == 11 && e.genome.mlp->inputs[9] == "vel.forward" && e.genome.mlp->inputs[10] == "vel.right",
+                     "flight sensor inputs kept, plus the drift sensor vel.forward / vel.right (the rocket gets the standard sensors)");
+        ok &= expect(c, e.name == "Quick start — hold altitude (New Shepard)", "name follows the craft: " + e.name);
+        ok &= expect(c, notes.size() == 2 && notes[0].find("Ailerons") != std::string::npos, "a note naming the dropped outputs");
+        ok &= expect(c, notes.size() == 2 && notes[1].find("angle mode") != std::string::npos && e.controller.assist == "angle", "and one for angle mode");
+        try {
+            ExperimentContext ctx(e, *rocket, EvoWorld::flat()); layout(ctx);
+            ok &= expect(c, ctx.assist == 2 && ctx.assistOutputs.size() == 3 && ctx.mlpOutputs.empty() && ctx.mlpSizes.back() == 3,
+                         "the rocket flight controller drives engine + both gimbal axes, the MLP its 3 sticks (" + std::to_string(ctx.mlpSizes.back()) + ")");
+            e.controller.assist = "none";
+            ExperimentContext direct(e, *rocket, EvoWorld::flat()); layout(direct);
+            ok &= expect(c, direct.assist == 0 && direct.mlpOutputs.size() == 3, "without assist the MLP drives engine + both gimbal axes (" + std::to_string(direct.mlpOutputs.size()) + ")");
+            e.controller.assist = "angle";
+        } catch (const std::exception& ex) { ok &= expect(c, false, std::string("experiment context after switch: ") + ex.what()); }
+        // and back: an "all outputs" list stays valid on any craft, nothing to note
+        ref.name = "Trainer"; auto trainer = resolveCraft(&ref, "", err);
+        ok &= expect(c, trainer && switchCraft(e, "Trainer", *trainer).empty() && e.name == "Quick start — hold altitude (Trainer)", "switching back is clean");
+        ok &= expect(c, e.controller.assist == "none", "a plane flies its controls directly");
+        return ok;
+    });
+
+    selftest::add("evolution.switch-craft-design-genes", [](Context& c) -> bool {
+        // "Craft design" evolves the Trainer's wings and stabilator by part name; New Shepard has none of them. The switch
+        // drops those genes and evolves a part the rocket has, sized to it, and the genes apply to the rocket.
+        ExperimentDocument e = presets::make("Craft design", "Trainer");
+        const std::size_t before = e.genome.design.size();
+        CraftRef ref; ref.name = "New Shepard";
+        std::string err; auto rocket = resolveCraft(&ref, "", err);
+        bool ok = expect(c, rocket.has_value() && before > 0, "New Shepard resolves, Trainer design has genes: " + err);
+        if (!rocket) return false;
+        const auto notes = switchCraft(e, "New Shepard", *rocket);
+        ok &= expect(c, e.genome.design.size() == 1 && e.genome.design[0].field == "mass", "one mass gene for the rocket");
+        const DesignGene g = e.genome.design[0];
+        const craft::CraftPart* part = nullptr;
+        for (auto& p : rocket->parts) if (design::partMatches(p, g.part)) { part = &p; break; }
+        double heaviest = 0; for (auto& p : rocket->parts) heaviest = std::max(heaviest, p.mass);
+        ok &= expect(c, part && part->mass == heaviest && g.min == heaviest * 0.5 && g.max == heaviest * 1.5, "heaviest part, ±50 % of its mass (" + g.part + ")");
+        ok &= expect(c, notes.size() == 1 && notes[0].find("Wing") != std::string::npos, "note names the dropped wing genes");
+        const double v = *g.initial;
+        try { auto applied = design::apply(e.genome.design, &v, *rocket); ok &= expect(c, applied.parts.size() == rocket->parts.size(), ""); }
+        catch (const std::exception& ex) { ok &= expect(c, false, std::string("design gene applies: ") + ex.what()); }
+        // back on the Trainer the rocket gene has no part either: replaced again, by the Trainer's heaviest part
+        ref.name = "Trainer"; auto trainer = resolveCraft(&ref, "", err);
+        ok &= expect(c, trainer && !switchCraft(e, "Trainer", *trainer).empty() && e.genome.design.size() == 1 && e.genome.design[0].part != g.part, "switching back re-fits again");
+        return ok;
+    });
+
+    selftest::add("evolution.algorithm-entry-refused", [](Context& c) -> bool {
+        // An "algorithm" entry the reader can't use is an error that says what to fix (it used to become Simple ES).
+        auto load = [](const char* text) -> std::string {
+            auto r = json::parse(text);
+            if (!r.ok) return "parse: " + r.error;
+            try { auto e = ExperimentDocument::fromJson(r.value); return "ok:" + e.algorithm.kind; }
+            catch (const EvoError& x) { return x.what(); }
+        };
+        bool ok = expect(c, load(R"({"algorithm": {"kind": "cmaes", "values": {}}})") == "ok:cmaes", "complete entry loads");
+        const std::string noValues = load(R"({"algorithm": {"kind": "cmaes"}})");
+        ok &= expect(c, noValues.find("has no \"values\"") != std::string::npos && noValues.find("Fix the file") != std::string::npos, "no values: " + noValues);
+        const std::string noKind = load(R"({"algorithm": {"values": {"sigma0": 1}}})");
+        ok &= expect(c, noKind.find("no \"kind\"") != std::string::npos, "no kind: " + noKind);
+        ok &= expect(c, load(R"({"algorithm": "ga"})").find("must be an object") != std::string::npos, "not an object");
+        ok &= expect(c, load(R"({"name": "x"})") == "ok:" + ExperimentDocument().algorithm.kind, "no entry at all = the default method");
+        return ok;
+    });
+
+    selftest::add("evolution.craft-kind", [](Context& c) -> bool {
+        // goal presets are offered by craft kind (rockets first: New Shepard's ring fin is made of wing panels)
+        const std::vector<std::pair<const char*, const char*>> want = {{"Trainer", "plane"}, {"Jet trainer", "plane"}, {"Rover", "ground"},
+            {"Sounding rocket", "rocket"}, {"New Shepard", "rocket"}, {"Racer quad", "rotor"}, {"Ducted rocket", "rotor"}, {"Heavy hex", "rotor"}};
+        bool ok = true;
+        for (auto& [name, kind] : want) {
+            auto d = craft::presets::load(name);
+            ok &= expect(c, d && craftKind(*d) == kind, std::string(name) + " is " + (d ? craftKind(*d) : "missing") + ", want " + kind);
+        }
+        for (auto& d : craft::presets::bundled()) c.note("  " + d.name + ": " + craftKind(d));
+        return ok;
+    });
+
+    selftest::add("evolution.neural-preset-crash-charge", [](Context& c) -> bool {
+        // The Neural preset charges a crash 2 points per second not flown, natively and in kNeuralJS alike. New Shepard
+        // from an air start crashes in generation 0, so the charge is exercised; the native and JS runs must agree.
+        ExperimentDocument e = presets::make("Neural controller", "New Shepard");
+        CraftRef ref; ref.name = "New Shepard";
+        std::string err; auto rocket = resolveCraft(&ref, "", err);
+        if (!expect(c, rocket.has_value(), "New Shepard resolves: " + err)) return false;
+        switchCraft(e, "New Shepard", *rocket);
+        e.controller.assist = "none";   // the unassisted network tips over and crashes, which is what this test needs
+        e.population = 6; e.generations = 1; e.workers = 1;
+        e.episode.duration = 8; e.episode.episodesPerCandidate = 1; e.episode.wind = {};
+        e.episode.spawn.mode = "air"; e.episode.spawn.altitudeAGL = 40; e.episode.spawn.speed = 0;
+        bool ok = expect(c, scripts::presetKind(e.scripts.source) == "neural", "the preset script is recognised");
+        auto run = [&](ScriptRuntimeFactory f) {
+            EvolutionRun r(e, *rocket, {EvoWorld::flat()}, EvolutionRun::newRunID(), {}, std::move(f));
+            return r.runGeneration();
+        };
+        const ScriptBundle b = e.scripts;
+        const GenerationRecord nat = run([] { return scripts::makePreset("neural"); });
+        const GenerationRecord js = run([b] { return scripts::make(b, scripts::Mode::JavaScript, script::Engine::Auto); });
+        // some flights crash (the charge is exercised); how many depends on the inputs the rocket gets, so only "some"
+        ok &= expect(c, nat.termsMean.count("crash") && nat.termsMean.at("crash") < 0, "flights crash (mean crash " + fmt(nat.termsMean.at("crash")) + ")");
+        ok &= expect(c, nat.best == js.best && nat.mean == js.mean && nat.worst == js.worst, "native = JavaScript (best " + fmt(nat.best) + " / " + fmt(js.best) + ")");
+        return ok;
+    });
+
+    selftest::add("evolution.hover-trim", [](Context& c) -> bool {
+        // Rotor / rocket crafts start their throttle outputs at the hover throttle (all weights 0 -> output = bias);
+        // planes keep 0 (their histories and the parity references are unchanged).
+        auto context = [&](const char* craftName, ExperimentDocument& e) {
+            CraftRef ref; ref.name = craftName;
+            std::string err; auto craft = resolveCraft(&ref, "", err);
+            if (!craft) throw EvoError(err);
+            e = presets::make("Neural controller", craftName);
+            switchCraft(e, craftName, *craft);
+            e.controller.assist = "none";   // the network drives the throttles itself (angle mode: evolution.angle-assist)
+            e.episode.spawn.mode = "air"; e.episode.spawn.altitudeAGL = 150; e.episode.spawn.speed = 0;
+            auto ctx = std::make_shared<ExperimentContext>(e, *craft, std::vector<std::shared_ptr<const EvoWorld>>{EvoWorld::flat()});
+            auto rt = scripts::make(e.scripts); rt->compile(e.scripts, e); ctx->buildLayout(*rt);
+            return ctx;
+        };
+        bool ok = true;
+        ExperimentDocument e;
+        const auto t0 = std::chrono::steady_clock::now();
+        auto shepard = context("New Shepard", e);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        const auto v = shepard->hoverThrottle(shepard->mlpOutputs, 150);
+        c.note("New Shepard hover throttle " + (v ? fmt(*v) : std::string("none")) + ", context + trim " + fmt(ms) + " ms");
+        ok &= expect(c, v && *v > 0.6 && *v < 0.9, "New Shepard hovers at ~3/4 throttle");
+        const auto trim = shepard->hoverTrimGenes();
+        ok &= expect(c, trim.size() == 1, "one trimmed bias (the engine; gimbals stay centred)");
+        double b = 0;
+        for (auto& g : shepard->layout.genes) if (!trim.empty() && g.name == trim[0].first) b = g.initial.value_or(0);
+        ok &= expect(c, !trim.empty() && b == trim[0].second && b > 0, "the layout starts that bias at the trim (" + fmt(b) + ")");
+        // the starting network (every gene at its initial value) flies 10 s without crashing; untrimmed it falls
+        {
+            Genome g; g.id = 1;
+            for (auto& gs : shepard->layout.genes) g.values.push_back(gs.initial.value_or(0));
+            auto fly = [&](const std::vector<double>& values) {
+                Genome x = g; x.values = values;
+                SimEvaluator ev(shepard, 1, [b = e.scripts] { return scripts::make(b); });
+                return ev.evaluate({x}, 0)[0];
+            };
+            std::vector<double> untrimmed = g.values;
+            for (std::size_t i = 0; i < shepard->layout.genes.size(); ++i) if (!trim.empty() && shepard->layout.genes[i].name == trim[0].first) untrimmed[i] = 0;
+            const Fitness withTrim = fly(g.values), without = fly(untrimmed);
+            c.note("start network: trimmed crash " + fmt(withTrim.terms.count("crash") ? withTrim.terms.at("crash") : 0) + ", untrimmed crash " +
+                   fmt(without.terms.count("crash") ? without.terms.at("crash") : 0));
+            ok &= expect(c, withTrim.terms.count("crash") && withTrim.terms.at("crash") == 0, "trimmed start network does not crash");
+            ok &= expect(c, without.terms.count("crash") && without.terms.at("crash") < 0, "the untrimmed one does (the problem this fixes)");
+        }
+        ExperimentDocument eq; auto quad = context("Racer quad", eq);
+        const auto qv = quad->hoverThrottle(quad->mlpOutputs, 150);
+        c.note("Racer quad hover throttle " + (qv ? fmt(*qv) : std::string("none")));
+        // prop power ∝ throttle and static thrust ∝ power^(2/3): hover = (1 / (T/W))^1.5 = (1/9.5)^1.5 ≈ 0.034
+        ok &= expect(c, qv && std::fabs(*qv - std::pow(1 / 9.5, 1.5)) < 0.01 && !quad->hoverTrimGenes().empty(), "Racer quad (T/W 9.5) trims to (1/9.5)^1.5");
+        ExperimentDocument et; auto trainer = context("Trainer", et);
+        ok &= expect(c, trainer->hoverTrimGenes().empty(), "the Trainer (a plane) keeps 0");
+        return ok;
+    });
+
+    selftest::add("evolution.angle-assist", [](Context& c) -> bool {
+        // controller.assist "angle": the network's outputs are the sticks of the built-in flight controller (FLY's angle
+        // mode), so the starting network (every weight 0) already holds a drone or a rocket level instead of flipping it.
+        auto context = [&](const char* craftName, const char* spawn, double agl, ExperimentDocument& e, craft::CraftDocument& craft) {
+            CraftRef ref; ref.name = craftName;
+            std::string err; auto cr = resolveCraft(&ref, "", err);
+            if (!cr) throw EvoError(err);
+            craft = *cr;
+            e = presets::make("Neural controller", craftName);
+            switchCraft(e, craftName, craft);
+            e.episode.spawn.mode = spawn; e.episode.spawn.altitudeAGL = agl; e.episode.spawn.speed = 0;
+            e.episode.duration = 10; e.episode.episodesPerCandidate = 1; e.episode.wind = {};
+            auto ctx = std::make_shared<ExperimentContext>(e, craft, std::vector<std::shared_ptr<const EvoWorld>>{EvoWorld::flat()});
+            auto rt = scripts::make(e.scripts); rt->compile(e.scripts, e); ctx->buildLayout(*rt);
+            return ctx;
+        };
+        // fly the starting network: (crashed, largest tilt °, height change m); speed = its sideways speed at the end
+        double speed = 0;
+        auto fly = [&](const std::shared_ptr<ExperimentContext>& ctx) {
+            Genome g; g.id = 1;
+            for (auto& gs : ctx->layout.genes) g.values.push_back(gs.initial.value_or(0));
+            EvalWorker w(ctx, scripts::make(ctx->experiment.scripts));
+            w.prepare(g);
+            double tilt = 0, agl0 = -1, agl = 0;
+            TickObserver obs = [&](const sim::CraftSim&, const ControlFrame& f) {
+                tilt = std::max(tilt, std::fabs(f.state.roll) + std::fabs(f.state.pitch));
+                if (agl0 < 0) agl0 = f.state.agl;
+                agl = f.state.agl; speed = std::hypot(f.state.vx, f.state.vz);
+            };
+            w.runEpisode(g, 0, 0, 0, w.episodeSeed(0, 0, 0), &obs);
+            return std::tuple<bool, double, double>{w.sim().crashed(), tilt, agl - agl0};
+        };
+        bool ok = true;
+        try {
+            ExperimentDocument e; craft::CraftDocument craft;
+            auto quad = context("Racer quad", "air", 10, e, craft);
+            ok &= expect(c, e.controller.assist == "angle" && e.controller.hz == kRotorControlHz, "a drone flies in angle mode at " + fmt(e.controller.hz) + " Hz");
+            ok &= expect(c, quad->assist == 1 && quad->assistOutputs.size() == 4 && quad->mlpOutputs.empty() && quad->mlpSizes.back() == 4,
+                         "the multirotor controller drives the 4 motors, the MLP its 4 sticks");
+            ok &= expect(c, quad->hoverTrimGenes().empty(), "a centred climb stick holds height: nothing to trim");
+            auto [crashed, tilt, dh] = fly(quad);
+            c.note("Racer quad, starting network: tilt " + fmt(tilt) + "°, height change " + fmt(dh) + " m");
+            ok &= expect(c, !crashed && tilt < 5 && std::fabs(dh) < 2, "the starting network hovers level for 10 s");
+            // no horizontal-velocity sensor: the controller leans against drift, so centred sticks stop an 8 m/s start
+            e.episode.spawn.speed = 8;
+            auto moving = std::make_shared<ExperimentContext>(e, craft, std::vector<std::shared_ptr<const EvoWorld>>{EvoWorld::flat()});
+            { auto rt = scripts::make(e.scripts); rt->compile(e.scripts, e); moving->buildLayout(*rt); }
+            auto [mCrashed, mTilt, mdh] = fly(moving);
+            c.note("Racer quad from 8 m/s: sideways " + fmt(speed) + " m/s after 10 s, tilt " + fmt(mTilt) + "°");
+            ok &= expect(c, !mCrashed && speed < 0.5, "centred sticks bring an 8 m/s start to a stop");
+            const Value j = e.toJson();
+            ok &= expect(c, ExperimentDocument::fromJson(j).controller.assist == "angle", "assist round-trips through JSON");
+
+            auto shepard = context("New Shepard", "air", 30, e, craft);
+            ok &= expect(c, shepard->assist == 2 && shepard->mlpSizes.back() == 3, "the rocket controller drives engine + gimbals, the MLP climb, pitch, yaw");
+            ok &= expect(c, shepard->hoverTrimGenes().empty() && shepard->assistHover > 0.6 && shepard->assistHover < 0.9,
+                         "the climb loop starts at the hover throttle (" + fmt(shepard->assistHover) + "), the sticks centred");
+            auto [rCrashed, rTilt, rdh] = fly(shepard);
+            c.note("New Shepard, starting network: tilt " + fmt(rTilt) + "°, height change " + fmt(rdh) + " m");
+            ok &= expect(c, !rCrashed && rTilt < 5 && std::fabs(rdh) < 3, "the starting network holds height upright for 10 s");
+        } catch (const std::exception& ex) { ok &= expect(c, false, ex.what()); }
+        return ok;
+    });
+
+    selftest::add("evolution.velocity-sensor", [](Context& c) -> bool {
+        // The standard "vel" sensor reads horizontal drift in the heading frame (vel.forward / vel.right); it is massless,
+        // so crafts that get the standard set keep their mass (reference histories).
+        auto trainer = craft::presets::load("Trainer");
+        if (!expect(c, trainer.has_value(), "Trainer loads")) return false;
+        const auto plain = sim::CraftSpec::fromDocument(craft::outputs::prepareForFlight(presets::addStandardSensors(*trainer)));
+        sim::CraftSim s; bool ok = expect(c, s.load(plain), "loads with the standard sensors");
+        int fwd = -1, right = -1;
+        for (std::size_t i = 0; i < s.inputs().size(); ++i) { if (s.inputs()[i].name == "vel.forward") fwd = int(i); if (s.inputs()[i].name == "vel.right") right = int(i); }
+        ok &= expect(c, fwd >= 0 && right == fwd + 1, "vel.forward and vel.right are standard inputs");
+        double mVel = -1;
+        for (auto& p : presets::addStandardSensors(*trainer).parts) if (p.id == "sn-vel") mVel = p.mass;
+        ok &= expect(c, mVel == 0, "the vel sensor is massless");
+        if (fwd < 0) return false;
+        // turned 90° about +Y, moving 7 m/s along its nose and 3 m/s to its left: the channels follow the heading
+        sim::SimEnvironment env;
+        s.groundEnabled = false;
+        s.reset(Vec3d{0, 100, 0}, Quatd::angleAxis(kPi / 2, {0, 1, 0}));
+        const Vec3d fwdW = s.orientation().act({1, 0, 0}), rightW = s.orientation().act({0, 0, 1});
+        s.setVelocity(fwdW * 7 + rightW * -3, Vec3d{});
+        s.updateInputValues(env);
+        ok &= expect(c, std::fabs(s.inputs()[std::size_t(fwd)].value - 7) < 1e-6 && std::fabs(s.inputs()[std::size_t(right)].value + 3) < 1e-6,
+                     "7 m/s ahead and 3 m/s to the left read (" + fmt(s.inputs()[std::size_t(fwd)].value) + ", " + fmt(s.inputs()[std::size_t(right)].value) + ")");
+        return ok;
+    });
+
     selftest::add("evolution.rng-determinism", [](Context& c) -> bool {
         EvoRNG a(42), b(42), cc(43);
         bool ok = true, same = true, diff = false;
@@ -600,7 +894,7 @@ void registerRunTests() {
         std::string dir = c.parityDir + "/evolution";
         auto e = ExperimentDocument::load(dir + "/parity-neural.json");
         ok &= expect(c, e.name == "parity-neural" && e.genome.mlp && e.genome.mlp->hidden == std::vector<int>{12} && e.population == 12 &&
-                        scripts::presetKind(e.scripts.source) == "neural" && e.algorithm.kind == "sep-cmaes", "Swift experiment file decodes");
+                        scripts::presetKind(e.scripts.source) == "neural-v1" && e.algorithm.kind == "sep-cmaes", "Swift experiment file decodes (its script is the pre-2026-10 Neural preset)");
         auto d = ExperimentDocument::load(dir + "/parity-design.json");
         ok &= expect(c, d.genome.design.size() == 4 && d.genome.design[2].mirror.size() == 3 && !d.genome.mlp && scripts::presetKind(d.scripts.source) == "design",
                      "Swift design experiment decodes (design genes, mirrors, no MLP)");
@@ -712,6 +1006,79 @@ void registerRunTests() {
         for (auto& o : sim.outputs()) if (o.name == "Engine" && o.value != 0) drives = true;
         ok &= expect(c, ap.lastError().empty() && drives, "autopilot drives outputs");
         std::error_code ec2; std::filesystem::remove_all(dir, ec2);
+        return ok;
+    });
+    selftest::add("evolution.behaviours", [](Context& c) -> bool {
+        c.note("a craft carries several named evolved controllers (\"behaviours\"), each on its own FLY key");
+        ExperimentDocument e = presets::neuralController();   // its JavaScript goal: FLY rebuilds the run from the craft alone
+        e.algorithm = AlgorithmParams{"simple-es", {}};
+        e.population = 8; e.episode.duration = 4; e.checkpointEvery = 0; e.worlds = {WorldRef{"flat"}};
+        EvolutionRun run(e, trainer(), EvoWorld::flat(), "behaviours", {});
+        run.runGeneration();
+        const HallOfFameEntry best = run.hallOfFame().front();
+        auto roundTrip = [](const craft::CraftDocument& d) {
+            craft::CraftDocument r; std::string err;
+            craft::fromJson(json::parse(craft::dumpCraft(d)).value, r, err);
+            return r;
+        };
+        // export: one behaviour, named, on a suggested free key
+        craft::CraftDocument doc = roundTrip(run.exportCraft(best.genome, &best.fitness, "Hold height"));
+        auto l = behaviours::list(doc);
+        bool ok = expect(c, l.size() == 1 && l[0].name == "Hold height" && l[0].key == "h" && l[0].controller.genome == best.genome
+                                && l[0].controller.experiment.has_value(), "export: one behaviour \"Hold height\" on H, with genome + experiment");
+        ok &= expect(c, doc.extra.find(behaviours::key) && !doc.parts[0].extra.find(EmbeddedController::key), "stored on the craft, no legacy part key");
+        ok &= expect(c, EmbeddedController::find(doc).has_value(), "EmbeddedController::find reads behaviours");
+        // old crafts: a single evolvedController on a part becomes one behaviour on O
+        craft::CraftDocument legacy = doc;
+        EmbeddedController old = l[0].controller; old.experiment.reset();
+        behaviours::store(legacy, {});
+        legacy.parts[0].extra.set(EmbeddedController::key, old.toJson());
+        legacy = roundTrip(legacy);
+        auto ll = behaviours::list(legacy);
+        ok &= expect(c, ll.size() == 1 && ll[0].key == "o" && ll[0].name == e.name && ll[0].controller.genome == best.genome,
+                     "legacy evolvedController -> one behaviour \"" + (ll.empty() ? std::string() : ll[0].name) + "\" on O");
+        // several: add, replace by name, steal a key
+        Behaviour climb = l[0]; climb.name = "Climb"; climb.key = "2";
+        behaviours::add(legacy, climb);   // migrates the legacy one into "behaviours"
+        Behaviour cruise = l[0]; cruise.name = "Cruise"; cruise.key = "2";
+        behaviours::add(legacy, cruise);
+        Behaviour climb2 = climb; climb2.name = "climb"; climb2.key = "k";
+        behaviours::add(legacy, climb2);
+        legacy = roundTrip(legacy);
+        auto l3 = behaviours::list(legacy);
+        ok &= expect(c, l3.size() == 3 && l3[0].key == "o" && l3[1].name == "climb" && l3[1].key == "k" && l3[2].name == "Cruise" && l3[2].key == "2",
+                     "three behaviours round-trip in order; same name replaces, a taken key moves");
+        ok &= expect(c, !legacy.parts[0].extra.find(EmbeddedController::key), "storing drops the legacy part key");
+        // keys
+        ok &= expect(c, !behaviours::keyConflict(legacy, "r", "x").empty() && !behaviours::keyConflict(legacy, "up", "x").empty()
+                            && !behaviours::keyConflict(legacy, "k", "Cruise").empty() && behaviours::keyConflict(legacy, "k", "Climb").empty()
+                            && behaviours::keyConflict(legacy, "j", "x").empty(), "FLY keys, flight keys and other behaviours' keys are refused");
+        const std::string sk = behaviours::suggestKey(legacy, "Circle");
+        ok &= expect(c, sk == "i", "suggested key for \"Circle\" skips C (camera): " + sk);
+        // FLY: the rebuilt training context flies the craft exactly like the run's own context
+        craft::CraftDocument flight = craft::outputs::prepareForFlight(presets::addStandardSensors(doc));
+        sim::CraftSim a, b;
+        a.load(sim::CraftSpec::fromDocument(flight)); b.load(sim::CraftSpec::fromDocument(flight));
+        sim::SimEnvironment ea, eb;
+        a.reset(a.restingSpawn() + Vec3d{0, 150, 0}); b.reset(b.restingSpawn() + Vec3d{0, 150, 0});
+        LivePilot pa(l[0].controller, flight, a, ea);
+        LivePilot pb(run.context(), best.genome, run.runtimeFactory(), b, eb);
+        bool same = pa.exact();
+        for (int k = 0; k < 300 && same; ++k) {
+            pa.update(ea, 1.0 / 300); pb.update(eb, 1.0 / 300);
+            a.step(1.0 / 300, ea); b.step(1.0 / 300, eb);
+            ea.time += 1.0 / 300; eb.time += 1.0 / 300;
+            for (std::size_t i = 0; i < a.outputs().size(); ++i) same = same && a.outputs()[i].value == b.outputs()[i].value;
+        }
+        ok &= expect(c, same && a.position() == b.position(), "behaviour from the craft alone flies bit-identically to the run's context (" + pa.note() + ")");
+        // older controller without its experiment: the standalone autopilot still flies it
+        sim::CraftSim s; s.load(sim::CraftSpec::fromDocument(flight));
+        sim::SimEnvironment es;
+        LivePilot pl(old, flight, s, es);
+        for (int k = 0; k < 60; ++k) { pl.update(es, 1.0 / 60); s.step(1.0 / 60, es); }
+        bool drives = false;
+        for (auto& o : s.outputs()) if (o.value != 0) drives = true;
+        ok &= expect(c, !pl.exact() && drives, "no stored experiment: falls back to EvolvedAutopilot and drives the outputs");
         return ok;
     });
     selftest::add("evolution.replay-matches-training", [](Context& c) -> bool {

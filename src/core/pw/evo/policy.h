@@ -89,6 +89,8 @@ private:
 /// Applies design genes to a craft document (native, before the script decode hook).
 namespace design {
 GenomeLayout layout(const std::vector<DesignGene>& genes);
+/// A gene's part selector: id or name, or a "prefix*".
+bool partMatches(const craft::CraftPart& p, const std::string& selector);
 /// Modified copy; `values` are the design genes in `genes` order (already legalised). Throws EvoError.
 craft::CraftDocument apply(const std::vector<DesignGene>& genes, const double* values, const craft::CraftDocument& doc);
 }

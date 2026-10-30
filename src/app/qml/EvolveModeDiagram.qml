@@ -61,6 +61,6 @@ Item {
         Arrow { anchors.verticalCenter: parent.verticalCenter }
         Node { width: d.nodeW; height: 54; title: qsTr("Flight"); sub: qsTr("headless sim") }
         Arrow { anchors.verticalCenter: parent.verticalCenter }
-        Node { width: d.nodeW; height: 54; title: qsTr("Fitness"); sub: qsTr("reward terms") }
+        Node { width: d.nodeW; height: 54; title: qsTr("Fitness"); sub: qsTr("scores") }
     }
 }

@@ -15,6 +15,8 @@
 #include "pw/evo/script.h"
 #include "pw/jobs.h"
 #include "pw/sim/craft_sim.h"
+#include "pw/sim/multirotor.h"
+#include "pw/sim/rocket_fc.h"
 #include "pw/world/bake.h"
 
 namespace pw::evo {
@@ -68,6 +70,12 @@ public:
         : ExperimentContext(std::move(e), std::move(flightCraft), std::vector<std::shared_ptr<const EvoWorld>>{std::move(world)}) {}
     /// Native layout (preset) + script genome(base) hook. Called once by the run.
     void buildLayout(ScriptRuntime& orchestrator);
+    /// The throttle-output value (each of `outputs`, in its own range) at which the craft holds its height in still air
+    /// at `altitude` m, measured in the sim by bisection; nullopt when full throttle can't lift it or `outputs` has no
+    /// motor / jet / rocket.
+    std::optional<double> hoverThrottle(const std::vector<int>& outputs, double altitude) const;
+    /// MLP output biases that start throttle outputs at the hover throttle (rotor / rocket crafts), by gene name
+    std::vector<std::pair<std::string, double>> hoverTrimGenes() const;
     ExperimentDocument experiment;
     craft::CraftDocument craft;
     sim::CraftSpec craftSpec;
@@ -84,6 +92,13 @@ public:
     std::vector<std::string> termNames, inputNames, outputNames;
     std::vector<std::pair<double, double>> outputRanges;
     std::vector<int> mlpSizes, mlpInputs, mlpOutputs, neatInputs, neatOutputs;
+    /// controller.assist "angle" on a craft with a built-in flight controller: 1 multirotor (sticks climb, yaw, pitch,
+    /// roll), 2 rocket (climb, pitch, yaw); 0 none. The network's first assistSticks outputs are the sticks, then one
+    /// per mlpOutputs entry (the controls the flight controller doesn't drive); assistOutputs are the ones it drives.
+    /// A centred climb stick holds the height, so the network starts from a craft that hovers.
+    int assist = 0, assistSticks = 0;
+    std::vector<int> assistOutputs;
+    double assistHover = 0.1;   // where the climb loop starts: hover thrust fraction (multirotor) / throttle (rocket)
     std::vector<double> mlpInputScale, neatInputScale;
     std::pair<int, int> mlpRange{-1, -1}, designRange{-1, -1};
     bool needsPerCandidateCraft = false;
@@ -144,6 +159,10 @@ private:
     std::unique_ptr<MLPPolicy> mlp_;
     std::unique_ptr<NEATNetwork> neat_;
     std::vector<double> mlpX_, mlpY_;
+    std::unique_ptr<sim::MultirotorFC> rotorFC_;   // controller.assist "angle" (ctx_->assist 1 / 2)
+    std::unique_ptr<sim::RocketFC> rocketFC_;
+    void attachAssist();
+    void resetAssist();
     std::vector<Vec3d> cornersPrev_, cornersCur_;
     int policyMode_ = 0;   // 0 script only, 1 mlp, 2 neat
     bool stopOnCrash_ = true;

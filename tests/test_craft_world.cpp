@@ -30,6 +30,7 @@ TEST_CASE("craft: CAD import STL / OBJ / glTF / platform USD") { CHECK(runSelf("
 TEST_CASE("craft: auto-rig of an imported glTF assembly") { CHECK(runSelf("craft.autorig-gltf")); }
 TEST_CASE("craft: mesh cut keeps both halves watertight") { CHECK(runSelf("craft.meshcut-watertight")); }
 TEST_CASE("craft: world document + library save/load") { CHECK(runSelf("craft.world-library")); }
+TEST_CASE("craft: library delete / rename / duplicate + thumbnail keys") { CHECK(runSelf("craft.library-manage")); }
 TEST_CASE("world: headless bake (terrain, water)") { CHECK(runSelf("world.bake")); }
 TEST_CASE("collision: hull, GJK, EPA, SAT") { CHECK(runSelf("collision.hull+gjk+epa")); }
 TEST_CASE("collision: 10-box stack stays put for 10 s") { CHECK(runSelf("collision.box-stack-10s")); }

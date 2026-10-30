@@ -319,6 +319,43 @@ void registerPhysicsTests() {
         return ex.ok;
     });
 
+    selftest::add("physics.multirotor-fc-frame-rates", [](Context& c) {
+        // FLY steps the controls and the physics in slices of at most 1/240 s, whatever the frame rate
+        // (AppController::stepFly). The multirotor controller is a discrete loop: stepped once per 60 Hz frame it
+        // limit-cycled (diagonal motor pairs slammed 0 <-> 1 on alternate frames) and the Racer quad jumped up every
+        // ~2 s. Here: take off from the ground, let go of the sticks, and the quad must settle into a hover with no jumps.
+        Expect ex{c};
+        craft::CraftDocument doc; std::string err;
+        for (const auto* b = craft::embedded::presets(); b->name; ++b)
+            if (std::string(b->name) == "Racer quad") craft::parseCraft({b->data, b->size}, doc, err);
+        const auto flight = craft::outputs::prepareForFlight(doc);
+        const ControlScheme scheme = ControlScheme::fromDocument(flight);
+        for (double frameHz : {60.0, 30.0}) {
+            CraftSim sim; sim.load(CraftSpec::fromDocument(flight));
+            sim.reset(sim.restingSpawn());
+            ControlSystem cs; cs.load(scheme, sim);
+            SimEnvironment env; env.wind = {0, 0, 3};   // the default WORLD's light wind
+            const double frame = 1 / frameHz;
+            const int slices = std::max(1, int(std::ceil(frame * 240 - 1e-9)));
+            int jumps = 0; double lastVy = 0, minUp = 1;
+            for (double t = 0; t < 14; t += frame) {
+                const bool climb = t > 0.5 && t < 1.7;   // a short burst of throttle to take off, then hands off
+                for (int i = 0; i < slices; ++i) {
+                    cs.step(sim, [&](const std::string& k) { return climb && k == "w"; }, frame / slices);
+                    sim.step(frame / slices, env);
+                }
+                const double vy = sim.velocity().y;
+                if (t > 2 && std::fabs(vy - lastVy) > 0.5) ++jumps;   // > 0.5 m/s in one frame: a kick, not flying
+                lastVy = vy;
+                minUp = std::min(minUp, sim.orientation().act({0, 1, 0}).y);
+            }
+            c.note(fmt("%.0f Hz frames: alt %.2f m, vy %+.2f m/s, lowest up.y %.3f, %d jumps", frameHz, sim.position().y, sim.velocity().y, minUp, jumps));
+            ex(jumps == 0 && minUp > 0.8 && !sim.crashed(), fmt("%.0f Hz frames: no jumps, never tips over", frameHz));
+            ex(std::fabs(sim.velocity().y) < 0.3 && sim.position().y > 1, fmt("%.0f Hz frames: hands-off it settles into a hover", frameHz));
+        }
+        return ex.ok;
+    });
+
     selftest::add("physics.multirotor-fc", [](Context& c) {
         // Racer quad under its "controls" block (multirotor controller): holds a hover, and each axis moves it the right way.
         Expect ex{c};

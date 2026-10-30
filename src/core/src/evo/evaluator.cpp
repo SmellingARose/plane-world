@@ -141,6 +141,64 @@ ExperimentContext::ExperimentContext(ExperimentDocument e, craft::CraftDocument 
     for (auto& o : probe.outputs()) { outputNames.push_back(o.name); outputRanges.push_back({o.lo, o.hi}); }
 }
 
+std::optional<double> ExperimentContext::hoverThrottle(const std::vector<int>& outputs, double altitude) const {
+    sim::CraftSim s;
+    if (!s.load(craftSpec)) return std::nullopt;
+    std::vector<int> thr;
+    for (int o : outputs) {
+        const auto k = s.outputs()[static_cast<std::size_t>(o)].kind;
+        if (k == sim::OutputKind::Motor || k == sim::OutputKind::Jet || k == sim::OutputKind::Rocket) thr.push_back(o);
+    }
+    if (thr.empty()) return std::nullopt;
+    // thrust minus weight (N) with every throttle at v, after the engines spool up, at the hover condition: the craft
+    // is held still (no inflow, no tumbling: an open-loop multirotor would flip within a second). Rotor and rocket
+    // crafts thrust along their up axis, so total thrust against weight is the hover test.
+    auto climb = [&](double v) {
+        s.load(craftSpec);
+        s.groundEnabled = false;
+        sim::SimEnvironment env;
+        s.reset(s.restingSpawn() + Vec3d{0, smax(0, altitude), 0});
+        for (int o : thr) s.setOutput(o, v);
+        for (int i = 0; i < 100; ++i) { s.step(0.01, env); s.setVelocity(Vec3d{}, Vec3d{}); }
+        double thrust = 0;
+        for (auto& p : s.parts()) thrust += p.thrustNow;
+        return thrust - s.mass() * kGravity;
+    };
+    double hi = 1;
+    for (int o : thr) hi = smin(hi, s.outputs()[static_cast<std::size_t>(o)].hi);
+    if (climb(hi) <= 0) return std::nullopt;
+    double lo = 0;
+    for (int it = 0; it < 12; ++it) { const double m = 0.5 * (lo + hi); (climb(m) > 0 ? hi : lo) = m; }
+    return 0.5 * (lo + hi);
+}
+
+std::vector<std::pair<std::string, double>> ExperimentContext::hoverTrimGenes() const {
+    std::vector<std::pair<std::string, double>> r;
+    const ExperimentDocument& e = experiment;
+    const bool mlp = (e.genome.preset == "neural" || e.genome.preset == "coevolve") && e.controller.mode == "mlp";
+    if (!mlp || !e.controller.hoverTrim || mlpSizes.size() < 2 || (mlpOutputs.empty() && assist == 0)) return r;
+    const std::string kind = craftKind(craft);
+    if (kind != "rotor" && kind != "rocket") return r;
+    const std::string act = e.genome.mlp ? e.genome.mlp->outputActivation : "tanh";
+    if (act != "tanh" && act != "linear") return r;
+    const double alt = e.episode.spawn.mode == "runway" ? 0 : e.episode.spawn.altitudeAGL;
+    const std::string L = std::to_string(mlpSizes.size() - 2);
+    auto gene = [&](std::size_t j, double y) {
+        y = smax(-0.995, smin(0.995, y));
+        r.push_back({"mlp." + L + ".b." + std::to_string(j), act == "tanh" ? std::atanh(y) : y});
+    };
+    // angle-mode assist: the sticks start centred (the climb stick holds height); only directly driven throttles trim
+    const auto v = hoverThrottle(mlpOutputs, alt);
+    if (!v) return r;
+    sim::CraftSim s; s.load(craftSpec);
+    for (std::size_t j = 0; j < mlpOutputs.size(); ++j) {
+        const auto& o = s.outputs()[static_cast<std::size_t>(mlpOutputs[j])];
+        if (o.kind != sim::OutputKind::Motor && o.kind != sim::OutputKind::Jet && o.kind != sim::OutputKind::Rocket) continue;
+        gene(std::size_t(assistSticks) + j, 2 * (*v - o.lo) / smax(1e-9, o.hi - o.lo) - 1);   // network output for v
+    }
+    return r;
+}
+
 std::vector<int> ExperimentContext::generationWorlds(int generation) const {
     const int n = int(worlds.size());
     const auto& s = experiment.worldSchedule;
@@ -195,9 +253,30 @@ void ExperimentContext::buildLayout(ScriptRuntime& rt) {
         if (mlpOutputs.empty()) throw EvoError("invalid experiment: neural controller needs at least one output");
         mlpInputScale.clear();
         for (int i : mlpInputs) mlpInputScale.push_back(1 / smax(1e-9, spec.scaleFor(inputNames[static_cast<std::size_t>(i)])));
+        // Angle-mode assist: the built-in flight controller drives the rotors / engine when the network was given all
+        // of them; the network's outputs become its sticks (plus any other controls it drives directly).
+        assist = 0; assistSticks = 0; assistOutputs.clear();
+        if (e.controller.assist == "angle") {
+            sim::CraftSim probe;
+            if (probe.load(craftSpec)) {
+                probe.reset(probe.restingSpawn());
+                sim::MultirotorFC mr; sim::RocketFC rk;
+                if (mr.attach(probe)) { assist = 1; assistSticks = 4; assistOutputs = mr.outputs(); }
+                else if (rk.attach(probe)) { assist = 2; assistSticks = 3; assistOutputs = rk.outputs(); }
+                for (int o : assistOutputs)
+                    if (std::find(mlpOutputs.begin(), mlpOutputs.end(), o) == mlpOutputs.end()) { assist = 0; assistSticks = 0; assistOutputs.clear(); break; }
+                std::erase_if(mlpOutputs, [&](int o) { return std::find(assistOutputs.begin(), assistOutputs.end(), o) != assistOutputs.end(); });
+                if (assist) {
+                    const double alt = e.episode.spawn.mode == "runway" ? 0 : e.episode.spawn.altitudeAGL;
+                    if (auto v = hoverThrottle(assistOutputs, alt))
+                        assistHover = assist == 1 ? std::pow(smax(0, *v), 2.0 / 3.0) : *v;   // props: thrust ∝ throttle^(2/3)
+                    else assistHover = assist == 1 ? 0.1 : 0.75;
+                }
+            }
+        }
         mlpSizes = {int(mlpInputs.size())};
         for (int h : spec.hidden) if (h > 0) mlpSizes.push_back(h);
-        mlpSizes.push_back(int(mlpOutputs.size()));
+        mlpSizes.push_back(assistSticks + int(mlpOutputs.size()));
         base = base + MLPPolicy::layout(mlpSizes, spec.weightRange);
     }
     if (e.controller.mode == "neat" || e.algorithm.kind == "neat") {
@@ -220,6 +299,13 @@ void ExperimentContext::buildLayout(ScriptRuntime& rt) {
         }
         for (int i : neatInputs) neatInputScale.push_back(1 / smax(1e-9, e.genome.mlp ? e.genome.mlp->scaleFor(inputNames[static_cast<std::size_t>(i)]) : 1.0));
     }
+    // Start a hovering craft's throttles at the hover throttle: a network with all weights 0 outputs its biases, and
+    // a bias of 0 is mid-range (50 %) — below hover for New Shepard (~76 %), so every first-generation candidate fell
+    // or never left the pad. Only genes still at 0 change (a genome() that chose a value wins), and only rotor and
+    // rocket crafts (planes and their parity references are untouched).
+    for (auto& [name, b] : hoverTrimGenes())
+        for (auto& g : layout.genes)
+            if (g.name == name && (!g.initial || *g.initial == 0)) g.initial = b;
     mlpRange = layout.range("mlp");
     designRange = layout.range("design");
     needsPerCandidateCraft = wantsDesign || rt.definedHooks().contains(ScriptHook::Decode);
@@ -302,6 +388,27 @@ EvalWorker::EvalWorker(std::shared_ptr<const ExperimentContext> ctx, std::unique
     mlpX_.assign(static_cast<std::size_t>(m), 0.0); mlpY_.assign(static_cast<std::size_t>(m), 0.0);
     remap();
 }
+// Angle-mode assist: the standard sensors have no horizontal velocity, so the network cannot see (or stop) a drift;
+// the flight controller leans against it (0.04 tilt sine per m/s: ~12° at 5 m/s), and centred sticks hover in place.
+static constexpr double kAssistBrake = 0.04;   // 0.1 limit-cycles New Shepard (±17°)
+void EvalWorker::attachAssist() {
+    rotorFC_.reset(); rocketFC_.reset();
+    if (policyMode_ != 1 || ctx_->assist == 0) return;
+    if (ctx_->assist == 1) {
+        rotorFC_ = std::make_unique<sim::MultirotorFC>();
+        if (!rotorFC_->attach(*sim_)) rotorFC_.reset();
+        else { rotorFC_->hoverStart = ctx_->assistHover; rotorFC_->brake = kAssistBrake; }
+    } else {
+        rocketFC_ = std::make_unique<sim::RocketFC>();
+        if (!rocketFC_->attach(*sim_)) rocketFC_.reset();
+        else { rocketFC_->hoverStart = ctx_->assistHover; rocketFC_->brake = kAssistBrake; }
+    }
+    resetAssist();
+}
+void EvalWorker::resetAssist() {
+    if (rotorFC_) rotorFC_->reset();
+    if (rocketFC_) rocketFC_->reset();
+}
 EvalWorker::~EvalWorker() = default;
 
 void EvalWorker::loadSim(sim::CraftSim& s, const sim::CraftSpec& spec) {
@@ -323,6 +430,7 @@ void EvalWorker::remap() {
     if (int(simInputs_.size()) < std::max(1, sim_->inputCount())) simInputs_.assign(static_cast<std::size_t>(std::max(1, sim_->inputCount())), 0.0);
     int nc = sim_->cornerCount();
     if (int(cornersPrev_.size()) < std::max(1, nc)) { cornersPrev_.assign(static_cast<std::size_t>(std::max(1, nc)), Vec3d{}); cornersCur_ = cornersPrev_; }
+    attachAssist();
 }
 
 craft::CraftDocument EvalWorker::prepare(const Genome& g) {
@@ -433,9 +541,22 @@ void EvalWorker::applyNativePolicy() {
         for (std::size_t j = 0; j < in.size(); ++j) mlpX_[j] = frame_.inputs[static_cast<std::size_t>(in[j])] * sc[j];
         mlp_->forward(mlpX_.data(), mlpY_.data());
         const auto& out = ctx_->mlpOutputs;
+        const std::size_t k = std::size_t(ctx_->assistSticks);
         for (std::size_t j = 0; j < out.size(); ++j) {
             int o = out[j]; auto r = ctx_->outputRanges[static_cast<std::size_t>(o)];
-            frame_.outputs[static_cast<std::size_t>(o)] = r.first + (mlpY_[j] + 1) * 0.5 * (r.second - r.first);
+            frame_.outputs[static_cast<std::size_t>(o)] = r.first + (mlpY_[k + j] + 1) * 0.5 * (r.second - r.first);
+        }
+        if (rotorFC_ || rocketFC_) {
+            // the flight controller sets its outputs on the sim; copy them into the frame so control() sees (and may
+            // override) what it commanded, and the runner applies them like any other output
+            auto y = [&](std::size_t i) { return smax(-1, smin(1, mlpY_[i])); };
+            const double dt = 1 / controlHz();
+            if (rotorFC_) rotorFC_->update(*sim_, sim::MultirotorSticks{y(0), y(1), y(2), y(3)}, dt);
+            else rocketFC_->updateClimb(*sim_, y(0), y(1), y(2), dt);
+            for (int o : ctx_->assistOutputs) {
+                const int si = outMap_[static_cast<std::size_t>(o)];
+                if (si >= 0) frame_.outputs[static_cast<std::size_t>(o)] = sim_->outputs()[static_cast<std::size_t>(si)].value;
+            }
         }
     } else if (policyMode_ == 2 && neat_) {
         const auto& in = ctx_->neatInputs; const auto& sc = ctx_->neatInputScale;
@@ -489,6 +610,7 @@ EpisodeResult EvalWorker::runEpisode(const Genome& g, int generation, int candid
     for (int i = 0; i < int(sim.outputs().size()); ++i) sim.setOutput(i, 0);
     if (neat_) neat_->reset();
     if (mlp_) mlp_->reset();
+    resetAssist();
 
     // incoming threat: the target sensors track the missile (defended point = spawn)
     std::optional<ThreatTrack> threat;

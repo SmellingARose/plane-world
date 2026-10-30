@@ -69,6 +69,7 @@ QtObject {
     // mode; the user's accent colour (QPalette::Accent, Qt 6.6+) is the right brand tint on both platforms.
     readonly property color accent: sys.accent !== undefined ? sys.accent : sys.highlight
     readonly property color accentText: sys.highlightedText
+    readonly property color link: dark ? "#58a6ff" : accent   // text links: the system accent is too dark on dark panels
     readonly property color accentSoft: Qt.rgba(accent.r, accent.g, accent.b, dark ? 0.24 : 0.14)
     readonly property color surface: dark ? Qt.lighter(window, 1.18) : Qt.darker(window, 1.03)
     readonly property color surfaceRaised: dark ? Qt.lighter(window, 1.38) : "#ffffff"

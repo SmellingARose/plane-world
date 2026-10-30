@@ -32,9 +32,9 @@ struct CraftInput {
 
 enum class SensorKind : uint8_t {
     AltitudeMSL, AltitudeAGL, Airspeed, GroundSpeed, VerticalSpeed, Attitude, AngularRate, Acceleration, Aero,
-    Target, Raycast, ServoAngle, WheelSpeed, Fuel, Water, Contact
+    Target, Raycast, ServoAngle, WheelSpeed, Fuel, Water, Contact, Velocity
 };
-constexpr int kSensorKindCount = 16;
+constexpr int kSensorKindCount = 17;
 const char* sensorKindName(SensorKind k);
 bool sensorKindFrom(std::string_view s, SensorKind& out);
 struct SensorChannel { const char* name; const char* unit; };

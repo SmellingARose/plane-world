@@ -3,6 +3,9 @@
 #include <fstream>
 #include "pw/craft/library.h"
 #include "pw/craft/outputs.h"
+#include "pw/evo/policy.h"
+#include "pw/sim/craft_sim.h"
+#include "pw/sim/craft_spec.h"
 
 namespace pw::evo {
 namespace {
@@ -158,6 +161,7 @@ MLPSpec mlpFromJson(const Value& v) {
 ScriptBundle scriptsFromJson(const Value& v) {
     ScriptBundle s;
     s.language = rStr(v, "language"); s.source = rStr(v, "source"); s.callBudgetMs = rNum(v, "callBudgetMs");
+    if (v.has("blocks") && v["blocks"].isObject()) s.blocks = v["blocks"];
     return s;
 }
 
@@ -181,6 +185,7 @@ Value toJson(const MLPSpec& m) {
 Value toJson(const ScriptBundle& s) {
     Value o = Value::object();
     o.set("language", Value::string(s.language)); o.set("source", Value::string(s.source)); o.set("callBudgetMs", Value::number(s.callBudgetMs));
+    if (s.blocks) o.set("blocks", *s.blocks);
     return o;
 }
 
@@ -211,13 +216,26 @@ ExperimentDocument ExperimentDocument::fromJson(const Value& v) {
         h.vegetation = rBool(x, "vegetation"); h.breakables = rBool(x, "breakables"); e.headless = h;
     });
     tolerant(v, "genome", [&](auto& x) { e.genome = genomeSourceFromJson(x); });
-    tolerant(v, "controller", [&](auto& x) { ControllerSpec c; c.mode = rStr(x, "mode"); c.hz = rNum(x, "hz"); e.controller = c; });
-    tolerant(v, "algorithm", [&](auto& x) {
-        AlgorithmParams p; p.kind = rStr(x, "kind");
-        auto& vals = req(x, "values"); if (!vals.isObject()) throw Missing("values");
-        for (auto& [k, val] : vals.members()) p.values.emplace_back(k, val);
-        e.algorithm = std::move(p);
+    tolerant(v, "controller", [&](auto& x) {
+        ControllerSpec c; c.mode = rStr(x, "mode"); c.hz = rNum(x, "hz");
+        if (x.has("hoverTrim") && x["hoverTrim"].type() == Value::Type::Bool) c.hoverTrim = x["hoverTrim"].boolean();
+        if (x.has("assist") && x["assist"].isString()) c.assist = x["assist"].str();
+        e.controller = c;
     });
+    // Not tolerant: an algorithm entry that can't be read used to fall back to Simple ES silently, so the run trained
+    // with a different method than the file names. Refuse and say what to fix instead.
+    if (v.has("algorithm") && !v["algorithm"].isNull()) {
+        const Value& x = v["algorithm"];
+        const std::string fix = " Fix the file, e.g. \"algorithm\": {\"kind\": \"sep-cmaes\", \"values\": {}} (empty values = that method's defaults).";
+        if (!x.isObject()) throw EvoError("invalid experiment: \"algorithm\" must be an object." + fix);
+        if (!x.has("kind") || !x["kind"].isString() || x["kind"].str().empty())
+            throw EvoError("invalid experiment: \"algorithm\" has no \"kind\" (which search method to use)." + fix);
+        AlgorithmParams p; p.kind = x["kind"].str();
+        if (!x.has("values") || !x["values"].isObject())
+            throw EvoError("invalid experiment: \"algorithm\" (" + p.kind + ") has no \"values\" object, so its settings are unknown." + fix);
+        for (auto& [k, val] : x["values"].members()) p.values.emplace_back(k, val);
+        e.algorithm = std::move(p);
+    }
     tolerant(v, "population", [&](auto& x) { if (!x.isNumber()) throw Missing("population"); e.population = int(x.asI64()); });
     tolerant(v, "generations", [&](auto& x) { if (!x.isNumber()) throw Missing("generations"); e.generations = int(x.asI64()); });
     tolerant(v, "episode", [&](auto& x) { e.episode = episodeFromJson(x); });
@@ -284,6 +302,8 @@ Value ExperimentDocument::toJson() const {
     if (genome.neat) g.set("neat", evo::toJson(*genome.neat));
     o.set("genome", std::move(g));
     Value c = Value::object(); c.set("mode", Value::string(controller.mode)); c.set("hz", Value::number(controller.hz));
+    if (!controller.hoverTrim) c.set("hoverTrim", Value::fromBool(false));   // default on: not written
+    if (controller.assist != "none") c.set("assist", Value::string(controller.assist));   // default none: not written
     o.set("controller", std::move(c));
     o.set("algorithm", evo::toJson(algorithm));
     o.set("population", Value::i64(population)); o.set("generations", Value::i64(generations));
@@ -358,7 +378,8 @@ craft::CraftDocument addStandardSensors(const craft::CraftDocument& craft) {
     bool hasAny = false;
     for (auto& p : craft.parts) hasAny |= p.partType() == craft::PartType::Sensor;
     static const char* kStd[][3] = {{"sn-alt", "alt", "altitudeAGL"}, {"sn-att", "att", "attitude"}, {"sn-rate", "rate", "angularRate"},
-                                    {"sn-air", "air", "airspeed"},    {"sn-vs", "vs", "verticalSpeed"}, {"sn-aero", "aero", "aero"}};
+                                    {"sn-air", "air", "airspeed"},    {"sn-vs", "vs", "verticalSpeed"}, {"sn-aero", "aero", "aero"},
+                                    {"sn-vel", "vel", "velocity"}};
     craft::CraftDocument c = craft;
     for (auto& s : kStd) {
         bool have = false;
@@ -367,7 +388,8 @@ craft::CraftDocument addStandardSensors(const craft::CraftDocument& craft) {
         if (have || c.part(std::string_view(s[0]))) continue;
         auto p = craft::CraftPart::make(s[0], craft::PartType::Sensor, s[1]);
         p.setParam("kind", std::string(s[2]));
-        if (hasAny) p.mass = 0;
+        // "vel" (sideways drift, added later) is always massless: crafts with no sensors keep their reference mass
+        if (hasAny || std::string_view(s[0]) == "sn-vel") p.mass = 0;
         c.parts.push_back(std::move(p));
     }
     return c;
@@ -453,6 +475,124 @@ std::optional<craft::CraftDocument> resolveCraft(const CraftRef* ref, const std:
         if (!doc) { err = "craft '" + name + "' not found (bundled or in " + craft::library::craftsDir() + ")"; return std::nullopt; }
     }
     return craft::outputs::prepareForFlight(presets::addStandardSensors(*doc));
+}
+
+std::vector<std::string> switchCraft(ExperimentDocument& e, const std::string& craftName, const craft::CraftDocument& prepared) {
+    std::vector<std::string> notes;
+    std::string oldName;
+    if (!e.crafts.empty()) oldName = e.crafts[0].name ? *e.crafts[0].name : e.crafts[0].inlineDoc ? e.crafts[0].inlineDoc->name : "";
+    CraftRef r; r.name = craftName;
+    e.crafts = {r};
+
+    const sim::CraftSpec spec = sim::CraftSpec::fromDocument(prepared);
+    std::vector<std::string> ins, outs;
+    for (auto& i : sim::craftInputs(spec)) ins.push_back(i.name);
+    for (auto& o : sim::CraftSim::makeOutputs(spec)) outs.push_back(o.name);
+    auto has = [](const std::vector<std::string>& v, const std::string& n) { return std::find(v.begin(), v.end(), n) != v.end(); };
+    auto join = [](const std::vector<std::string>& v) { std::string s; for (auto& x : v) { if (!s.empty()) s += ", "; s += x; } return s; };
+    // inputs: keep what the new craft still has
+    auto fitInputs = [&](std::vector<std::string>& sel, const char* what) {
+        std::vector<std::string> gone;
+        std::erase_if(sel, [&](const std::string& n) { if (has(ins, n)) return false; gone.push_back(n); return true; });
+        if (!gone.empty()) notes.push_back(craftName + " has no " + join(gone) + " sensor, so the " + what + " no longer reads " + (gone.size() == 1 ? "it" : "them") + (sel.empty() ? " (it now reads every sensor)" : ""));
+    };
+    // outputs: all or nothing (a partial list would leave the new craft's other controls undriven)
+    auto fitOutputs = [&](std::vector<std::string>& sel, const char* what) {
+        std::vector<std::string> gone;
+        for (auto& n : sel) if (!has(outs, n)) gone.push_back(n);
+        if (gone.empty()) return;
+        sel.clear();
+        notes.push_back(craftName + " has no " + join(gone) + ", so the " + what + " now moves every control it has: " + join(outs));
+    };
+    if (e.genome.mlp) { fitInputs(e.genome.mlp->inputs, "controller"); fitOutputs(e.genome.mlp->outputs, "controller"); }
+    if (e.genome.neat) {
+        fitInputs(e.genome.neat->inputs, "controller"); fitOutputs(e.genome.neat->outputs, "controller");
+        if (e.genome.neat->inputs.empty()) e.genome.neat->inputs = ins;
+        if (e.genome.neat->outputs.empty()) e.genome.neat->outputs = outs;
+    }
+
+    // design genes: keep the ones whose part this craft has
+    {
+        std::vector<std::string> gone;
+        auto has = [&](const std::string& sel) { return std::any_of(prepared.parts.begin(), prepared.parts.end(), [&](auto& p) { return design::partMatches(p, sel); }); };
+        std::erase_if(e.genome.design, [&](const DesignGene& g) { if (has(g.part)) return false; gone.push_back(g.geneName()); return true; });
+        for (auto& g : e.genome.design) std::erase_if(g.mirror, [&](const std::string& m) { return !has(m); });
+        const bool wantsDesign = e.genome.preset == "design" || e.genome.preset == "coevolve";
+        if (wantsDesign && e.genome.design.empty() && !prepared.parts.empty()) {
+            e.genome.design.push_back(defaultDesignGene(prepared));
+            notes.push_back(craftName + " has none of the parts whose sizes evolved (" + join(gone) + "), so it now evolves the mass of " + e.genome.design[0].part);
+        } else if (!gone.empty()) {
+            notes.push_back(craftName + " has no part for " + join(gone) + ", so " + (gone.size() == 1 ? "that dimension no longer evolves" : "those dimensions no longer evolve"));
+        }
+    }
+
+    // Drones and rockets: a network driving the motors / engine and gimbals directly has to learn to balance before it
+    // can learn anything else, and nearly every early candidate flips or tips over (§10). Angle mode lets the built-in
+    // flight controller keep it level, so the network starts from a craft that already hovers. The multirotor
+    // controller limit-cycles below ~100 Hz (FLY runs it at 240 Hz), so drones control at 200 Hz.
+    if (e.controller.mode == "mlp") {
+        const std::string kind = craftKind(prepared);
+        const bool hovers = kind == "rotor" || kind == "rocket";
+        if (hovers && e.controller.assist != "angle")
+            notes.push_back("the network flies " + craftName + " in angle mode (the built-in flight controller keeps it level; Set up › Advanced)");
+        e.controller.assist = hovers ? "angle" : "none";
+        if (kind == "rotor" && e.controller.hz < kRotorControlHz) e.controller.hz = kRotorControlHz;
+        // ...and it reads its drift over the ground: without vel.* a hover can't stop a sideways drift it can't see
+        if (hovers && e.genome.mlp && !e.genome.mlp->inputs.empty()) {
+            for (const char* n : {"vel.forward", "vel.right"}) {
+                if (!has(ins, n) || has(e.genome.mlp->inputs, n)) continue;
+                e.genome.mlp->inputs.push_back(n);
+                if (!e.genome.mlp->hasScale(n)) e.genome.mlp->inputScale.push_back({n, 10});   // 10 m/s of drift reads as 1
+            }
+        }
+    }
+
+    if (!oldName.empty() && oldName != craftName) {
+        for (const std::string& suffix : {"(" + oldName + ")", "— " + oldName}) {
+            if (e.name.size() >= suffix.size() && e.name.compare(e.name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+                e.name = e.name.substr(0, e.name.size() - suffix.size()) + (suffix[0] == '(' ? "(" + craftName + ")" : "— " + craftName);
+                break;
+            }
+        }
+    }
+    return notes;
+}
+
+std::string craftKind(const craft::CraftDocument& craft) {
+    int wings = 0, props = 0, wheels = 0, rockets = 0;
+    for (auto& p : craft.parts) {
+        switch (p.partType()) {
+        case craft::PartType::Wing: ++wings; break;
+        case craft::PartType::Prop: ++props; break;
+        case craft::PartType::Wheel: ++wheels; break;
+        case craft::PartType::Rocket: case craft::PartType::Solid: ++rockets; break;
+        default: break;
+        }
+    }
+    if (rockets > 0) return "rocket";
+    // propellers pushing up that can lift the craft hover, fins or not (the ducted tail-sitter, multirotors)
+    if (props > 0) {
+        sim::CraftSim probe;
+        if (probe.load(sim::CraftSpec::fromDocument(craft))) {
+            double up = 0;
+            for (auto& p : probe.parts())
+                if (p.is(sim::PartType::Prop) && std::fabs(p.baseQ.act(Vec3d{1, 0, 0}).y) > 0.7) up += p.kThrust;
+            if (up > probe.mass() * kGravity) return "rotor";
+        }
+    }
+    if (wings > 0) return "plane";
+    if (props >= 3) return "rotor";
+    if (wheels > 0) return "ground";
+    return "other";
+}
+
+DesignGene defaultDesignGene(const craft::CraftDocument& craft) {
+    const craft::CraftPart* best = craft.parts.empty() ? nullptr : &craft.parts[0];
+    for (auto& p : craft.parts) if (p.mass > best->mass) best = &p;
+    DesignGene g; g.part = !best ? "part" : best->name.empty() ? best->id : best->name; g.field = "mass";
+    const double m = best && best->mass > 0 ? best->mass : 1;
+    g.min = m * 0.5; g.max = m * 1.5; g.initial = m;
+    return g;
 }
 
 // MARK: - threat (missile interception)
